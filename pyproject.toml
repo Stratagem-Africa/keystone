@@ -1,0 +1,20 @@
+[project]
+name = "keystone"
+version = "0.0.1"
+description = "Intent -> grounded consensus design -> deterministic simulation -> validated architecture."
+requires-python = ">=3.10"
+# Phase-0 engine is pure stdlib — zero runtime dependencies on purpose.
+dependencies = []
+
+[project.optional-dependencies]
+# Added as the backend/council come online. Kept out of the engine.
+council = ["anthropic>=0.40"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["prototype/tests"]
