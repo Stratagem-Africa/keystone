@@ -111,7 +111,13 @@ holds across the free tiers. Note: Cloudflare Workers can't run the Python backe
 4. **Edit in the GitHub web UI** on her branch.
 Production builds run **only from `main`**, so editing-before-merge = editing-before-prod by construction.
 
-### GitHub enforcement
-- **Branch protection on `main`:** require PR; require 1 approving review **from Code Owners**; dismiss stale approvals; **include administrators**; block force-push/deletion.
-- **`.github/CODEOWNERS`:** `* @BifolaX` → Bifola auto-requested + required on every PR.
-- ⚠️ **Plan caveat (confirmed):** the org is on **GitHub Free**, where branch protection is **not available on private repos** (`403: upgrade to Team/Pro`). Until you upgrade (**GitHub Team ≈ $4/user/mo**), the rule runs on **convention + CODEOWNERS auto-review** (Bifola is auto-added as reviewer, but a merge is not hard-blocked). Decision for Bifola: **upgrade to enforce**, or **convention-for-now**.
+### GitHub enforcement — the free model (decided: **not upgrading**)
+Branch protection isn't available on private repos on GitHub Free (`403`), and we're
+staying on Free. So the rule is enforced **without** paid branch protection:
+- **CODEOWNERS** (`* @BifolaX`) → Bifola is auto-requested on every PR.
+- **CI** (`.github/workflows/ci.yml`) → the test suite runs on every PR and on `main`; a red PR is visible at review time.
+- **Production is Bifola-gated** → prod deploys **only** on Bifola's manual trigger
+  (`workflow_dispatch` / a release tag he controls). So even an accidental direct push to
+  `main` never ships to users without Bifola. *This gates the thing that actually matters — production — for free.*
+- **Convention** → only Bifola merges to `main`; nobody pushes to `main` directly. See `CONTRIBUTING.md`.
+- **Residual risk (accepted):** on Free, an admin *can* technically push to `main` or self-merge — it isn't hard-blocked. Mitigated by CI + the Bifola-gated prod deploy + the convention. Revisit only if the team grows or the risk bites.
