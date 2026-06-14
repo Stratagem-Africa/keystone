@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 
 from keystone.blueprints import url_shortener
-from keystone.council import DeterministicStubCouncil
+from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.report import render
 
@@ -19,8 +19,9 @@ def main() -> None:
     # 1. Canonical model (LLM-derived in product; hand-built here for validation).
     model = url_shortener.build(system_rps=10_000, cache_hit_rate=0.90)
 
-    # 2. Council reasons (stub here; real Claude council plugs in behind this interface).
-    adrs = DeterministicStubCouncil().design(model)
+    # 2. Council reasons. Defaults to the deterministic stub ($0, no key); set
+    #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
+    adrs = make_council().design(model)
 
     # 3. Deterministic simulation — the engine produces the numbers.
     sim = simulate(model)

@@ -11,10 +11,15 @@ runs end-to-end with no API key. The stub's ADRs are illustrative, not live reas
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from keystone.model import SystemModel
+
+# Cheap dev default (Doc 02 §4 — one model, control cost). Mirrors .env.example;
+# set COUNCIL_MODEL=claude-opus-4-8 for a production-grade council.
+DEFAULT_COUNCIL_MODEL = "claude-haiku-4-5-20251001"
 
 
 @dataclass
@@ -83,3 +88,31 @@ class DeterministicStubCouncil:
                 kill_criteria=["Shipped without independent expert sign-off"],
             ))
         return adrs
+
+
+def make_council(provider: str | None = None, model: str | None = None,
+                 *, client=None) -> Council:
+    """Build the configured council.
+
+    Defaults to the deterministic stub so the whole loop runs with no API key and
+    at $0 (CLAUDE.md cost rule). Reads COUNCIL_PROVIDER (stub | claude) and
+    COUNCIL_MODEL from the environment when not passed explicitly. The Claude
+    provider is imported lazily, so the zero-dependency engine never pulls in the
+    Anthropic SDK just by importing this module.
+
+    `client` lets a caller (or a test) inject an LLM transport for the claude
+    provider — the path used for $0 offline testing.
+    """
+    provider = (provider or os.getenv("COUNCIL_PROVIDER", "stub")).strip().lower()
+    if provider == "stub":
+        return DeterministicStubCouncil()
+    if provider == "claude":
+        from keystone.claude_council import ClaudeCouncil  # lazy: optional dep
+        return ClaudeCouncil(
+            model=model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL),
+            client=client,
+        )
+    raise ValueError(
+        f"Unknown COUNCIL_PROVIDER={provider!r}. Use 'stub' or 'claude'. "
+        "(openrouter/ollama are a documented v2 lever, not yet built — Doc 02 §4.)"
+    )
