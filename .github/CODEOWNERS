@@ -1,0 +1,18 @@
+# Keystone code owners.
+#
+# Bifola (Keystone A) reviews and approves EVERYTHING before it reaches `main`.
+# See docs/07-Team-and-Roadmap.md §2 (release governance).
+#
+# With a CODEOWNERS file present, GitHub auto-requests the owner's review on
+# every PR. To make that approval MANDATORY (block merge without it), enable
+# branch protection on `main` with "Require review from Code Owners" +
+# "Include administrators" (needs GitHub Team on a private repo — see §6).
+
+* @BifolaX
+
+# When Jem and Tunji's handles are known, you can ADD area owners below WITHOUT
+# removing Bifola's blanket ownership (later matches win, so re-list @BifolaX to
+# keep his required review). Example:
+#   /prototype/keystone/   @BifolaX            # engine/AI core — Bifola (B)
+#   /api/                  @BifolaX @jem-handle # delivery layer — Bifola + Jem
+#   /frontend/             @BifolaX @jem-handle
