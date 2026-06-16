@@ -1,0 +1,24 @@
+name: CI
+
+# Runs on every PR and on pushes to main. Works on GitHub Free — gives Bifola a
+# pass/fail signal at review time even though private-repo branch protection isn't
+# available on Free (see docs/07 §6, CONTRIBUTING.md).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: tests (engine + council)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The engine is zero-dependency and the council tests use an injected fake
+      # client, so the suite runs with no pip install and no API key ($0).
+      - name: Run test suite
+        working-directory: prototype
+        run: python -m unittest discover -s tests -v
