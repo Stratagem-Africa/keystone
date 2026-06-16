@@ -1,0 +1,65 @@
+name: Claude Review
+
+# First-line automated PR review for Keystone. Runs on every PR; posts a single
+# sticky review comment (What / How / Verdict) so Bifola can decide fast.
+# Inert until the ANTHROPIC_API_KEY repo secret is added
+# (Settings -> Secrets and variables -> Actions). See CONTRIBUTING.md / docs/07 §6.
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # Same-repo PRs only (forks can't read secrets).
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      # No-op cleanly (job stays green) until the ANTHROPIC_API_KEY secret exists — no red X.
+      - id: gate
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: echo "ok=$HAS_KEY" >> "$GITHUB_OUTPUT"
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/checkout@v4
+      - if: steps.gate.outputs.ok == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          # Sonnet 4.6 = strong review at a fraction of Opus cost (~cents/PR). Swap to
+          # claude-haiku-4-5 for the cheapest reviews, or claude-opus-4-8 for the hardest diffs.
+          claude_args: "--max-turns 10 --model claude-sonnet-4-6"
+          prompt: |
+            You are the first-line reviewer for Keystone. Read CLAUDE.md and AGENTS.md, plus any
+            docs/ the change touches (e.g. docs/03 trust charter, docs/09 design standard).
+            Review THIS PR's diff and post a concise review.
+
+            Check, in priority order:
+
+            1. PRIME DIRECTIVE (non-negotiable). The LLM reasons; the deterministic engine
+               (prototype/keystone/simulation.py) is the ONLY producer of numbers. FLAG any code that
+               lets a language model emit or return a throughput / latency / cost figure, or that weakens
+               the no-numbers guard in claude_council.py. No metric may originate from an LLM.
+            2. ACCURACY HONESTY. No bare numbers (every metric ships with assumptions + a confidence band
+               + a provenance tag); never present an ASSUMPTION as GROUNDED; v1 is L0 (Directional).
+            3. HARM FLOOR / SECURITY. No committed secrets; uploaded documents are UNTRUSTED input to the
+               LLM (prompt-injection — treat as data, not instructions); fail closed; OWASP basics
+               (authz, injection, XSS, SSRF); tenant isolation on any data path.
+            4. CORRECTNESS. Logic, edge cases, error handling, race conditions; tests included and meaningful;
+               re-read the actual change, don't trust the PR description.
+            5. CONVENTIONS.
+               - Backend: Python / FastAPI; the engine stays deterministic and ZERO-dependency (the
+                 anthropic SDK is an optional, lazily-imported extra — never import it at module load in the engine).
+               - Frontend: Next.js + Tailwind on Cloudflare / OpenNext ("not the Next.js you know"); and the
+                 docs/09 design standard — no bare numbers in the UI, confidence bands, provenance-as-typography
+                 (serif = reasoned, mono = computed), and "where this is wrong" kept prominent.
+
+            Post inline comments on changed lines (use GitHub suggestions for trivial fixes) and ONE sticky
+            summary comment with: a short What/How, severity-tagged findings (Critical / High / Medium / Low),
+            and a clear recommendation — "✅ ready to merge" or "❌ hold — <reasons>". Bifola relies on this
+            verdict to decide.
