@@ -3,18 +3,19 @@
 > Accuracy level **L0 (Directional)**. This scores the **(reference-model + engine)** pipeline against documented component counts + monthly cost bands. The engine's math is exact given a model (see engine unit tests); a cost miss is usually **model calibration**, not engine error. Capacities/costs are SEED `ASSUMPTION`s (Doc 03) — not yet field-calibrated.
 
 ## Coverage
-- **Reference models scored: 5 / 34 in-scope blueprints** (29 still need a model built — a tracked GAP).
+- **Reference models scored: 6 / 34 in-scope blueprints** (28 still need a model built — a tracked GAP).
 
 ## Summary
-- **Cost band:** 4/5 in-band · 5/5 within an order of magnitude.
-- **Bottleneck identified (plausibility):** 5/5.
-- **Breakpoint stable (load-invariant):** 5/5.
-- **Deterministic:** 5/5.
+- **Cost band:** 5/6 in-band · 6/6 within an order of magnitude.
+- **Bottleneck identified (plausibility):** 6/6.
+- **Breakpoint stable (load-invariant):** 6/6.
+- **Deterministic:** 6/6.
 
 ## Per-model
 
 | Blueprint | Cat | @rps | Cost (engine) | Band | Verdict | Bottleneck (util) | Safe bp (rps) | Stable | Det | Comp m/t |
 |---|---|--:|--:|--|--|--|--:|:--:|:--:|:--:|
+| Ticket Booking System | event_driven | 5,000 | $895 | $300–$1,500 | in-band | Booking app tier (62%) | 6,800 | ✓ | ✓ | 8/8 |
 | Rate Limiter | infrastructure | 5,000 | $120 | $30–$200 | in-band | Edge gateway (33%) | 12,750 | ✓ | ✓ | 2/6 |
 | Key-Value Store | infrastructure | 7,000 | $465 | $100–$500 | in-band | KV API tier (78%) | 7,650 | ✓ | ✓ | 4/7 |
 | Paste Bin | web_app | 1,000 | $95 | $15–$100 | in-band | App tier (67%) | 1,275 | ✓ | ✓ | 4/5 |

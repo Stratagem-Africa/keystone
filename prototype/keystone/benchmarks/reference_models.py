@@ -12,7 +12,7 @@ Each registry entry: (blueprint_key, build_fn, reference_rps).
 """
 from __future__ import annotations
 
-from keystone.blueprints import url_shortener
+from keystone.blueprints import ticket_booking, url_shortener
 from keystone.model import (
     Assumption, Component, ComponentKind, Flow, FlowStep, SystemModel, Workload,
 )
@@ -103,6 +103,7 @@ def build_id_generator(system_rps: float = 20_000) -> SystemModel:
 # (blueprint_key, build_fn, reference_rps). url_shortener uses its existing blueprint.
 REFERENCE_MODELS = [
     ("url_shortener", lambda: url_shortener.build(system_rps=10_000), 10_000),
+    ("ticket_booking", ticket_booking.build, 5_000),   # case #2; baseline (steady state)
     ("rate_limiter", build_rate_limiter, 5_000),
     ("kv_store", build_kv_store, 7_000),
     ("paste_bin", build_paste_bin, 1_000),
