@@ -91,11 +91,13 @@ python3 -m keystone.benchmarks.syssimulator_blueprints   # the benchmark corpus
 - Secrets live in `.env` (gitignored). Never commit a key (harm floor).
 - Treat uploaded user documents as **untrusted input** to the LLM (prompt-injection guard).
 
-## Current status (Phase 0 — complete)
+## Current status (Phase 1 — in progress)
 
-Deterministic engine + full loop run on the URL Shortener; 7 tests pass; 56-blueprint benchmark corpus registered. **Council is STUBBED** (canned ADRs). 
+Phase 0 complete (deterministic engine + loop; 56-blueprint corpus). The documented Phase-1 list is now **landed on `main`, all stub-default with no live activation**: (1) real Claude consensus council behind the `Council` interface (#29, ADR-001) — Keystone-owned high-stakes gate + Hybrid prime-directive guard; (2) LLM **ingestion layer** (#31, ADR-002) — intent → canonical model behind the `Ingestor` seam, with the injection envelope + harm-floor secret-scan; (3) **engine scoring** vs the benchmark corpus (#33, docs/11); (4) **Ticket Booking** as case #2 + a flash-sale what-if (F6). 88 tests pass; the full `intent → ingest → council → simulate → report` loop runs offline.
 
-**Next (Phase 1), in order:** (1) real Claude consensus council behind the existing `Council` interface; (2) the LLM **ingestion layer** (concept note / docs → canonical model) — this is the last unproven piece of the loop; (3) score the engine against the in-scope benchmark blueprints; (4) add Ticket Booking as case #2.
+**All LLM layers default to STUB** (`COUNCIL_PROVIDER` / `INGEST_PROVIDER`); real activation is a **manual Bifola trigger** — and is gated on the council's structured-output v2 lever (ADR-001) + the model store's no-retention/tenant-isolation MUST (ADR-002) before any real upload.
+
+**Next:** reconciliation (F2, multi-doc merge + conflict report); canonical model store (docs/05, versioned + tenant-isolation); grow the reference-model corpus toward L1 calibration (needs the KB); delivery layer (FastAPI → Next.js, ADR-003 — Jem).
 
 ## What NOT to do
 

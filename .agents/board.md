@@ -11,7 +11,7 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 |---|---|---|---|---|
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
 | 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | A/Tunji | **IN-REVIEW** | **docs/11** (plan) + `benchmarks/scoring.py` + `reference_models.py` + `run_scoring.py`; scorecard: 4/5 cost in-band, 5/5 bottleneck+stable+det; 5/34 modeled (GAP). PR pending |
-| 6 | Ticket Booking blueprint — benchmark case #2 (flash-sale spike what-if) | Tunji | PROPOSED | — |
+| 6 | Ticket Booking blueprint — benchmark case #2 (flash-sale spike what-if) | A/Tunji | **IN-REVIEW** | `blueprints/ticket_booking.py` + `run_ticket_booking.py` (F6 what-if: flash sale shifts bottleneck app→inventory DB 667%) + scoring entry (in-band) + 6 tests. PR pending |
 
 ## Next
 - Reconciliation service (merge partial models; conflict/gap report). — B

@@ -51,11 +51,17 @@
   breakpoint + deterministic. Honest coverage: **5/34 in-scope modeled** (rest = GAP, L0→L1 path).
   82 tests green.
 
+- **Ticket Booking (case #2, Task #6)** on `feat/ticket-booking-case2`: `blueprints/ticket_booking.py`
+  (event-driven, 8 comp, in $300–1500 band) + `run_ticket_booking.py` (the **flash-sale what-if**, F6:
+  bottleneck shifts app→inventory DB 667% under an 8× booking spike, breakpoint collapses) + scoring
+  entry (now 6/34, ticket_booking in-band) + 6 tests. Completes CLAUDE.md's Phase-1 list (1–4). 88 tests
+  green. Updated CLAUDE.md status.
+
 **What's next (candidates — checkpoint with Bifola on priority):**
-1. Build out the reference-model corpus (5/34 → more) and field-calibrate (L0→L1, needs the KB).
-2. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
-3. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
+1. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
+2. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
    no-retention MUST (ADR-002 §4); unblocks real upload + the calibration moat.
+3. Grow the reference-model corpus (6/34 → more) and field-calibrate (L0→L1, needs the KB).
 
 **Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger + the
 council's v2 structured-output lever.
