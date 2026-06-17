@@ -162,8 +162,6 @@ _REDACTION = "[engine-owned metric removed]"
 _INT = r"(?:\d{1,3}(?:,\d{3}){1,5}|\d{1,15})(?![\d,])"
 # Multiplier (k/m/g/b/t) only when NOT followed by a letter/digit, so it cannot eat
 # the "m" of "machines"/"million" or the "g" of "gateway".
-# Multiplier (k/m/g/b/t) only when NOT followed by a letter/digit, so it cannot eat
-# the "m" of "machines"/"million" or the "g" of "gateway".
 _MULT = r"(?:[kmgbt](?![a-z\d]))?"
 # Spelled-out multiplier so a unit-bound figure survives the word ("2 million rps").
 _SPELLED = r"(?:\s?(?:thousand|million|billion|trillion))?"

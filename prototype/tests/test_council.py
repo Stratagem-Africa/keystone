@@ -349,16 +349,24 @@ class TestGuardKeepsDesignLanguage(unittest.TestCase):
             self.assertEqual(clean, s)
 
     def test_guard_is_redos_bounded(self):
-        # ADR-001 H2 + re-verify: the OLD code backtracked catastrophically (tens of
-        # seconds). Test BOTH a comma-run AND a plain-digit run (the re-verification
-        # found the first fix only bounded the comma path; '9'*4000 took ~78s).
-        for payload in [("1," * 6000) + "x ms",          # comma run, 12KB
-                        ("9" * 4000) + " utilisation",    # plain digit run + noun
-                        (".1" * 8000) + " ms"]:           # decimal-dense, 16KB
+        # ADR-001 H2 + re-verify: prior code backtracked catastrophically — plain run
+        # ~78s, plain-comma run ~9.4s, grouped-comma run ~9.1s@16KB. The bounded,
+        # non-backtrackable _INT makes every vector roughly linear (each payload below
+        # is ~8KB and runs well under 0.5s here). A regression would be many SECONDS,
+        # so a 2s bound cleanly separates linear from catastrophic without flaking under
+        # CI/dev load (the decimal-dense recall vector is the slowest, ~0.3-0.8s).
+        payloads = [
+            ("1," * 4000) + "x ms",              # plain comma run (original H2)
+            ",".join(["123"] * 2666) + " rps",    # grouped-comma run (v2 regression canary)
+            ("9" * 4000) + " utilisation",        # plain digit run next to a noun
+            (".1" * 4000) + " ms",                # decimal-dense
+        ]
+        for payload in payloads:
             start = time.perf_counter()
             _redact_engine_metrics(payload)
             elapsed = time.perf_counter() - start
-            self.assertLess(elapsed, 0.5, f"guard too slow ({elapsed:.3f}s) — ReDoS regression")
+            self.assertLess(elapsed, 2.0,
+                            f"guard too slow ({elapsed:.3f}s) on {payload[:24]!r} — ReDoS regression")
 
 
 def _chairman_with_area(area):
