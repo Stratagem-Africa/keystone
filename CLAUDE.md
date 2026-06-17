@@ -4,6 +4,16 @@ Guidance for Claude Code (and any AI agent) working in this repository. **Read t
 
 ---
 
+## Team & coordination (read every session)
+
+Keystone is built by a small team, each using Claude Code: **Bifola** (architect/reviewer + builder of the trust-critical core) and **Jem** (`foreverjamila` — delivery layer: API, frontend, infra, CI). Bifola's Claude reviews contributors' pushes and **pushes fixes/improvements directly onto their branch**, then merges. Because of that:
+
+- **MANDATORY — pull before you work AND before every commit.** Run `git fetch origin && git pull` on your branch at session start and again before committing/pushing. Your branch is frequently *ahead* of your local copy; committing stale causes divergence. If you see *"branches have diverged,"* `git pull --rebase` before anything else.
+- **Branch → small PR → review → merge.** Nobody pushes to `main` directly. Bifola's Claude merges reviewed PRs; **production deploys only on Bifola's manual trigger** — nothing reaches users without him.
+- New contributor? Read **`docs/10-Contributor-Guide.md`** and **`CONTRIBUTING.md`** first.
+
+---
+
 ## What Keystone is
 
 *Describe what you're building in plain English — a grounded consensus of AI architects designs it, justifies every decision, and validates it with simulation, improving toward enterprise-grade correctness over time.*
