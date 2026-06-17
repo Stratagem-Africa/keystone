@@ -14,7 +14,7 @@ Doc 03 makes correctness the differentiator and an **eval harness a MUST before 
 
 `syssimulator_blueprints.py` is **metadata**: per blueprint `(component_count, monthly_cost_band, category, v1_scope)`. It contains **no runnable model, no ground-truth bottleneck, and no breakpoint.** Therefore:
 
-- The engine can only be scored on a blueprint that has a **hand-built `SystemModel`** (`benchmarks/reference_models.py`). Building the rest of the 33 in-scope models is a tracked **GAP** (and is partly what the ingestion layer will eventually automate).
+- The engine can only be scored on a blueprint that has a **hand-built `SystemModel`** (`benchmarks/reference_models.py`). Building the rest of the 34 in-scope models is a tracked **GAP** (and is partly what the ingestion layer will eventually automate).
 - The only hard ground-truth signals are **cost band** and **component count**.
 
 ## 3. What is scored (and the honest caveat on each)
@@ -41,7 +41,7 @@ L0 does **not** claim exact cost/latency. The scorecard ships a permanent "where
 
 ## 5. The L0 → L1 path
 
-1. **Build the reference corpus** — a `SystemModel` per in-scope blueprint at a documented reference load (the current GAP: 5/33).
+1. **Build the reference corpus** — a `SystemModel` per in-scope blueprint at a documented reference load (the current GAP: 5/34).
 2. **Field-calibrate capacities** to published, version-pinned component benchmarks → per-component **error envelopes** (the L1 gate, Doc 03 §3). This needs the Knowledge Base (unbuilt).
 3. **Regression-test** the scorecard so accuracy cannot silently regress (this PR wires `score_all()` + tests).
 4. **Publish** per-component error envelopes once L1 data exists — never before.

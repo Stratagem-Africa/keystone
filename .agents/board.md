@@ -10,7 +10,7 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
-| 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | A/Tunji | **IN-REVIEW** | **docs/11** (plan) + `benchmarks/scoring.py` + `reference_models.py` + `run_scoring.py`; scorecard: 4/5 cost in-band, 5/5 bottleneck+stable+det; 5/33 modeled (GAP). PR pending |
+| 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | A/Tunji | **IN-REVIEW** | **docs/11** (plan) + `benchmarks/scoring.py` + `reference_models.py` + `run_scoring.py`; scorecard: 4/5 cost in-band, 5/5 bottleneck+stable+det; 5/34 modeled (GAP). PR pending |
 | 6 | Ticket Booking blueprint — benchmark case #2 (flash-sale spike what-if) | Tunji | PROPOSED | — |
 
 ## Next

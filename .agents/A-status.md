@@ -48,11 +48,11 @@
   `benchmarks/scoring.py` + `reference_models.py` (5 in-scope models) + `run_scoring.py` +
   `outputs/engine_scorecard.md` + 8 tests. Scorecard: 4/5 cost in-band (URL Shortener 7× over —
   high-traffic seed model vs small-deployment band, a calibration note), 5/5 bottleneck + stable
-  breakpoint + deterministic. Honest coverage: **5/33 in-scope modeled** (rest = GAP, L0→L1 path).
+  breakpoint + deterministic. Honest coverage: **5/34 in-scope modeled** (rest = GAP, L0→L1 path).
   82 tests green.
 
 **What's next (candidates — checkpoint with Bifola on priority):**
-1. Build out the reference-model corpus (5/33 → more) and field-calibrate (L0→L1, needs the KB).
+1. Build out the reference-model corpus (5/34 → more) and field-calibrate (L0→L1, needs the KB).
 2. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
 3. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
    no-retention MUST (ADR-002 §4); unblocks real upload + the calibration moat.
