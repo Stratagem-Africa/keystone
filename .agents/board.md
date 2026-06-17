@@ -9,7 +9,7 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
-| 2 | **LLM ingestion layer** (Brief #3): concept note / text → partial canonical `SystemModel` + assumption ledger. One source for v1 (reconciliation is "Next"). Carries the ADR-001 **M1** prompt-injection data-envelope + harm-floor secret-scan; input-vs-derived boundary enforced by schema; stub-default/$0. | B/A | **RATIFIED** (ready to build) | **ADR-002** §"Build plan" |
+| 2 | **LLM ingestion layer** (Brief #3): concept note / text → partial canonical `SystemModel` + assumption ledger. Built behind the `Ingestor` seam (stub-default/$0); injection envelope + harm-floor secret-scan + provenance tagging + prime-directive-by-schema + fail-closed validation; shared `llm.py` transport (council refactored onto it). Adversarial Review→Verify done (3 criticals found + fixed: secret-class gaps, markdown/free-text injection, NaN/inf fail-open). 73 tests green. | B/A | **IN-REVIEW** | **ADR-002**; PR pending |
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
 | 4 | CI: GitHub Actions running the test suite on every PR | Jem | PROPOSED | — |
 | 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | Tunji | PROPOSED | _A to write test plan_ |

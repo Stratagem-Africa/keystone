@@ -25,9 +25,9 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Protocol
 
 from keystone.council import ADR, ensure_high_stakes_gate
+from keystone.llm import LLM, AnthropicLLM
 from keystone.model import SystemModel
 
 log = logging.getLogger("keystone.council")
@@ -37,45 +37,9 @@ class CouncilError(RuntimeError):
     """Raised when the council cannot produce a usable result (parse/transport)."""
 
 
-# --------------------------------------------------------------------------- #
-# LLM transport — a thin seam so the council is provider-agnostic and testable
-# --------------------------------------------------------------------------- #
-
-class LLM(Protocol):
-    """One blocking completion. `label` is for logging/observability only."""
-    def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
-        ...
-
-
-class AnthropicLLM:
-    """Default transport: a single Claude model via the official Anthropic SDK.
-
-    Reads ANTHROPIC_API_KEY from the environment (per the SDK's default
-    credential resolution). `thinking`/`effort` are intentionally omitted so the
-    same call works across the configurable model set — `effort` 400s on Haiku
-    4.5 and adaptive thinking is a 4.6+ mode. Enabling adaptive thinking for
-    Opus-tier councils is a deliberate future enhancement (ADR territory)."""
-
-    def __init__(self, model: str) -> None:
-        try:
-            import anthropic  # optional dep — only needed for the real council
-        except ImportError as e:  # pragma: no cover - exercised only without the extra
-            raise CouncilError(
-                "The 'claude' council provider needs the Anthropic SDK. "
-                "Install it with:  pip install 'keystone[council]'"
-            ) from e
-        self._client = anthropic.Anthropic()
-        self._model = model
-
-    def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
-        log.debug("council call [%s] model=%s", label, self._model)
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return "".join(b.text for b in resp.content if b.type == "text")
+# The provider-agnostic LLM transport (`LLM` protocol + default `AnthropicLLM`) lives
+# in keystone.llm so the council and the ingestion layer share one testable seam
+# (ADR-001/ADR-002). Inject any `LLM` for $0 offline tests.
 
 
 # --------------------------------------------------------------------------- #

@@ -32,10 +32,16 @@
   the input-vs-derived boundary (ingestion carries tagged INPUTS; engine still owns all DERIVED
   metrics). Board updated (Task #1/#1b → DONE; Task #2 → RATIFIED/ready-to-build, Brief #3).
 
-**What's next (driving autonomously):**
-1. Build the ingestion layer (Brief #3) behind the `Ingestor` interface: stub + ClaudeIngestor +
-   envelope + secret-scan + validation + offline tests; then adversarial Review→Verify (untrusted
-   input / harm floor / prime directive) before merge. Stub-default/$0; no activation.
-2. Reconciliation service (F2) is the follow-on ("Next").
+- **Built the ingestion layer (Brief #3)** on `feat/ingestion-layer`: `ingestion.py` (Ingestor seam,
+  stub-default/$0, ClaudeIngestor) + shared `llm.py` transport (council refactored onto it, guard/gate
+  untouched, 42 tests still green) + `run_from_note.py` demo + 31 ingestion tests. Adversarial
+  Review→Verify (4 lenses) found **3 criticals** — secret-class gaps (Stripe/GitHub/`client_secret=`),
+  markdown/free-text injection (forged GROUNDED row), NaN/inf/zero fail-open — all **fixed + locked
+  with regression tests**. 73 tests green; both loops run.
 
-**Blocker:** none. Real-council activation still needs Bifola's manual trigger + the v2 structured-output lever.
+**What's next (driving autonomously):**
+1. PR `feat/ingestion-layer` → independent merge-gate review → merge (stub-default; no activation).
+2. Reconciliation service (F2) is the follow-on ("Next"); then the model store (docs/05) which carries
+   the deferred tenant-isolation/no-retention MUST (ADR-002 §4).
+
+**Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger.
