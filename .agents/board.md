@@ -9,9 +9,7 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
-| 1 | Real Claude consensus council behind the `Council` interface (single model, multi-persona; design → blind review → synthesis) | B | **IN-REVIEW** | built; Review→Verify done (46 agents); **ADR-001** ratifies architecture _conditionally_ |
-| 1b | **Fix-brief #2 — council trust-core fixes (BLOCKING activation):** C1 Keystone-owned gate + render-from-flags; C2/C3 + ReDoS guard rewrite (Hybrid: bounded non-backtrackable int + noun-anchored backstop); honest banner; H1 `_as_list`. **DONE on `fix/council-trust-core`** — implemented + 3 adversarial re-verify rounds + 42 tests (new ones fail-before/pass-after). Awaiting Bifola review/merge; council stays `stub`-gated until merged. | B/A | **IN-REVIEW** | `docs/adr/ADR-001` §"Fix brief" + §"Implementation & verification" |
-| 2 | LLM ingestion layer: concept note / docs → canonical model (the last unproven loop piece). **Carries ADR-001 GAP M1:** `_model_brief` data envelope (prompt-injection framing) ships with this. | B | PROPOSED | _A to write ADR-002_ |
+| 2 | **LLM ingestion layer** (Brief #3): concept note / text → partial canonical `SystemModel` + assumption ledger. One source for v1 (reconciliation is "Next"). Carries the ADR-001 **M1** prompt-injection data-envelope + harm-floor secret-scan; input-vs-derived boundary enforced by schema; stub-default/$0. | B/A | **RATIFIED** (ready to build) | **ADR-002** §"Build plan" |
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
 | 4 | CI: GitHub Actions running the test suite on every PR | Jem | PROPOSED | — |
 | 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | Tunji | PROPOSED | _A to write test plan_ |
@@ -30,5 +28,13 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
   in code). Outcome → **ADR-001** (2026-06-17). Architecture ratified; 3 CRITICAL trust-core
   bugs found (C1 high-stakes gate droppable via "review" substring; C2 metric-family guard
   bypass; C3 percentage leak) + H1 dissent char-explosion + H2 ReDoS — all invisible to the 25
-  green tests. Real council gated to `stub` until Fix-brief #2 lands. No live exposure (stub
-  default, no user-facing path).
+  green tests.
+- **Council fixes (Task #1/#1b) — DONE, merged in #29** (2026-06-17). Keystone-owned high-stakes
+  gate (undroppable/unforgeable) + Hybrid prime-directive guard (bounded non-backtrackable int +
+  noun-anchored backstop) + `_as_list` + honest banner. THREE adversarial re-verify rounds (each
+  caught real defects: re-introduced ReDoS, leading-digit-eat, comma-branch ReDoS, a carve-out
+  latency leak — all fixed). Independent pre-merge review (author recused) → APPROVE; flaky ReDoS
+  test de-flaked before merge. 42 tests green. Real council **stays `stub`-gated**; activation +
+  the documented bare-number residuals await the structured-output v2 lever + Bifola's trigger.
+- **ADR-002 — ingestion layer** (2026-06-17): design + M1 injection-envelope + harm-floor +
+  input-vs-derived boundary. Unblocks Brief #3.
