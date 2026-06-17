@@ -65,8 +65,14 @@ class IngestResult:
 # --------------------------------------------------------------------------- #
 # Harm floor — secret scan: redact-and-flag BEFORE the LLM or any log (Doc 02 §6)
 # --------------------------------------------------------------------------- #
-# All patterns are linear (no nested quantifiers; delimiter-excluding char classes) so
-# adversarial input cannot trigger catastrophic backtracking.
+# All patterns are linear (no nested quantifiers; delimiter-excluding/bounded char
+# classes) so adversarial input cannot trigger catastrophic backtracking.
+# This scanner is BEST-EFFORT defence-in-depth: it covers the common live-credential
+# classes (cloud keys, vendor tokens, key/secret/token assignments incl. camelCase,
+# URL user-info, auth headers, connection strings, JWTs, private-key blocks) but no
+# regex set is exhaustive. The DURABLE confidentiality mitigations — a no-retention
+# mode, tenant-isolated storage, and an LLM provider that does not train on inputs —
+# are the canonical model-store task's MUSTs (ADR-002 §4); this is the intake gate.
 _SECRET_PATTERNS = (
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA)[0-9A-Z]{16}\b")),
     ("private-key-block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")),
@@ -78,6 +84,17 @@ _SECRET_PATTERNS = (
     ("secret-token-assignment", re.compile(
         r"(?i)(?:[a-z0-9]{1,20}[_-])?(?:api[_-]?key|apikey|secret|token|bearer|password|passwd|pwd|credential|auth)"
         r"\s*[=:]\s*[^\s'\";,]{8,}")),
+    # camelCase secret assignment (AccountKey=, clientSecret=, accessToken=) — case-
+    # SENSITIVE capital suffix so "monkey"/"primary key" are not false positives.
+    ("camelcase-secret", re.compile(r"\b[A-Za-z0-9]{2,40}(?:Key|Secret|Token|Password|Credential)\s*[=:]\s*[^\s'\";,]{8,}")),
+    # credentials embedded in a web URL (https://user:pass@host) — note: a port
+    # (host:8080/path) has no '@' so it does not match.
+    ("url-userinfo", re.compile(r"(?i)\bhttps?://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
+    # Authorization header forms: "Bearer <token>" / "Basic <base64>" (space-separated).
+    ("auth-header", re.compile(r"(?i)\b(?:bearer|basic)\s+[0-9A-Za-z+/._=\-]{12,}")),
+    # bounded vendor bare tokens (GitLab/npm/SendGrid/Twilio).
+    ("vendor-token", re.compile(
+        r"\b(?:glpat-[0-9A-Za-z_\-]{20,}|npm_[0-9A-Za-z]{30,}|SG\.[0-9A-Za-z_\-]{16,}\.[0-9A-Za-z_\-]{16,}|SK[0-9a-f]{32})\b")),
     ("stripe-key", re.compile(r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b")),
     ("openai-anthropic-key", re.compile(r"\bsk-(?:ant-|proj-)?[0-9A-Za-z_\-]{20,}\b")),
     ("github-token", re.compile(r"\b(?:gh[pousr]_[0-9A-Za-z]{20,}|github_pat_[0-9A-Za-z_]{20,})\b")),
@@ -340,6 +357,10 @@ def validate_model(model: SystemModel) -> None:
             raise IngestError(f"component {c.id!r} has non-positive/non-finite capacity ({c.per_instance_rps})")
         if c.instances < 1 or not math.isfinite(c.base_latency_ms) or c.base_latency_ms < 0:
             raise IngestError(f"component {c.id!r} has invalid instances/latency")
+        # validate the DERIVED capacity the engine actually divides by (per_instance * instances
+        # can overflow to inf even when per_instance is finite).
+        if not math.isfinite(c.capacity_rps) or c.capacity_rps <= 0:
+            raise IngestError(f"component {c.id!r} has non-finite derived capacity (overflow?)")
 
 
 # --------------------------------------------------------------------------- #

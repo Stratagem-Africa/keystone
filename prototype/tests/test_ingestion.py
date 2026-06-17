@@ -98,14 +98,25 @@ class TestSecretScan(unittest.TestCase):
             self.assertIn("[secret redacted on intake]", clean)
 
     def test_redacts_vendor_and_assignment_classes(self):
-        # the classes the first review found leaking past the scanner
+        # classes the two review rounds found leaking past the scanner
         for c in ["sk_live_0123456789abcdef0123", "github_pat_11ABCDEFG0123456789_abcdefghij",
                   "sk-ant-api03-abcdefghij1234567890XYZ", "client_secret=GOCSPX-abcdefgh12345678",
                   "access_token=ya29.aBcDeF1234567890", "aws_secret_access_key=wJalrXUtnFEMIabcd1234",
-                  "x-api-key: abcdefgh12345678"]:
+                  "x-api-key: abcdefgh12345678",
+                  # round-2 (merge-gate) additions: camelCase, URL user-info, auth headers, vendor
+                  "AccountKey=abcd1234efgh5678ijkl9012mnop==", "https://admin:hunter2pass@db.host/prod",
+                  "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature123",
+                  "Authorization: Basic YWRtaW46c3VwZXJzZWNyZXQ=", "glpat-abcdefghij1234567890",
+                  "npm_abcdefghijklmnopqrstuvwxyz0123456789"]:
             clean, found = scan_and_redact_secrets(c)
             self.assertTrue(found, f"vendor/assignment secret NOT detected: {c!r}")
             self.assertIn("[secret redacted on intake]", clean)
+
+    def test_no_false_positive_on_clean_prose(self):
+        for s in ["primary key index and foreign-key joins", "the monkey runs a turnkey service",
+                  "bearer of bad news", "https://example.com:8080/path", "a basic auth flow design"]:
+            _, found = scan_and_redact_secrets(s)
+            self.assertEqual(found, [], f"false-positive secret on clean prose: {s!r}")
 
     def test_leaves_clean_text_untouched(self):
         text = "An app server fronted by a load balancer, with a Postgres primary and a Redis cache. The monkey and donkey services scale to 5 nodes."
@@ -273,6 +284,11 @@ class TestADR002ReviewFixes(unittest.TestCase):
         with self.assertRaises(IngestError):
             validate_model(m)
         m.components["a"].per_instance_rps = float("inf")
+        with self.assertRaises(IngestError):
+            validate_model(m)
+        # derived capacity overflow (finite per-instance * instances -> inf) also fails closed
+        m.components["a"].per_instance_rps = 1e308
+        m.components["a"].instances = 10
         with self.assertRaises(IngestError):
             validate_model(m)
 
