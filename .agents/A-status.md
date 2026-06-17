@@ -44,11 +44,18 @@
   (intent→ingest→council→simulate→report), every LLM layer stubbed-by-default. Council fixes (#29),
   ADR-002 (#30), ingestion (#31) all on `main`. CI (Task #4) confirmed live → DONE.
 
+- **Engine scoring (Task #5)** built on `feat/engine-scoring`: **docs/11** (scoring plan) +
+  `benchmarks/scoring.py` + `reference_models.py` (5 in-scope models) + `run_scoring.py` +
+  `outputs/engine_scorecard.md` + 8 tests. Scorecard: 4/5 cost in-band (URL Shortener 7× over —
+  high-traffic seed model vs small-deployment band, a calibration note), 5/5 bottleneck + stable
+  breakpoint + deterministic. Honest coverage: **5/34 in-scope modeled** (rest = GAP, L0→L1 path).
+  82 tests green.
+
 **What's next (candidates — checkpoint with Bifola on priority):**
-1. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
-2. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
+1. Build out the reference-model corpus (5/34 → more) and field-calibrate (L0→L1, needs the KB).
+2. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
+3. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
    no-retention MUST (ADR-002 §4); unblocks real upload + the calibration moat.
-3. ADR-003 already exists (hosting); the delivery layer (Task #3, FastAPI→Next.js) is Jem's to build.
 
 **Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger + the
 council's v2 structured-output lever.
