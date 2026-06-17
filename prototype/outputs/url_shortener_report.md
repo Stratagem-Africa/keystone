@@ -1,6 +1,6 @@
 # Keystone Stress-Test Report — URL Shortener
 
-> Accuracy level **L0 (Directional)**. Decision support, **not** certification. Every number below is produced by the deterministic engine, not the LLM.
+> Accuracy level **L0 (Directional)**. Decision support, **not** certification. Numbers come from the deterministic engine; the council reasons about design and is constrained and scrubbed to keep figures out of its output (best-effort, not a guarantee). Read *Where this is wrong* before trusting a number.
 
 **Offered load:** 10,000 req/s — 99:1 read:write, cache-aside
 **Overall confidence:** medium (directional; within the model's reliable band)

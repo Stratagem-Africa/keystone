@@ -35,6 +35,58 @@ class ADR:
     source: str = "stub"              # stub | claude
 
 
+# --------------------------------------------------------------------------- #
+# High-stakes review gate (Doc 03 §6 MUST; ADR-001 C1) — shared by both councils
+# --------------------------------------------------------------------------- #
+# The mandatory expert-review block's presence is a DETERMINISTIC function of
+# model.domain_flags, never contingent on LLM wording. De-dup keys on the gate's
+# OWN identity (canonical area/decision), NOT on a loose "review" substring of an
+# LLM-authored ADR area — that substring let a benign "Code review process" ADR
+# silently drop the MUST block (ADR-001 finding C1).
+HIGH_STAKES_AREA = "Review gate"
+HIGH_STAKES_DECISION = "REQUIRES expert/legal/security review before any production use."
+
+
+def is_high_stakes(domain_flags: list[str]) -> bool:
+    """True if any flag marks a high-stakes domain. Normalised (case/space/hyphen)
+    so the gate fails CLOSED on front-door variants ('HIGH_STAKES:', ' high-stakes:')
+    once the ingestion layer can emit them (ADR-001 M3)."""
+    return any(
+        f.strip().lower().replace("-", "_").startswith("high_stakes")
+        for f in domain_flags
+    )
+
+
+def _high_stakes_gate_adr(source: str) -> ADR:
+    return ADR(
+        area=HIGH_STAKES_AREA,
+        decision=HIGH_STAKES_DECISION,
+        rationale="Domain flagged high-stakes; Keystone does not certify safety.",
+        confidence="high",
+        kill_criteria=["Shipped without independent expert sign-off"],
+        source=source,
+    )
+
+
+def ensure_high_stakes_gate(adrs: list[ADR], domain_flags: list[str], *, source: str) -> list[ADR]:
+    """Guarantee the mandatory expert-review block for high-stakes domains (Doc 03
+    §6 MUST). The gate is KEYSTONE-OWNED, never LLM-substitutable: any incoming ADR
+    that impersonates the reserved gate (its canonical area OR decision) is stripped,
+    then the authoritative gate is appended unconditionally. This closes both ADR-001
+    C1 (a benign 'Code review' area could suppress it) and the re-verification finding
+    that a chairman could forge a 'Review gate' ADR carrying 'no external review needed'
+    to suppress the real one. Operates in place; idempotent (the canonical gate gets
+    stripped then re-appended on a repeat call, leaving exactly one)."""
+    if not is_high_stakes(domain_flags):
+        return adrs
+    adrs[:] = [
+        a for a in adrs
+        if not (a.area == HIGH_STAKES_AREA or a.decision.strip() == HIGH_STAKES_DECISION)
+    ]
+    adrs.append(_high_stakes_gate_adr(source))
+    return adrs
+
+
 class Council(Protocol):
     def design(self, model: SystemModel) -> list[ADR]:
         ...
@@ -78,16 +130,9 @@ class DeterministicStubCouncil:
                 kill_criteria=["Going to external/production traffic with 1 DB + 1 cache"],
             ),
         ]
-        # High-stakes guard (Doc 03 §6): never imply production-safety for flagged domains.
-        if any(f.startswith("high_stakes") for f in model.domain_flags):
-            adrs.append(ADR(
-                area="Review gate",
-                decision="REQUIRES expert/legal/security review before any production use.",
-                rationale="Domain flagged high-stakes; Keystone does not certify safety.",
-                confidence="high",
-                kill_criteria=["Shipped without independent expert sign-off"],
-            ))
-        return adrs
+        # High-stakes guard (Doc 03 §6): never imply production-safety for flagged
+        # domains. Shared, identity-based gate (ADR-001 C1) — same as the real council.
+        return ensure_high_stakes_gate(adrs, model.domain_flags, source="stub")
 
 
 def make_council(provider: str | None = None, model: str | None = None,

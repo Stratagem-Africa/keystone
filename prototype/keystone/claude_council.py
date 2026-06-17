@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from keystone.council import ADR
+from keystone.council import ADR, ensure_high_stakes_gate
 from keystone.model import SystemModel
 
 log = logging.getLogger("keystone.council")
@@ -131,42 +131,123 @@ _CHAIRMAN_SYSTEM = (
 # --------------------------------------------------------------------------- #
 # Prime-directive guard — scrub any engine-owned metric the LLM leaks
 # --------------------------------------------------------------------------- #
-
-# Unit-anchored on purpose: these match a number ONLY when bound to a
-# performance/cost unit, so legitimate design language ("30% of traffic",
-# "99:1 read:write", "shard into 4", "t4g.medium x12") is left untouched.
-#
-# `_NUM` carries an optional thousands separator, decimal, AND magnitude
-# multiplier (k/M/G/B/T) — because an LLM writes "8k rps" and "$2.5k/mo", not
-# just "8000 rps". `_PERIOD` is ordered longest-first ("month" before "mo") so a
-# match never strands a suffix like "nth". Deliberately NOT matched, to avoid
-# corrupting valid prose: bare single-letter time units (a "30s" TTL, "1.2s"),
-# bare "us" (a "us-east" region), and "minute(s)" (a cron interval / RTO target).
-# The prompt-level rule still forbids those; this guard is defence-in-depth.
-_NUM = r"\d[\d,]*(?:\.\d+)?\s?[kmgbt]?\s?"
-_PERIOD = r"(?:months?|years?|hours?|days?|mo|hr|yr)"
-
-_METRIC_PATTERNS = (
-    re.compile(rf"[$€£]\s?{_NUM}(?:(?:/|per)\s?{_PERIOD})?", re.I),    # leading currency symbol
-    re.compile(rf"\b{_NUM}\$", re.I),                                  # trailing "$" (e.g. "500$")
-    re.compile(rf"\b{_NUM}(?:usd|dollars?|cents?)\b", re.I),           # spelled-out currency
-    re.compile(rf"\b{_NUM}(?:rps|qps|tps|req/s|reqs?/s|requests?\s?/\s?s|requests?\s+per\s+second)\b", re.I),
-    re.compile(rf"\b{_NUM}(?:milliseconds?|millis|msec|ms|microseconds?|µs|nanoseconds?|nsec|ns|seconds?|secs?)\b", re.I),
-)
+# Two layers (ADR-001 §3 — the Hybrid policy, because an allowlist of unit
+# spellings can NEVER be complete):
+#   1. UNIT-ANCHORED patterns (precision) — a magnitude bound to a known
+#      performance/cost/throughput/data-rate unit (rps, ms, Gbps, $/mo, …),
+#      including ranges/approximations ("50-100ms", "~50ms") so no lower bound
+#      survives.
+#   2. A NOUN-ANCHORED deny-by-default BACKSTOP (recall) — any magnitude sitting
+#      next to an engine-OWNED concept (utilisation/throughput/latency/cost/…) is
+#      scrubbed even when its unit spelling is unknown. Keyed on engine-metric
+#      NOUNS, never design vocabulary, so "90% of traffic", "shard into 4",
+#      "3 availability zones", "5 nodes" are left untouched.
+# The integer run `_INT` is BOUNDED and NON-backtrackable: a comma-grouped form (the
+# comma repeat is bounded {1,5} — an unbounded `+` is itself quadratic) OR <=15 plain
+# digits, with `(?![\d,])` forbidding it from giving back a digit/comma. Bounding BOTH
+# branches kills the catastrophic backtracking on a long digit OR comma run (ADR-001
+# H2; the plain-only and then comma-only ReDoS were each caught by re-verification)
+# AND the leading-digit-eat ("12 nodes" must not become "[…]2 nodes"). The prompt-level
+# `_NO_NUMBERS_RULE` is the first line; this guard is the binding control, and report.py
+# states only what the guard can prove. Still deliberately NOT matched (left to the
+# prompt rule): bare single-letter time ("30s" TTL), bare "us" ("us-east"), spelled-out
+# magnitudes ("eight thousand"), bare data VOLUME ("16 GB", ambiguous with sizing).
+# Accepted over-redaction (safe direction, ADR-001 L): a configured design DURATION in
+# seconds/ms ("TTL of 300 seconds") is scrubbed like a latency — a keyword carve-out was
+# tried and removed because it could not be made leak-safe (latency phrasing is
+# open-ended; "served in 50ms" has no noun). A typed-duration field is the v2 lever.
 
 _REDACTION = "[engine-owned metric removed]"
 
+_INT = r"(?:\d{1,3}(?:,\d{3}){1,5}|\d{1,15})(?![\d,])"
+# Multiplier (k/m/g/b/t) only when NOT followed by a letter/digit, so it cannot eat
+# the "m" of "machines"/"million" or the "g" of "gateway".
+_MULT = r"(?:[kmgbt](?![a-z\d]))?"
+# Spelled-out multiplier so a unit-bound figure survives the word ("2 million rps").
+_SPELLED = r"(?:\s?(?:thousand|million|billion|trillion))?"
+_NUM = rf"{_INT}(?:\.\d+)?(?:e[+-]?\d+)?{_SPELLED}\s?{_MULT}\s?"
+# Range / approximation wrapper so "50-100ms"/"~50ms"/"sub-50ms" collapse whole.
+_APPROX = (r"(?:[~≈<>]\s?|sub[\s-]?|about\s|approx\.?\s|roughly\s|around\s|"
+           r"under\s|over\s|at\s+least\s|up\s+to\s)?")
+_RANGE = rf"(?:{_NUM}(?:\s?(?:-|–|—|to|and|±)\s?))?"
+_VAL = rf"{_APPROX}{_RANGE}{_NUM}"
+
+_PERIOD = r"(?:months?|years?|hours?|days?|weeks?|mo|hr|yr|wk)"
+_BILL = r"(?:mo|months?|monthly|yr|years?|yearly|annum|annually)"  # billing periods only
+_PER = r"(?:/\s?|per\s?)"
+_WIN = r"(?:s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hour|hours|day|days)"
+_THRU = (r"(?:req|reqs|requests?|transactions?|txns?|ops|operations?|calls?|hits?|"
+         r"reads?|writes?|queries|query|messages?|msgs?|packets?|events?)")
+
+# UNIT-ANCHORED patterns (precision). A magnitude bound to a known unit is redacted.
+_METRIC_PATTERNS = (
+    re.compile(rf"[$€£]\s?{_VAL}(?:{_PER}{_PERIOD})?", re.I),                        # $420/month, $8k, $2.5k/mo
+    re.compile(rf"(?<!\w){_VAL}\$", re.I),                                                # 500$
+    re.compile(rf"(?<!\w){_VAL}(?:usd|dollars?|cents?|eur|euros?|gbp|pounds?)\b", re.I),  # 500 dollars, 500 EUR
+    re.compile(rf"\b(?:usd|eur|gbp)\s?{_VAL}(?:{_PER}{_PERIOD})?", re.I),            # USD 500, USD 5/month
+    re.compile(rf"(?<!\w){_VAL}{_PER}{_BILL}\b", re.I),                              # bare cost-rate: 8k/mo, 8000/month
+    re.compile(rf"(?<!\w){_VAL}(?:rps|qps|tps|iops)\b", re.I),                            # 8000 rps, 50000 IOPS
+    re.compile(rf"(?<!\w){_VAL}{_THRU}\s?{_PER}\s?{_WIN}\b", re.I),                        # 8000 requests/second
+    re.compile(rf"(?<!\w){_VAL}{_PER}\s?(?:s|sec|second)\b", re.I),                        # 8000/s, 8000/sec
+    re.compile(rf"(?<!\w){_VAL}(?:milliseconds?|millis|msec|ms|microseconds?|µs|μs|"
+               rf"nanoseconds?|nsec|ns|seconds?|secs?)\b", re.I),                          # 50ms, 2.5 seconds, 20 ns
+    re.compile(rf"(?<!\w){_VAL}(?:[kmgtp]?bps|gbps|mbps|kbps|tbps)\b", re.I),              # 10Gbps, 40 Mbps
+    re.compile(rf"(?<!\w){_VAL}[kmgtp]?b(?:it)?\s?{_PER}\s?{_WIN}\b", re.I),               # 10 GB/s, 5 Gbit/s, 2 TB/day
+    re.compile(rf"(?<!\w){_VAL}(?:kilo|mega|giga|tera|peta)?(?:bit|byte)s?\s?{_PER}\s?{_WIN}\b", re.I),  # 10 gigabit per second
+)
+
+# Deny-by-default backstop: a magnitude next to an engine-OWNED concept (a number the
+# deterministic engine PRODUCES — utilisation/latency/throughput/cost/…) is scrubbed
+# whatever the unit. Engine OUTPUTS only: cache hit-rate, read/write split, instance
+# counts etc. are model INPUTS / design assumptions, deliberately absent (a "hit-rate
+# below 70%" kill criterion must survive). "availability" excludes "availability zone".
+_ENGINE_NOUN = (
+    r"utili[sz]ation|utili[sz]ed|availability(?!\s+zones?)|uptime|downtime|"
+    r"saturat(?:ion|ed)|error[\s-]?rate|packet[\s-]?loss|throughput|breakpoint|"
+    r"latenc(?:y|ies)|response[\s-]?times?|bandwidth|headroom|p50|p95|p99|p999|iops|"
+    r"cost|costs|costing|spend|spends|spent|budget|priced?|pricing|egress|ingress|"
+    r"bills?|billed|billing|invoiced?|invoices?"
+)
+# A ratio (90/10, 99:1), a design count/sizing ("12 nodes", "8 queues"), AND a workload
+# INPUT ("50000 users", "DAU") are NOT engine outputs — a magnitude bound to one survives
+# even next to an engine noun. The `(?<![\d:/])` on _MAG anchors a number to a clean
+# left boundary (so a ratio's right operand "90/10" is not matched as "0"); the forward
+# lookahead `(?!\s?[:/]\s?\d)` protects the left operand; the keep-noun lookahead protects
+# counts/inputs. report.py renders only what this can prove (no absolute claim).
+_DESIGN_COUNT = (r"replicas?|nodes?|instances?|shards?|partitions?|zones?|regions?|"
+                 r"copies|cores?|vcpus?|cpus?|workers?|pods?|containers?|nines?|azs?|"
+                 r"vms?|machines?|servers?|tables?|columns?|keys?|fields?|tiers?|brokers?|"
+                 r"queues?|gateways?|datacent(?:er|re)s?|data[\s-]?cent(?:er|re)s?|clusters?|"
+                 r"caches?|microservices?|services?|buckets?|endpoints?|channels?|hops?|"
+                 r"topics?|streams?|consumers?|producers?|lambdas?|functions?|"
+                 r"users?|dau|mau|customers?|tenants?|subscribers?|accounts?|records?|"
+                 r"rows?|documents?|objects?|items?|entities?|sessions?")
+_MAG = (rf"(?<![\d:/]){_INT}(?:\.\d+)?(?:e[+-]?\d+)?{_SPELLED}\s?{_MULT}\s?(?:%|percent)?"
+        rf"(?!\s?[:/]\s?\d)(?!\s?(?:{_DESIGN_COUNT})\b)")
+_GAP = r".{0,22}?"   # bounded -> ReDoS-safe; wide enough for natural connectives
+
+_BACKSTOP = (
+    (re.compile(rf"((?:{_ENGINE_NOUN}){_GAP})({_MAG})", re.I), r"\1" + _REDACTION),  # noun … number
+    (re.compile(rf"({_MAG})({_GAP}(?:{_ENGINE_NOUN}))", re.I), _REDACTION + r"\2"),  # number … noun
+)
+
 
 def _redact_engine_metrics(text: str) -> tuple[str, int]:
-    """Replace any performance/cost magnitude with a neutral marker.
+    """Replace any performance/cost magnitude with a neutral marker (ADR-001 §3).
 
-    Returns (clean_text, count). The prime directive forbids the council from
-    producing numbers; rather than crash the loop on a stray figure, we redact
-    it and flag the ADR (transparency, Doc 03 §2). Never silently passes through."""
+    Returns (clean_text, count). Two layers: unit-anchored patterns (precision) then a
+    noun-anchored deny-by-default backstop (recall — an allowlist of unit spellings can
+    never be complete). The prime directive forbids the council from producing numbers;
+    rather than crash the loop on a stray figure we redact it and flag the ADR
+    (transparency, Doc 03 §2). Never silently passes a matched figure through; the count
+    drives the transparency flag in `_scrub_adr`."""
     count = 0
     out = text
     for pat in _METRIC_PATTERNS:
         out, n = pat.subn(_REDACTION, out)
+        count += n
+    for pat, repl in _BACKSTOP:
+        out, n = pat.subn(repl, out)
         count += n
     return out, count
 
@@ -225,6 +306,20 @@ def _model_brief(model: SystemModel) -> str:
     return "\n".join(lines)
 
 
+def _as_list(v: object) -> list:
+    """Normalise an LLM list-field. A bare string becomes a ONE-element list (one
+    bullet), never a per-character explosion: `[str(c) for c in "none"]` would emit
+    bullets 'n','o','n','e' into the dissent section (ADR-001 H1). None/scalar -> []
+    or [scalar]."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v]
+
+
 def _extract_json(text: str, *, expect: str) -> object:
     """Pull the first JSON array/object out of an LLM reply, tolerating prose or
     code fences around it. `expect` is 'array' or 'object'.
@@ -267,21 +362,10 @@ class ClaudeCouncil:
         adrs = self._stage_chairman_synthesis(brief, proposals, reviews)
         # Defence in depth: guard every ADR even though the prompts forbid numbers.
         adrs = [_scrub_adr(a) for a in adrs]
-        # MANDATORY high-stakes gate (Doc 03 §6 — a MUST). Enforced deterministically,
-        # NOT left to LLM discretion, so activating the real council can never silently
-        # drop the expert-review block the stub guarantees. Refuse to imply prod-safety.
-        if any(f.startswith("high_stakes") for f in model.domain_flags) and not any(
-            "review" in a.area.lower() for a in adrs
-        ):
-            adrs.append(ADR(
-                area="Review gate",
-                decision="REQUIRES expert/legal/security review before any production use.",
-                rationale="Domain flagged high-stakes; Keystone does not certify safety.",
-                confidence="high",
-                kill_criteria=["Shipped without independent expert sign-off"],
-                source="claude",
-            ))
-        return adrs
+        # MANDATORY high-stakes gate (Doc 03 §6 — a MUST). Deterministic and shared
+        # with the stub; de-dups on the gate's identity, NOT a "review" substring, so
+        # a benign "Code review" ADR can never silently drop it (ADR-001 C1).
+        return ensure_high_stakes_gate(adrs, model.domain_flags, source="claude")
 
     # -- stage 1: independent design ---------------------------------------- #
 
@@ -384,9 +468,9 @@ class ClaudeCouncil:
                 area=str(it.get("area", "Decision")),
                 decision=str(it.get("decision", "")),
                 rationale=str(it.get("rationale", "")),
-                dissent=[str(d) for d in it.get("dissent", []) if str(d).strip()],
+                dissent=[str(d) for d in _as_list(it.get("dissent")) if str(d).strip()],
                 confidence=conf,
-                kill_criteria=[str(k) for k in it.get("kill_criteria", []) if str(k).strip()],
+                kill_criteria=[str(k) for k in _as_list(it.get("kill_criteria")) if str(k).strip()],
                 source="claude",
             ))
         if not adrs:
