@@ -9,9 +9,7 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
-| 2 | **LLM ingestion layer** (Brief #3): concept note / text → partial canonical `SystemModel` + assumption ledger. Built behind the `Ingestor` seam (stub-default/$0); injection envelope + harm-floor secret-scan + provenance tagging + prime-directive-by-schema + fail-closed validation; shared `llm.py` transport (council refactored onto it). Adversarial Review→Verify done (3 criticals found + fixed: secret-class gaps, markdown/free-text injection, NaN/inf fail-open). 73 tests green. | B/A | **IN-REVIEW** | **ADR-002**; PR pending |
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
-| 4 | CI: GitHub Actions running the test suite on every PR | Jem | PROPOSED | — |
 | 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | Tunji | PROPOSED | _A to write test plan_ |
 | 6 | Ticket Booking blueprint — benchmark case #2 (flash-sale spike what-if) | Tunji | PROPOSED | — |
 
@@ -37,4 +35,14 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
   test de-flaked before merge. 42 tests green. Real council **stays `stub`-gated**; activation +
   the documented bare-number residuals await the structured-output v2 lever + Bifola's trigger.
 - **ADR-002 — ingestion layer** (2026-06-17): design + M1 injection-envelope + harm-floor +
-  input-vs-derived boundary. Unblocks Brief #3.
+  input-vs-derived boundary. Merged in #30.
+- **Ingestion layer (Task #2) — DONE, merged in #31** (2026-06-17). `ingestion.py` behind the
+  `Ingestor` seam (stub-default/$0) + shared `llm.py` transport (council refactored onto it,
+  guard/gate byte-for-byte intact). Injection envelope + harm-floor secret-scan + provenance
+  tagging + prime-directive-by-schema + fail-closed validation. TWO adversarial review rounds
+  (Review→Verify + merge-gate) found 3 criticals (secret-class gaps, markdown/free-text injection,
+  NaN/inf fail-open) + more harm-floor gaps — all fixed + locked. 74 tests green. `run_from_note.py`
+  runs the full intent→ingest→council→simulate→report loop ($0/stub). Real ingestion stays
+  stub-gated. **The Phase-1 loop is now complete end-to-end (all LLM layers stubbed-by-default).**
+- **CI (Task #4) — DONE**: GitHub Actions runs the test suite + the automated reviewer on every PR
+  (the `tests (engine + council)` + `review` checks, live since #27).

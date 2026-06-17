@@ -39,9 +39,16 @@
   markdown/free-text injection (forged GROUNDED row), NaN/inf/zero fail-open — all **fixed + locked
   with regression tests**. 73 tests green; both loops run.
 
-**What's next (driving autonomously):**
-1. PR `feat/ingestion-layer` → independent merge-gate review → merge (stub-default; no activation).
-2. Reconciliation service (F2) is the follow-on ("Next"); then the model store (docs/05) which carries
-   the deferred tenant-isolation/no-retention MUST (ADR-002 §4).
+- **Ingestion MERGED (#31)** — led it: Review→Verify (3 criticals fixed) → PR → merge-gate review
+  (more harm-floor gaps fixed) → squash-merge. **The Phase-1 loop is now complete end-to-end**
+  (intent→ingest→council→simulate→report), every LLM layer stubbed-by-default. Council fixes (#29),
+  ADR-002 (#30), ingestion (#31) all on `main`. CI (Task #4) confirmed live → DONE.
 
-**Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger.
+**What's next (candidates — checkpoint with Bifola on priority):**
+1. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
+2. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
+   no-retention MUST (ADR-002 §4); unblocks real upload + the calibration moat.
+3. ADR-003 already exists (hosting); the delivery layer (Task #3, FastAPI→Next.js) is Jem's to build.
+
+**Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger + the
+council's v2 structured-output lever.
