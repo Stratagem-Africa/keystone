@@ -9,8 +9,9 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
-| 1 | Real Claude consensus council behind the `Council` interface (single model, multi-persona; design → blind review → synthesis) | B | **IN-REVIEW** | built; _A to write ADR-001 + run Review→Verify_ |
-| 2 | LLM ingestion layer: concept note / docs → canonical model (the last unproven loop piece) | B | PROPOSED | _A to write ADR-002_ |
+| 1 | Real Claude consensus council behind the `Council` interface (single model, multi-persona; design → blind review → synthesis) | B | **IN-REVIEW** | built; Review→Verify done (46 agents); **ADR-001** ratifies architecture _conditionally_ |
+| 1b | **Fix-brief #2 — council trust-core fixes (BLOCKING activation):** C1 Keystone-owned gate + render-from-flags; C2/C3 + ReDoS guard rewrite (Hybrid: bounded non-backtrackable int + noun-anchored backstop); honest banner; H1 `_as_list`. **DONE on `fix/council-trust-core`** — implemented + 3 adversarial re-verify rounds + 42 tests (new ones fail-before/pass-after). Awaiting Bifola review/merge; council stays `stub`-gated until merged. | B/A | **IN-REVIEW** | `docs/adr/ADR-001` §"Fix brief" + §"Implementation & verification" |
+| 2 | LLM ingestion layer: concept note / docs → canonical model (the last unproven loop piece). **Carries ADR-001 GAP M1:** `_model_brief` data envelope (prompt-injection framing) ships with this. | B | PROPOSED | _A to write ADR-002_ |
 | 3 | Stand up the delivery layer: FastAPI over engine+council → Next.js/Vercel → Fly+Supabase (dev) | Jem | PROPOSED | _A to write ADR-003 (hosting topology)_ |
 | 4 | CI: GitHub Actions running the test suite on every PR | Jem | PROPOSED | — |
 | 5 | Score engine vs in-scope SysSimulator blueprints (cost band + bottleneck) | Tunji | PROPOSED | _A to write test plan_ |
@@ -24,4 +25,10 @@ Team + governance: see `docs/07-Team-and-Roadmap.md`. **Every task merges to
 ## Done
 - Phase 0: deterministic engine + loop on URL Shortener; 7 tests green; 56-blueprint corpus.
 - Council (build): real ClaudeCouncil behind the interface; prime-directive guard + high-stakes
-  gate; 25 tests green; stub-mode loop unchanged. (Awaiting ADR-001 + A's review — task #1.)
+  gate; 25 tests green; stub-mode loop unchanged.
+- Council (review): adversarial Review→Verify (8 dimensions, 46 agents, all findings reproduced
+  in code). Outcome → **ADR-001** (2026-06-17). Architecture ratified; 3 CRITICAL trust-core
+  bugs found (C1 high-stakes gate droppable via "review" substring; C2 metric-family guard
+  bypass; C3 percentage leak) + H1 dissent char-explosion + H2 ReDoS — all invisible to the 25
+  green tests. Real council gated to `stub` until Fix-brief #2 lands. No live exposure (stub
+  default, no user-facing path).

@@ -4,7 +4,7 @@ the mandatory 'where this is wrong' section (Doc 03)."""
 from __future__ import annotations
 
 from keystone.model import SystemModel
-from keystone.council import ADR
+from keystone.council import ADR, is_high_stakes
 from keystone.simulation import SimulationResult
 
 
@@ -20,11 +20,22 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"# Keystone Stress-Test Report — {model.name}")
     L.append("")
     L.append("> Accuracy level **L0 (Directional)**. Decision support, **not** certification. "
-             "Every number below is produced by the deterministic engine, not the LLM.")
+             "Numbers come from the deterministic engine; the council reasons about design and is "
+             "constrained and scrubbed to keep figures out of its output (best-effort, not a "
+             "guarantee). Read *Where this is wrong* before trusting a number.")
     L.append("")
     L.append(f"**Offered load:** {_fmt_rps(sim.system_rps)} req/s — {model.workload.description}")
     L.append(f"**Overall confidence:** {sim.confidence}")
     L.append("")
+
+    # Mandatory high-stakes block (Doc 03 §6 MUST; ADR-001 C1 defence-in-depth).
+    # Rendered straight from domain_flags so it can NEVER be dropped by an ADR-list
+    # mutation, independent of the council's own Review-gate ADR.
+    if is_high_stakes(model.domain_flags):
+        L.append("> ⚠️ **HIGH-STAKES DOMAIN — mandatory expert review.** This design touches a "
+                 "high-stakes domain. It **REQUIRES expert / legal / security review before any "
+                 "production use.** Keystone does **not** certify safety or production-readiness.")
+        L.append("")
 
     # Headline
     L.append("## Verdict")
