@@ -25,9 +25,17 @@
   carve-out was removed as un-leak-safe). 42 tests green (new ones fail-before/pass-after). Residual
   bare-number leak classes documented in ADR-001 as accepted L0 (structured output = v2 lever).
 
-**What's next:**
-1. Open PR for `fix/council-trust-core`; Bifola reviews + merges. Council stays `stub`-gated until then.
-2. Write **ADR-002** (ingestion layer) — must carry the M1 GAP: `_model_brief` data-envelope /
-   prompt-injection framing ships with ingestion (Doc 02 §6 MUST).
+- **Council fixes MERGED (#29)** — led the merge myself (Bifola delegated): independent pre-merge
+  review (author recused, 4 reviewers, APPROVE/no-blockers), de-flaked the new ReDoS test, squash-
+  merged to `main` (5912ee6), branch deleted, tests green on `main`. Council stays `stub`-gated.
+- **Wrote ADR-002** (ingestion layer) — design + M1 injection-envelope + harm-floor secret-scan +
+  the input-vs-derived boundary (ingestion carries tagged INPUTS; engine still owns all DERIVED
+  metrics). Board updated (Task #1/#1b → DONE; Task #2 → RATIFIED/ready-to-build, Brief #3).
 
-**Blocker:** none. Fixes await Bifola review/merge; real-council activation needs his go.
+**What's next (driving autonomously):**
+1. Build the ingestion layer (Brief #3) behind the `Ingestor` interface: stub + ClaudeIngestor +
+   envelope + secret-scan + validation + offline tests; then adversarial Review→Verify (untrusted
+   input / harm floor / prime directive) before merge. Stub-default/$0; no activation.
+2. Reconciliation service (F2) is the follow-on ("Next").
+
+**Blocker:** none. Real-council activation still needs Bifola's manual trigger + the v2 structured-output lever.
