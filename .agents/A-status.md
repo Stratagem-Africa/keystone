@@ -57,11 +57,19 @@
   entry (now 6/34, ticket_booking in-band) + 6 tests. Completes CLAUDE.md's Phase-1 list (1–4). 88 tests
   green. Updated CLAUDE.md status.
 
-**What's next (candidates — checkpoint with Bifola on priority):**
-1. Reconciliation service (F2): merge multi-doc partial models; conflict/gap report. — needs ADR.
-2. Canonical model store (docs/05, versioned/persisted) — carries the deferred tenant-isolation /
-   no-retention MUST (ADR-002 §4); unblocks real upload + the calibration moat.
-3. Grow the reference-model corpus (6/34 → more) and field-calibrate (L0→L1, needs the KB).
+- **Reviewed + merged Jem's #36** (FastAPI scaffold, issue #10) — prime-directive-clean; auth/CORS
+  deferred to #20. Closed 5 resolved issues (#4/#5/#7/#25/#26); added `.claude/settings.json`
+  (`gh issue` allow, #37). Wrote + ratified **ADR-004** (reconciliation, #38) and **built F2** on
+  `feat/reconciliation`: `reconciliation.py` (deterministic merge; halt-on-hard-conflict; never
+  auto-resolve; fail-closed) + `ingest_corpus` + `run_reconciliation.py` + 12 tests. 100 tests green.
+
+**What's next (candidates):**
+1. Reconciliation **prose-level/semantic** conflicts — the v2 LLM lever (ADR-004).
+2. Canonical model store (docs/05, GH #21) — A designs spec / Jem migration; tenant-isolation MUST.
+3. Grow the reference-model corpus (6/34 → more) toward L1 calibration (needs the KB).
+
+**Coordination:** B session committed a `B-status.md` update directly to local `main` (`c7a51d7`,
+unpushed) — flagged to Bifola; should be PR'd, not held local.
 
 **Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger + the
 council's v2 structured-output lever.
