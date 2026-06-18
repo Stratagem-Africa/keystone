@@ -1,6 +1,6 @@
 # ADR-004 — Cross-document Reconciliation (F2)
 
-**Status:** Proposed · **Pending ratification:** Bifola
+**Status:** Accepted · **Ratified-by:** Bifola, 2026-06-18 (build assigned to A / issue #8)
 **Date:** 2026-06-18 · **Owner:** Keystone A (Bifola)
 **Relates to:** `docs/04` F2 (the differentiator), `docs/02` §4 (REC component), `docs/05` (ReconciliationReport), `docs/03` §2/§6 (prime directive, fail-closed); ADR-002 (ingestion — produces the partial models this merges)
 **Implements:** GH issue **#8** (Ingestion: reconciliation → conflict/gap report). Unblocks the F2 build that B-status lists as "next, gated on ADR".
