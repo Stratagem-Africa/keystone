@@ -9,8 +9,9 @@ Keystone runs **trunk-based** with one rule above all:
    **local gate** green: **`scripts/check.sh`** (runs the suite — zero-dependency, $0).
 3. Open a PR. **CODEOWNERS** auto-requests Bifola. (GitHub Actions is **dormant** — see below — so
    there's no auto-CI check on the PR; the test signal comes from the local gate the reviewer runs.)
-4. Bifola reviews — runs the gate + an adversarial Review→Verify, may push fixes to your branch —
-   then **squash-merges**. **Do not merge your own PR. Do not push to `main`.**
+4. Bifola reviews — runs the gate + an adversarial Review→Verify — and leaves clear feedback for
+   **you to address on your own branch** (the reviewer explains what & why; you make the fix and
+   re-push). Once it's green and clean, he **squash-merges**. **Do not merge your own PR. Do not push to `main`.**
 
 ## Why it's convention, not a hard lock (and how prod is still safe)
 The org is on **GitHub Free**, where branch protection isn't available on private repos —
@@ -36,9 +37,12 @@ anyway (`gh pr merge` is a plain git op). For each contributor PR, the reviewer 
 2. **Adversarial Review→Verify** of the diff against the gates below (prime directive, accuracy
    honesty, harm floor, correctness). Trust-critical changes (auth, money, PII, tenant isolation,
    schema, crypto, the prime-directive guard) get an independent, author-recused pass.
-3. On a **green gate + clean review**: `gh pr merge <PR#> --squash --delete-branch`. Push fixes to the
-   branch first if needed. **Never merge on a failing gate; never merge your own PR; production stays
-   a manual Bifola trigger.**
+3. If anything needs changing, **leave clear, beginner-friendly feedback (what, why, where) and let
+   the contributor fix it on their own branch** — the reviewer doesn't push fixes onto it (she's
+   learning by doing). Re-check after she re-pushes.
+4. On a **green gate + clean review**: `gh pr merge <PR#> --squash --delete-branch`. **Never merge on
+   a failing gate; never merge your own PR; production stays a manual Bifola trigger.** (Bifola's Claude
+   makes direct fixes only to the trust-critical core it owns, not to contributors' branches.)
 
 ## Gates on every change (no exceptions)
 - **Prime directive:** the LLM reasons; the engine computes. No number ever comes from the LLM.

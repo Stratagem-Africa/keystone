@@ -29,8 +29,8 @@ You own the **delivery layer + backend code**: the **FastAPI API, file parsing, 
 2. Branch from `main` (`feat/…`, `fix/…`) — short-lived.
 3. Build it (to `docs/09` + the stack). Keep PRs small.
 4. Push your branch / open a PR.
-5. Bifola pings his Claude → **we review, fix/improve, and re-push to your branch**, leave a *What / How / Verdict*, and **merge** when clean.
-6. **You `git pull`** to get our changes, then continue.
+5. Bifola pings his Claude → **we review and leave you clear feedback**: *what to change, **why** it matters, and where to look*, plus a *Verdict*. **You make the fixes on your own branch and re-push** — that's how you learn the codebase; we don't edit your branch for you.
+6. We re-check the gate and **merge** when it's green and clean. `git pull` regularly so your local copy stays current with `main`.
 7. Production deploys only on Bifola's manual trigger — nothing that merges ships to users without him.
 
 ## 3. The gates — they bind everything, even the UI
