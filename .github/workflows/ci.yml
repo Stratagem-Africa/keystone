@@ -1,12 +1,13 @@
 name: CI
 
-# Runs on every PR and on pushes to main. Works on GitHub Free — gives Bifola a
-# pass/fail signal at review time even though private-repo branch protection isn't
-# available on Free (see docs/07 §6, CONTRIBUTING.md).
+# DORMANT — GitHub Actions is unavailable on this account (billing / spending limit),
+# so auto-runs only post a misleading red ✗ on PRs. CI now runs LOCALLY via
+# `scripts/check.sh`, and the merge gate is MANUAL: the reviewer runs the suite + an
+# adversarial review, then squash-merges (see CONTRIBUTING.md "Reviewer runbook").
+# Switched to manual dispatch so it can be re-enabled instantly if Actions returns —
+# restore the `pull_request:` + `push: branches: [main]` triggers below.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:

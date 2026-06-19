@@ -1,17 +1,18 @@
 name: Claude Review
 
-# First-line automated PR review for Keystone. Runs on every PR; posts a single
-# sticky review comment (What / How / Verdict) so Bifola can decide fast.
-# Inert until the ANTHROPIC_API_KEY repo secret is added
-# (Settings -> Secrets and variables -> Actions). See CONTRIBUTING.md / docs/07 §6.
+# DORMANT — GitHub Actions is unavailable on this account (billing). The automated
+# first-line review is replaced by the MANUAL gate: Bifola's Claude runs an adversarial
+# Review→Verify on each PR locally before merge (a stronger review than this action).
+# See CONTRIBUTING.md "Reviewer runbook". Switched to manual dispatch so it can be
+# re-enabled if Actions + the ANTHROPIC_API_KEY secret return — restore the
+# `pull_request:` trigger below.
 
 permissions:
   contents: read
   pull-requests: write
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  workflow_dispatch:
 
 jobs:
   review:

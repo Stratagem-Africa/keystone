@@ -10,6 +10,7 @@ Keystone is built by a small team, each using Claude Code: **Bifola** (architect
 
 - **MANDATORY — pull before you work AND before every commit.** Run `git fetch origin && git pull` on your branch at session start and again before committing/pushing. Your branch is frequently *ahead* of your local copy; committing stale causes divergence. If you see *"branches have diverged,"* `git pull --rebase` before anything else.
 - **Branch → small PR → review → merge.** Nobody pushes to `main` directly. Bifola's Claude merges reviewed PRs; **production deploys only on Bifola's manual trigger** — nothing reaches users without him.
+- **CI is LOCAL + MANUAL.** GitHub Actions is dormant (account billing), so the merge gate is `scripts/check.sh` (the test/lint signal) run by the reviewer — `scripts/review-pr.sh <N>` fetches + diffs + checks a PR in one step. Never merge on a red gate. Full runbook in **`CONTRIBUTING.md`** ("Reviewer runbook"). The `.github/workflows/*.yml` are `workflow_dispatch` stubs, re-enabled instantly if Actions returns.
 - New contributor? Read **`docs/10-Contributor-Guide.md`** and **`CONTRIBUTING.md`** first.
 
 ---
@@ -77,6 +78,7 @@ Keystone/
 ## How to run
 
 ```bash
+scripts/check.sh                             # the merge gate: full suite (+ruff if installed); run before every push
 cd prototype
 python3 run_url_shortener.py                 # end-to-end loop -> outputs/url_shortener_report.md
 python3 -m unittest discover -s tests -v     # engine tests (must stay green)
