@@ -10,7 +10,7 @@ dependencies = []
 # Added as the backend/council come online. Kept out of the engine.
 council = ["anthropic>=0.40"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2"]
-db = ["supabase>=2.31", "python-dotenv>=1.0]
+db = ["supabase>=2.31", "python-dotenv>=1.0"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
 [tool.ruff]
