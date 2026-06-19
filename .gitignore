@@ -22,3 +22,6 @@ venv/
 # Local scratch
 *.log
 prototype/outputs/*.local.md
+
+# Learning notes — local only, not for review
+learning-notes/
