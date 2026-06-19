@@ -59,7 +59,8 @@ priority rollup; the issue each Done item closes is noted inline.
 - **Engine scoring (Task #5) — DONE, merged in #33** (2026-06-17, closes GH issue **#26**).
   `docs/11` plan + `benchmarks/scoring.py` + `reference_models.py` + `run_scoring.py`. Scorecard
   (honest by construction): bottleneck + stable-breakpoint + deterministic across all models; cost
-  within an order of magnitude of band; coverage now **6/34 in-scope modeled** (rest = L0→L1 GAP).
+  within an order of magnitude of band. Coverage grown **6 → 14/34 in-scope modeled** (#42 — +8
+  across web_app/real_time/event_driven/ai_agents; 13/14 in-band); rest = L0→L1 GAP.
 - **Ticket Booking case #2 (Task #6) — DONE, merged in #34** (2026-06-17, closes GH issue **#25**).
   `blueprints/ticket_booking.py` + `run_ticket_booking.py` flash-sale what-if (F6): an 8× booking
   spike shifts the bottleneck app→inventory-DB (667% util) and collapses the breakpoint. In-band; 6 tests.
