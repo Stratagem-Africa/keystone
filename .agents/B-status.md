@@ -1,43 +1,40 @@
 # Keystone B (Builder) — status
 
-**Lane state:** handing back (work on disk, uncommitted)
-**Last changed:** 2026-06-14
+**Lane state:** idle — Phase-1 build queue empty; no ratified brief open for B.
+**Last changed:** 2026-06-19
 
-**What changed — Brief #1: real Claude council** (all in B's lane, `prototype/**`):
-- `keystone/claude_council.py` (new) — `ClaudeCouncil` behind the existing
-  `Council` interface. Three stages (independent design → blind peer review →
-  chairman synthesis), one Claude model + 7 persona system-prompts (Doc 02 §4).
-  Includes `AnthropicLLM` transport (lazy SDK import), the prime-directive guard
-  `_redact_engine_metrics`, tolerant JSON parsing, and a deterministic
-  high-stakes review gate (Doc 03 §6 MUST).
-- `keystone/council.py` — added `make_council()` factory (env-driven, defaults
-  to stub, lazy `claude_council` import) + `DEFAULT_COUNCIL_MODEL`.
-- `run_url_shortener.py` — wired to `make_council()`; defaults to stub, so NO
-  behaviour change without `COUNCIL_PROVIDER=claude` + `ANTHROPIC_API_KEY`.
-- `tests/test_council.py` (new) — offline tests (injected fake client, $0).
+## My tasks — both DONE & merged
+- **Task #1 — real Claude council:** merged in **#29** (`5912ee6`). Architecture
+  ratified by **ADR-001**; trust-core fixes landed (Keystone-owned, undroppable
+  high-stakes gate + Hybrid prime-directive guard). The real `claude` provider
+  stays **stub-gated** until the v2 structured-output lever + Bifola's manual
+  trigger. (Original build was `5650ab0`, behind the unchanged `Council` seam.)
+- **Task #2 — LLM ingestion layer:** merged in **#31** (`edd4180`), per **ADR-002**.
+  Built by **A** on `feat/ingestion-layer` (board had it under owner B — noted for
+  lane history). `Ingestor` seam, stub-default/$0, injection envelope + harm-floor
+  secret-scan + provenance tagging + prime-directive-by-schema. Real ingestion
+  stays stub-gated.
 
-**Prime directive held:** the engine stays the only number producer. The council
-is blocked at the prompt AND scrubbed at the output — every free-text ADR field
-incl. the `area` header. 25/25 tests green; stub-mode loop output unchanged.
+**Phase-1 loop is complete end-to-end** (intent→ingest→council→simulate→report,
+every LLM layer stubbed-by-default). **100 tests green on `main`** (verified 2026-06-19).
 
-**Self-verification:** ran a 3-lens adversarial Review→Verify (24 agents) and
-applied all 8 confirmed findings — high-stakes gate regression vs the stub,
-JSON-parser fragility on a trailing same-type bracket, and guard false-negatives
-(`8k rps`, `$2.5k/mo`, `millis`/`ns`, non-USD symbols, unscrubbed `area`).
-Declined "minutes"/bare-`s`/bare-`us` matching (collides with TTLs / `us-east` /
-cron intervals) — documented in the guard comment.
+## Not mine right now (all merged)
+- **#3** delivery layer → **Jem** (IN-PROGRESS; scaffold #36 merged).
+- **#5** engine scoring → merged **#33**; **#6** Ticket Booking → merged **#34**.
+- **#8** Reconciliation (F2) → **built by A** (ADR-004), merged **#39**. Was tagged
+  "— B" in the board's **Next**, but A wrote the ADR and built it deterministically
+  over the typed models (halt-on-hard-conflict / never-auto-resolve / fail-closed).
+  Prose-level/semantic conflicts remain a v2 LLM lever (ADR-004) — a future brief.
 
-**Authorization note:** implemented on Adam's direct instruction, AHEAD of the
-A/B loop (Brief #1 is still PROPOSED; ADR-001 not yet written). The code sits
-behind the unchanged `Council` interface so A's ADR-001 + formal Review→Verify
-and any fix-briefs land cleanly.
+## CI / workflow note
+- CI is now a **manual local gate** (`scripts/check.sh`), not GitHub Actions (dormant —
+  account billing); see CONTRIBUTING.md "Reviewer runbook" (#40). Before pushing, run
+  `scripts/check.sh` green. Status/board files go through a PR like everything else —
+  never commit straight to local `main` (that caused a divergence this session).
 
-**For A (open items / ADR-001 should record):**
-1. Adaptive thinking for Opus-tier councils — omitted now (`effort` 400s on Haiku
-   4.5; adaptive is a 4.6+ mode). Enable behind a model-capability check.
-2. Guard policy: redact-and-flag (current) vs fail-closed/raise on a leaked metric.
-3. `openrouter` / `ollama` providers — factory raises (v2 lever, Doc 02 §4).
-4. Per-persona proposal/review text is not scrubbed — only the final ADRs are
-   (verifier rated low; confirm acceptable since only ADRs reach the report).
+## Housekeeping
+- Supersedes the local-only `B-status.md` syncs (`614136b`, `a8e2522`) — both described
+  state behind reality (council only IN-REVIEW / F2 paused). The `chore/b-status-sync`
+  branch holds `a8e2522` for history and is safe to delete once this lands.
 
-**Blocker:** none. Awaiting Adam's go to commit (and the ADR-001 number to cite).
+**Blocker:** none. Idle pending a ratified brief from A + Bifola.

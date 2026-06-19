@@ -1,7 +1,7 @@
 # Keystone A (Engineering Lead / Architect / PM / QA / Reviewer) — status
 
 **Lane state:** active
-**Last changed:** 2026-06-17
+**Last changed:** 2026-06-19
 **What changed this session:**
 - Ran the formal adversarial Review→Verify on the real council (commit `5650ab0`): 8 dimensions,
   46 agents, every finding reproduced empirically against the code (not asserted).
@@ -63,13 +63,28 @@
   `feat/reconciliation`: `reconciliation.py` (deterministic merge; halt-on-hard-conflict; never
   auto-resolve; fail-closed) + `ingest_corpus` + `run_reconciliation.py` + 12 tests. 100 tests green.
 
+- **CI restructured to a MANUAL LOCAL gate (#40)** — GitHub Actions is unavailable on the account
+  (billing), so its auto-runs only posted a misleading red ✗ and merging never depended on them.
+  Added `scripts/check.sh` (the $0 zero-dep test/lint gate) + `scripts/review-pr.sh <N>` (fetch+diff+check);
+  neutered both workflows to `workflow_dispatch` stubs (re-enable instantly if Actions returns); wrote the
+  **Reviewer runbook** in CONTRIBUTING.md + CLAUDE.md notes. The merge gate is now: reviewer runs the gate
+  green + adversarial Review→Verify, then squash-merges.
+- **Merged reconciliation (F2) via the new gate (#39)** — rebased onto #40, `scripts/check.sh` green
+  (100 tests), re-read the trust-critical safety invariant (halt-on-hard-conflict / never-auto-resolve /
+  fail-closed) before merge. Closed GH issue **#8**.
+- **Resolved the recurring local-`main` divergence** — the B-session's unpushed `B-status.md` commit
+  (`a8e2522`) was preserved on a branch, local `main` reset clean to `origin/main`, and the (now-stale)
+  B-status is PR'd here with an accuracy update instead of held local.
+
 **What's next (candidates):**
 1. Reconciliation **prose-level/semantic** conflicts — the v2 LLM lever (ADR-004).
 2. Canonical model store (docs/05, GH #21) — A designs spec / Jem migration; tenant-isolation MUST.
 3. Grow the reference-model corpus (6/34 → more) toward L1 calibration (needs the KB).
 
-**Coordination:** B session committed a `B-status.md` update directly to local `main` (`c7a51d7`,
-unpushed) — flagged to Bifola; should be PR'd, not held local.
+**Coordination:** the B-session's direct-to-local-`main` `B-status.md` commits (`c7a51d7`→`a8e2522`,
+unpushed) caused a local/origin divergence — **resolved**: preserved on `chore/b-status-sync`, local
+`main` reset to `origin/main`, B-status synced via this PR. Reminder for all sessions (CLAUDE.md):
+status/board files go through a PR like everything else; never commit straight to local `main`.
 
 **Blocker:** none. Real-council & real-ingestion activation still need Bifola's manual trigger + the
 council's v2 structured-output lever.
