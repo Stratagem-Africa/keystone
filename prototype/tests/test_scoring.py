@@ -63,11 +63,16 @@ class TestScorecardHonesty(unittest.TestCase):
         self.assertIn("Where this is wrong", self.md)
         self.assertIn("L0 (Directional)", self.md)
 
-    def test_states_coverage_gap(self):
-        # must honestly report it scored only a subset of the in-scope corpus
-        self.assertLess(len(REFERENCE_MODELS), len(corpus.in_scope()))
+    def test_full_in_scope_coverage_and_honest_calibration_gap(self):
+        # every in-scope blueprint now has a reference model (full coverage)...
+        modeled = {k for k, _, _ in REFERENCE_MODELS}
+        in_scope = {b[0] for b in corpus.in_scope()}
+        self.assertTrue(in_scope.issubset(modeled),
+                        f"in-scope blueprints with no reference model: {sorted(in_scope - modeled)}")
+        # ...and the scorecard still honestly carries the remaining (calibration) GAP
         self.assertIn("in-scope blueprints", self.md)
         self.assertIn("GAP", self.md)
+        self.assertIn("full in-scope coverage", self.md)
 
 
 class TestReferenceModelHygiene(unittest.TestCase):
@@ -109,8 +114,8 @@ class TestReferenceModelHygiene(unittest.TestCase):
                 self.assertGreaterEqual(c.monthly_cost_per_instance, 0, f"{key}.{cid}: negative cost")
 
     def test_coverage_did_not_regress(self):
-        # the expansion to 14 in-scope reference models must not silently shrink
-        self.assertGreaterEqual(len(REFERENCE_MODELS), 14)
+        # full in-scope coverage (34) must not silently shrink
+        self.assertGreaterEqual(len(REFERENCE_MODELS), len(corpus.in_scope()))
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ scorecard reports, per reference model:
     simulated HOT PATH, a subset of the full architecture).
 
 Honest by construction: the scorecard ships a "where this is wrong" section and states how
-many of the 33 in-scope blueprints actually have a reference model (the rest are a GAP).
+many of the in-scope blueprints actually have a reference model (and that field-calibration is a GAP).
 """
 from __future__ import annotations
 
@@ -122,8 +122,13 @@ def render_scorecard(cards: list[ScoreCard]) -> str:
              "`ASSUMPTION`s (Doc 03) — not yet field-calibrated.")
     L.append("")
     L.append("## Coverage")
-    L.append(f"- **Reference models scored: {modeled} / {n_in_scope} in-scope blueprints** "
-             f"({n_in_scope - modeled} still need a model built — a tracked GAP).")
+    if modeled >= n_in_scope:
+        L.append(f"- **Reference models scored: {modeled} / {n_in_scope} in-scope blueprints — "
+                 f"full in-scope coverage.** The remaining work is field-calibration, not coverage "
+                 f"(see 'where this is wrong'); out-of-scope blueprints await the v2 engine.")
+    else:
+        L.append(f"- **Reference models scored: {modeled} / {n_in_scope} in-scope blueprints** "
+                 f"({n_in_scope - modeled} still need a model built — a tracked GAP).")
     L.append("")
     L.append("## Summary")
     L.append(f"- **Cost band:** {in_band}/{modeled} in-band · {within_oom}/{modeled} within an order of magnitude.")
@@ -156,7 +161,8 @@ def render_scorecard(cards: list[ScoreCard]) -> str:
              "plausibility/sanity checks, not scored-vs-truth.")
     L.append("- **Component count is the simulated hot path**, a subset of the full architecture's "
              "documented count; it is informational, not a pass/fail.")
-    L.append("- **Most in-scope blueprints have no reference model yet** — building them (and "
-             "field-calibrating capacities to benchmarks) is the L0→L1 path (Doc 03 §3).")
+    L.append("- **Capacities/costs are SEED `ASSUMPTION`s, not field-calibrated** — even at full "
+             "in-scope coverage, calibrating them to real benchmarks is the remaining L0→L1 **GAP** "
+             "(Doc 03 §3); out-of-scope blueprints still await the v2 engine.")
     L.append("")
     return "\n".join(L)
