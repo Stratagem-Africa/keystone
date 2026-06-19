@@ -1,6 +1,6 @@
 # ADR-005 — Canonical Model Store (versioned, tenant-isolated persistence)
 
-**Status:** **PROPOSED** — awaiting Bifola ratification (schema + tenant-isolation = the "a human ratifies before code" gate)
+**Status:** **Accepted** · **Ratified-by:** Bifola, 2026-06-19 (schema + tenant-isolation = the "a human ratifies before code" gate — satisfied)
 **Date:** 2026-06-19 · **Owner:** Keystone A (Bifola) · **Migration owner:** Jem (delivery layer)
 **Relates to:** `docs/05` (canonical data model — this turns its entity sketch into a storage spec), `docs/02` §6 (security MUSTs), `docs/03` §2 (prime directive) + pillars (provenance), ADR-002 (ingestion — which **explicitly defers** the tenant-isolation/no-retention MUST to this task), ADR-003 (Supabase + Fly topology), CLAUDE.md (harm floor; Tier-1; "Next" item)
 **Implements:** GitHub issue **#21** (A designs spec → Jem migration). Blocks: real multi-tenant upload (ADR-002 kill-criterion) and the diff-able "design-as-code" promise.
