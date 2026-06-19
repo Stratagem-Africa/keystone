@@ -70,5 +70,48 @@ class TestScorecardHonesty(unittest.TestCase):
         self.assertIn("GAP", self.md)
 
 
+class TestReferenceModelHygiene(unittest.TestCase):
+    """Structural well-formedness of every reference model — catches a malformed
+    new model (bad flow shares, dangling component ref, non-positive capacity)
+    before it reaches the scorer, where it would silently distort the scorecard."""
+
+    def test_every_model_is_a_real_in_scope_blueprint(self):
+        keys = {b[0] for b in corpus.in_scope()}
+        for key, _build, _rps in REFERENCE_MODELS:
+            self.assertIn(key, keys, f"{key!r} is not an in-scope blueprint")
+
+    def test_registry_rps_matches_model_default(self):
+        # the displayed reference rps must equal the load the model is actually built at
+        for key, build, rps in REFERENCE_MODELS:
+            m = build()
+            self.assertEqual(m.workload.system_rps, rps,
+                             f"{key}: registry rps {rps} != model rps {m.workload.system_rps}")
+
+    def test_flow_shares_sum_to_one(self):
+        for key, build, _rps in REFERENCE_MODELS:
+            total = sum(f.share for f in build().flows)
+            self.assertAlmostEqual(total, 1.0, places=6,
+                                   msg=f"{key}: flow shares sum to {total}, not 1.0")
+
+    def test_flow_steps_reference_real_components(self):
+        for key, build, _rps in REFERENCE_MODELS:
+            m = build()
+            for f in m.flows:
+                for step in f.path:
+                    self.assertIn(step.component_id, m.components,
+                                  f"{key}: flow {f.name!r} references unknown component {step.component_id!r}")
+
+    def test_capacities_and_costs_are_sane(self):
+        for key, build, _rps in REFERENCE_MODELS:
+            for cid, c in build().components.items():
+                self.assertGreater(c.per_instance_rps, 0, f"{key}.{cid}: non-positive capacity")
+                self.assertGreaterEqual(c.instances, 1, f"{key}.{cid}: <1 instance")
+                self.assertGreaterEqual(c.monthly_cost_per_instance, 0, f"{key}.{cid}: negative cost")
+
+    def test_coverage_did_not_regress(self):
+        # the expansion to 14 in-scope reference models must not silently shrink
+        self.assertGreaterEqual(len(REFERENCE_MODELS), 14)
+
+
 if __name__ == "__main__":
     unittest.main()
