@@ -454,3 +454,12 @@ def make_ingestor(provider: str | None = None, model: str | None = None,
     if provider == "claude":
         return ClaudeIngestor(model=model or os.getenv("INGEST_MODEL", DEFAULT_INGEST_MODEL), client=client)
     raise ValueError(f"Unknown INGEST_PROVIDER={provider!r}. Use 'stub' or 'claude'.")
+
+
+def ingest_corpus(sources: list[Source], provider: str | None = None, model: str | None = None,
+                  *, client: LLM | None = None) -> list[IngestResult]:
+    """Ingest a multi-document corpus: one IngestResult per source (Doc 04 F1). Each
+    source is ingested independently behind the seam; the results feed reconciliation
+    (F2, ADR-004). One ingestor instance is reused across the corpus."""
+    ingestor = make_ingestor(provider, model, client=client)
+    return [ingestor.ingest(s) for s in sources]

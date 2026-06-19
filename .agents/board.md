@@ -13,11 +13,12 @@ priority rollup; the issue each Done item closes is noted inline.
 
 | # | Task | Owner | Status | Brief / ADR |
 |---|---|---|---|---|
-| 3 | Delivery layer: FastAPI over engine+council/ingestion → Next.js/Cloudflare → Fly+Supabase (dev) | Jem | **IN-PROGRESS** | ADR-003 ratified; broken into GH issues `#10–#24`. Jem on **#10** (FastAPI scaffold) — local branch, not pushed yet. Core is import-ready on `main` (engine/council/ingestion). |
+| 3 | Delivery layer: FastAPI over engine+council/ingestion → Next.js/Cloudflare → Fly+Supabase (dev) | Jem | **IN-PROGRESS** | ADR-003 ratified; GH issues `#10–#24`. **#10 scaffold merged (#36)** — auth deferred to #20, CORS hardening tied to it. Jem on #11–#14 next. |
+| 8 | **Reconciliation (F2)** — merge multi-doc partial models → conflict/gap/duplication report | A | **IN-REVIEW** | **ADR-004** + `reconciliation.py` + `ingest_corpus` + `run_reconciliation.py` + 12 tests. Deterministic; halts on hard conflicts (never designs on a contradiction), never auto-resolves; fail-closed. 100 tests green. PR pending. |
 
 ## Next
-- Reconciliation service (merge partial models; conflict/gap report). — B
-- Canonical model store (Postgres, versioned). — A design / Jem build
+- Reconciliation **prose-level (semantic) conflicts** — the v2 LLM lever (ADR-004); v1 is deterministic over typed models.
+- Canonical model store (Postgres, versioned; GH #21) — A designs spec / Jem migration; carries the tenant-isolation MUST.
 - Knowledge base / RAG (pgvector grounding). — Phase 2
 
 ## Done
