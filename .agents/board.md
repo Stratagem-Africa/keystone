@@ -16,8 +16,9 @@ priority rollup; the issue each Done item closes is noted inline.
 | 3 | Delivery layer: FastAPI over engine+council/ingestion → Next.js/Cloudflare → Fly+Supabase (dev) | Jem | **IN-PROGRESS** | ADR-003 ratified; GH issues `#10–#24`. **#10 scaffold merged (#36)** — auth deferred to #20, CORS hardening tied to it. Jem on #11–#14 next. |
 
 ## Next
+- **Canonical model store (#21)** — **ADR-005 PROPOSED (PR #45), awaiting Bifola ratification** (schema + tenant-isolation = human-ratifies). On ratification: Jem migrates; then reconcile `docs/05` (money→integer minor units; Edge vs Flow; `Assumption.source` enum).
 - Reconciliation **prose-level (semantic) conflicts** — the v2 LLM lever (ADR-004); v1 (merged, #39) is deterministic over typed models.
-- Canonical model store (Postgres, versioned; GH #21) — A designs spec / Jem migration; carries the tenant-isolation MUST.
+- Field-calibrate reference-model capacities to real benchmarks (L0→L1) — now that in-scope coverage is complete (34/34), this is the remaining accuracy GAP; needs the KB.
 - Knowledge base / RAG (pgvector grounding). — Phase 2
 
 ## Done
@@ -59,8 +60,14 @@ priority rollup; the issue each Done item closes is noted inline.
 - **Engine scoring (Task #5) — DONE, merged in #33** (2026-06-17, closes GH issue **#26**).
   `docs/11` plan + `benchmarks/scoring.py` + `reference_models.py` + `run_scoring.py`. Scorecard
   (honest by construction): bottleneck + stable-breakpoint + deterministic across all models; cost
-  within an order of magnitude of band. Coverage grown **6 → 14/34 in-scope modeled** (#42 — +8
-  across web_app/real_time/event_driven/ai_agents; 13/14 in-band); rest = L0→L1 GAP.
+  within an order of magnitude of band. Coverage grown **6 → 14 → 34/34 in-scope modeled** (#42 +8,
+  #46 +20) — **full in-scope coverage**; 33/34 in-band, all bottleneck-plausible/stable/deterministic.
+  #46 hardened by a modeling-realism review (fixed distributed_cache/proximity bottlenecks +
+  payment audit-trail). Remaining GAP = field calibration (L0→L1), not coverage.
+- **Canonical model store (Task #21) — ADR-005 PROPOSED (#45)**, awaiting Bifola ratification:
+  deny-by-default RLS tenant isolation, prime-directive-by-schema, integer-money, no-retention,
+  immutable versioning, model.py round-trip; A spec → Jem migration. Hardened by an adversarial
+  Review→Verify (22 findings folded in; 1 hallucinated finding rejected).
 - **Ticket Booking case #2 (Task #6) — DONE, merged in #34** (2026-06-17, closes GH issue **#25**).
   `blueprints/ticket_booking.py` + `run_ticket_booking.py` flash-sale what-if (F6): an 8× booking
   spike shifts the bottleneck app→inventory-DB (667% util) and collapses the breakpoint. In-band; 6 tests.

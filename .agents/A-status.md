@@ -2,7 +2,23 @@
 
 **Lane state:** active
 **Last changed:** 2026-06-19
-**What changed this session:**
+**Latest (most recent first):**
+- **Reference-model corpus → full in-scope coverage (14 → 34/34, #46).** Modelled the remaining 20
+  in-scope blueprints; verified empirically (33/34 in-band, all stable/deterministic, none saturated)
+  + a modeling-realism adversarial review (fixed distributed_cache & proximity bottlenecks + the
+  payment audit-trail). Remaining GAP = field calibration (L0→L1), not coverage.
+- **ADR-005 — canonical model store (#45, PROPOSED, awaiting Bifola ratification).** Deny-by-default RLS
+  tenant isolation, prime-directive-by-schema, integer-money, no-retention, immutable versioning,
+  model.py round-trip; A spec → Jem migration. Adversarial Review→Verify: 22 findings folded in, 1
+  hallucinated finding rejected. Discharges ADR-002's deferred tenant-isolation MUST on ratification.
+- **Reviewer norm changed (#44):** for contributors' PRs (esp. Jem, beginner) I now *communicate and
+  let her fix her own code* — no pushing fixes onto her branch (direct fixes only on the trust-critical
+  core I own). Synced CLAUDE.md/CONTRIBUTING.md/docs-10.
+- **API hardening (#43):** reviewer follow-up on Jem's #36 — input validation (null/0/neg → 422 not 500),
+  CORS credentials off (safe), docs; left as a one-time worked example (future fixes are hers to make).
+- **Manual local CI gate (#40) + reconciliation F2 (#39):** see earlier entries below.
+
+**Earlier this session:**
 - Ran the formal adversarial Review→Verify on the real council (commit `5650ab0`): 8 dimensions,
   46 agents, every finding reproduced empirically against the code (not asserted).
 - Wrote **`docs/adr/ADR-001-real-consensus-council.md`** — ratifies the council *architecture*
