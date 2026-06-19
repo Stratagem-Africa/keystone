@@ -2,7 +2,7 @@
 
 **Doc:** 05 · **Status:** Draft v0.1 · **Date:** 13 June 2026
 **Playbook:** Pillar F (`DAT-F*`), Pillar B. The canonical model is the **single source of truth** — every front door (docs, voice, text, diagram) normalises into it; every output (diagram, ADRs, simulation, export) is derived from it. It is the design-as-code artifact.
-**Provenance:** `ASSUMPTION` — schema sketch for review, not a migration.
+**Provenance:** this is the conceptual entity sketch. The **ratified v1 storage spec is [ADR-005](adr/ADR-005-canonical-model-store.md)** (versioned + tenant-isolated Postgres; ratified by Bifola 2026-06-19) — **authoritative wherever the two differ** (see the reconciliation note at the end of §1).
 
 ---
 
@@ -11,8 +11,14 @@
 - **One source of truth `MUST`** — UI, simulation, exports all read this model; none holds parallel state.
 - **Versioned & diff-able `MUST`** — every change produces a new immutable version; designs are compared as diffs (the "design-as-code" promise).
 - **Assumptions are data, not prose `MUST`** — each inferred value links to an `Assumption` record.
-- **Wire-safe `MUST`** (Playbook) — IDs as strings; money as decimal strings; timestamps ISO-8601; enums as typed unions.
+- **Wire-safe `MUST`** (Playbook) — IDs as strings; **money as integer minor units** (per the harm floor; ADR-005 §4 — this **supersedes** the earlier "decimal strings"); timestamps ISO-8601; enums as typed unions.
 - **Append-only where it matters `SHOULD`** — ADRs and calibration records are append-only; corrections are new records, not overwrites.
+
+> **Reconciled to ADR-005 (ratified 2026-06-19).** Where this conceptual sketch and the ratified storage spec differ, **ADR-005 wins** for v1:
+> - **Money** → integer minor units + currency (not decimal strings), with a float→minor-units conversion at the storage boundary (ADR-005 §4).
+> - **Topology** → v1 persists the engine's runnable `Flow`/`FlowStep` shape (see `prototype/keystone/model.py`), **not** the `Edge` form sketched in §2 below; the richer `Edge` (protocol/payload topology, for diagram export) is a deferred `GAP` → later ADR.
+> - **`Assumption.source`** → the enum is `{llm_inferred | benchmark | user}` (§ below). *Follow-up (minor):* `model.py`'s `Assumption.source` default `"assumption"` is out-of-spec — every caller already passes a valid value, so it's dead, but it should be normalised in a small code PR.
+> - **Tenant isolation, immutable versioning, prime-directive-by-schema, no-retention/erasure** are specified concretely in ADR-005 and are the binding requirements for the migration (#21, Jem).
 
 ## 2. Core entities
 
