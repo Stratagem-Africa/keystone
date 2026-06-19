@@ -16,7 +16,7 @@ priority rollup; the issue each Done item closes is noted inline.
 | 3 | Delivery layer: FastAPI over engine+council/ingestion → Next.js/Cloudflare → Fly+Supabase (dev) | Jem | **IN-PROGRESS** | ADR-003 ratified; GH issues `#10–#24`. **#10 scaffold merged (#36)** — auth deferred to #20, CORS hardening tied to it. Jem on #11–#14 next. |
 
 ## Next
-- **Canonical model store (#21)** — **ADR-005 PROPOSED (PR #45), awaiting Bifola ratification** (schema + tenant-isolation = human-ratifies). On ratification: Jem migrates; then reconcile `docs/05` (money→integer minor units; Edge vs Flow; `Assumption.source` enum).
+- **Canonical model store (#21)** — **ADR-005 RATIFIED & merged (#45, Bifola 2026-06-19).** `docs/05` reconciled to it. **Next: Jem builds the Supabase migration (#21/#20)** from the spec; A reviews. Tiny code follow-up: normalise `model.py` `Assumption.source` default (out-of-spec, dead).
 - Reconciliation **prose-level (semantic) conflicts** — the v2 LLM lever (ADR-004); v1 (merged, #39) is deterministic over typed models.
 - Field-calibrate reference-model capacities to real benchmarks (L0→L1) — now that in-scope coverage is complete (34/34), this is the remaining accuracy GAP; needs the KB.
 - Knowledge base / RAG (pgvector grounding). — Phase 2
@@ -64,10 +64,11 @@ priority rollup; the issue each Done item closes is noted inline.
   #46 +20) — **full in-scope coverage**; 33/34 in-band, all bottleneck-plausible/stable/deterministic.
   #46 hardened by a modeling-realism review (fixed distributed_cache/proximity bottlenecks +
   payment audit-trail). Remaining GAP = field calibration (L0→L1), not coverage.
-- **Canonical model store (Task #21) — ADR-005 PROPOSED (#45)**, awaiting Bifola ratification:
+- **Canonical model store (Task #21) — ADR-005 RATIFIED & merged (#45, Bifola 2026-06-19):**
   deny-by-default RLS tenant isolation, prime-directive-by-schema, integer-money, no-retention,
-  immutable versioning, model.py round-trip; A spec → Jem migration. Hardened by an adversarial
-  Review→Verify (22 findings folded in; 1 hallucinated finding rejected).
+  immutable versioning, model.py round-trip; A spec → **Jem migration next**. Hardened by an adversarial
+  Review→Verify (22 findings folded in; 1 hallucinated finding rejected). `docs/05` reconciled to it.
+  Discharges ADR-002's deferred tenant-isolation MUST (precondition for any real upload).
 - **Ticket Booking case #2 (Task #6) — DONE, merged in #34** (2026-06-17, closes GH issue **#25**).
   `blueprints/ticket_booking.py` + `run_ticket_booking.py` flash-sale what-if (F6): an 8× booking
   spike shifts the bottleneck app→inventory-DB (667% util) and collapses the breakpoint. In-band; 6 tests.
