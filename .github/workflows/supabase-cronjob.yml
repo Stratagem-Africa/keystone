@@ -1,3 +1,8 @@
+# DORMANT: GitHub Actions is currently disabled on this account (billing).
+# This workflow will not run until Actions is re-enabled.
+# The actual keepalive mechanism is Supabase's pg_cron job "keepalive-ping" (see migrations/ or Supabase dashboard).
+# Keeping this file so it's ready to use once Actions returns.
+
 # This workflow keeps the Supabase free-tier project alive.
 # Free projects pause after 7 days of inactivity — this ping prevents that.
 name: Supabase Cron Ping
@@ -38,5 +43,5 @@ jobs:
       - name: Ping Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python prototype/api/ping_supabase.py
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: python scripts/ping_supabase.py
