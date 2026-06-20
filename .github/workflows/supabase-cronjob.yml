@@ -1,0 +1,47 @@
+# DORMANT: GitHub Actions is currently disabled on this account (billing).
+# This workflow will not run until Actions is re-enabled.
+# The actual keepalive mechanism is Supabase's pg_cron job "keepalive-ping" (see migrations/ or Supabase dashboard).
+# Keeping this file so it's ready to use once Actions returns.
+
+# This workflow keeps the Supabase free-tier project alive.
+# Free projects pause after 7 days of inactivity — this ping prevents that.
+name: Supabase Cron Ping
+
+on:
+  # Run automatically on a schedule (UTC time).
+  # Cron syntax: minute hour day-of-month month day-of-week
+  # "0 0 */3 * *" = midnight UTC, every 3 days.
+  schedule:
+    - cron: "0 0 */3 * *"
+
+  # Also allow triggering this workflow manually from the GitHub Actions UI.
+  workflow_dispatch:
+
+jobs:
+  ping:
+    # The type of machine to run this job on.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository so the runner has access to the code.
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Step 2: Install the Python version the project targets.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Step 3: Install the project's db dependencies (supabase + python-dotenv).
+      - name: Install dependencies
+        run: pip install -e ".[db]"
+
+      # Step 4: Run the ping script.
+      # Secrets are stored in GitHub → Settings → Secrets and variables → Actions.
+      # They are injected as environment variables at runtime and never logged.
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: python scripts/ping_supabase.py
