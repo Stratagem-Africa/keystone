@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from keystone.provenance import Grounding  # evidence types (pure stdlib; no cycle)
+
 
 class ComponentKind(str, Enum):
     CLIENT = "client"
@@ -42,7 +44,19 @@ class Component:
     instances: int = 1
     base_latency_ms: float = 1.0      # service time with no contention
     monthly_cost_per_instance: float = 0.0
-    provenance: str = "assumption"    # GROUNDED | GAP | ASSUMPTION
+    provenance: str = "assumption"    # component default: GROUNDED | GAP | ASSUMPTION
+    # Per-metric grounding evidence (ADR-006/docs/12). A capacity becomes GROUNDED only when the
+    # KB attaches a `Grounding` (value + band + citations) under that metric name; otherwise the
+    # metric keeps the component `provenance` default. Empty = nothing grounded (the honest L0 state).
+    # Set at construction (immutable evidence); the engine NEVER reads it (prime directive — grounding
+    # changes the input number, never the math). `scaled()` shares components, which is correct: a
+    # what-if keeps the same capacities, so the same groundings apply.
+    groundings: dict[str, Grounding] = field(default_factory=dict)
+
+    def provenance_of(self, metric: str) -> str:
+        """GROUNDED if this metric carries grounding evidence, else the component default."""
+        g = self.groundings.get(metric)
+        return g.provenance if g else self.provenance
 
     @property
     def capacity_rps(self) -> float:

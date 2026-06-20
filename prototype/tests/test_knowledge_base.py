@@ -28,10 +28,10 @@ class TestStubAndFactory(unittest.TestCase):
                 self.assertIsNone(kb.ground(kind, metric),
                                   f"stub must ground nothing, but grounded {kind}/{metric}")
 
-    def test_unbuilt_providers_are_gated(self):
-        for p in ("curated", "rag"):
-            with self.assertRaises(NotImplementedError):
-                make_knowledge_base(p)
+    def test_rag_provider_still_gated(self):
+        # 'curated' is now built (see test_benchmark_corpus); only 'rag' (pgvector) stays gated.
+        with self.assertRaises(NotImplementedError):
+            make_knowledge_base("rag")
 
     def test_unknown_provider_rejected(self):
         with self.assertRaises(ValueError):
