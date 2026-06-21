@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  /* ─── Surfaces ─────────────────────────────────────────────────────────── */
+  --color-slate-ink:  #0E1622; /* primary dark surface — "instrument, not terminal" */
+  --color-paper:      #F7F8FA; /* primary light surface — reading / report mode */
+  --color-graphite:   #1B2736; /* elevated panels on dark */
+  --color-steel:      #2A3A4D; /* card strokes, table rules on dark */
+  --color-mist:       #E3E8EF; /* hairlines, disabled states on light */
+
+  /* ─── Meaning colors — LOAD-BEARING, never decorative (docs/09 §2.4) ──── */
+  --color-grounded-green:   #2FB67C; /* EXCLUSIVELY: GROUNDED / high-confidence */
+  --color-assumption-amber: #E8A33D; /* EXCLUSIVELY: ASSUMPTION / GAP / "where this is wrong" */
+
+  /* ─── Confidence gradient midpoint (amber → teal → green) ──────────────── */
+  --color-confidence-teal: #36A0A6;
+
+  /* ─── Support colors ────────────────────────────────────────────────────── */
+  --color-signal-red:     #E5484D; /* failure / SPOF / high-stakes domain flags */
+  --color-architect-blue: #4C7DF0; /* interactive / links / council-voice attribution */
+  --color-dissent-indigo: #3B4C8A; /* recorded dissent — minority report */
+  --color-ink-muted:      #8A98A8; /* secondary text, provenance metadata */
+
+  /* ─── Fonts — wired from CSS variables set in layout.tsx ───────────────── */
+  /* Rule: serif = model reasoned it · mono = engine computed it · sans = chrome */
+  --font-sans:  var(--font-inter);       /* grotesque: wordmark, labels, chrome */
+  --font-serif: var(--font-newsreader);  /* serif: report prose, ADR rationale */
+  --font-mono:  var(--font-geist-mono);  /* mono: every engine number and metric */
+
+  /* ─── Type scale — major-third (×1.250), 16px base (docs/09 §2.5) ──────── */
+  --text-display:    clamp(3.052rem, 5vw, 3.815rem); /* verdict / hero — 49–61px */
+  --text-h1:         2.441rem;  /* 39px */
+  --text-h2:         1.953rem;  /* 31px */
+  --text-h3:         1.563rem;  /* 25px */
+  --text-body:       1.188rem;  /* 19px — generous, document-grade reading */
+  --text-label:      0.875rem;  /* 14px — UI labels, table headers */
+  --text-mono-data:  0.938rem;  /* 15px — engine numbers, band labels */
+  --text-provenance: 0.75rem;   /* 12px — provenance pills */
+
+  /* ─── Line heights ──────────────────────────────────────────────────────── */
+  --text-body--line-height: 1.65; /* document-grade reading comfort */
+
+  /* ─── Motion — "instruments settle, they don't bounce" (docs/09 §2.6) ──── */
+  --ease-settle:    cubic-bezier(0.2, 0.8, 0.2, 1); /* critically-damped settle */
+  --duration-ui:    220ms;  /* standard UI interactions */
+  --duration-band:  420ms;  /* confidence band reveal */
+}
