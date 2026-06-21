@@ -1,0 +1,65 @@
+# Keystone — Prior Art: Genesys-Simulator
+
+**Doc:** 13 · **Status:** Proposal (open to revision) · **Date:** 2026-06-21 · **Owner:** Keystone A (Bifola)
+**Relates to:** `docs/02` (System Architecture — the *DES-is-v2* GAP, §8), `docs/03` (Accuracy & Trust Charter — fail-closed, no-bare-numbers), `docs/12 §8` (the prior-art house style this mirrors — SQuADDS), CLAUDE.md (prime directive; harm floor; YAGNI lane; $0 cost rule).
+**Scope:** lessons mined from **[Genesys-Simulator](https://github.com/rlcancian/Genesys-Simulator)** — a C++23 discrete-event simulation *platform* (Arena/SIMAN lineage) that *also* carries an LLM assistant layer — and how they bear on Keystone. Verified against the source tree.
+**Method & provenance:** mined and **adversarially verified** (each lesson checked for truth, citation-resolution, prime-directive safety, and YAGNI fit; 3 of 43 candidate lessons were dropped or corrected). Genesys references are `Genesys path:line` against the **master snapshot dated 2026-06-15**; line numbers may drift, so each cites a symbol/concept too. Keystone references are normal `file:line` and resolve in this tree.
+
+---
+
+## 1. Why Genesys is a useful mirror (a double one)
+
+Genesys-Simulator is *"a generic and expansible system simulator"* — not a fixed tool with a closed block set, but a kernel + plugin platform. Different lineage and language from Keystone; the **architecture and the trust-boundary discipline map directly**, and it mirrors us on two independent axes at once:
+
+1. **It is a working reference implementation of the v2 DES engine Keystone deferred.** `docs/02-System-Architecture.md:89` lists "No DES engine in v1 → analytical model now; DES in v2" as a named GAP, and `docs/02:58` even name-checks SysSimulator's DES. Genesys *is* that deferred engine, in the open.
+2. **It made the same prime-directive bet** — an LLM layer bolted onto a deterministic numeric engine — and we can read exactly where it drew (or blurred) the boundary that is Keystone's reason to exist.
+
+It is also a **cautionary tale on scope**: it grew into a multi-paradigm platform (DES + FSM/EFSM + cellular automata + ODE + Markov + SPICE + biochemistry + whole-cell), and its own audits record the cost.
+
+---
+
+## 2. What it confirms about our strategy
+
+- **The prime directive is what a mature numeric simulator converges on — not a self-imposed handcuff.** Genesys's AI assistant builds its results table by reading each metric straight off the deterministic engine's `SimulationResponse` objects and printing the value unchanged (`Genesys source/tools/AIAssistant/AIAssistantDefaultImpl.cpp:1475`); the LLM is bounded to emit model *text* and prose (`Genesys source/tools/AIAssistant/AIAssistant_if.h:494`), and the MCP server's number-producing tools are thin pass-throughs to deterministic endpoints (`Genesys source/applications/mcp/genesys_mcp/server.py:270`). That is independent, real-world validation of `CLAUDE.md` ("the LLM reasons; the deterministic engine computes") and `prototype/keystone/simulation.py:1-4`. *(Notably, Genesys's LLM layer is itself still **stub-stage** — `Genesys source/tools/AIAssistant/AIAssistant_if.h:496`: "Stage 3 will implement actual LLM calls. Current stub returns NotImplemented" — exactly like our stub-default `COUNCIL_PROVIDER`/`INGEST_PROVIDER`: the AI seam is built behind an interface and left inert.)*
+- **Deferring DES to v2 was correct, and the v2 build is a small, well-understood kernel — not a moonshot.** The whole engine is a chronologically-sorted future-event calendar (`Genesys source/kernel/simulator/model/Model.h:312` — *"the calendar of future events… one of the most important structures"*) plus a step loop that pops the front event, advances simulated time, dispatches, and may enqueue more events (`Genesys source/kernel/simulator/model/ModelSimulation.cpp:189` — *"this is the main simulation loop"*). That is exactly the mechanism our single-pass M/M/1 (`prototype/keystone/simulation.py:84`) collapses away. De-risks the GAP at `docs/02:89` without reopening it.
+- **Our honesty contract is independently corroborated.** Genesys **fails closed to `NaN`** rather than emit a fake zero confidence band on insufficient samples (`Genesys source/kernel/statistics/StatisticsDefaultImpl1.cpp:113` — *"Propagate undefined dispersion and confidence settings as NaN instead of fragile default zeros"*), re-audits code with a per-item Evidence subsection (`Genesys documentation/kernel-memory-leak-review-2026-03-30.md`), and reports BLOCKED rather than a soft pass when validation can't run (`Genesys documentation/post-refactor-validation-report.md`). These mirror our provenance grammar and `docs/03:51` ("fail closed on confidence").
+- **Hold the narrow lane — Genesys is the counterexample.** Multi-paradigm breadth left, by its own plugin audit, ~24 of 41 components at priority-0 with core methods missing — *including its number-producers* (SPICE, LSODE, ODE, MarkovChain) (`Genesys documentation/plugin_components_method_matrix.md`); and a depth-before-calibration sim reports "✅ Runs successfully" while a key output is ~38× wrong, with caveats buried below the green check (`Genesys documentation/developersCommunication/whole_cell_biosimulator_project.md`). That is precisely the confidently-wrong failure the accuracy ladder (`docs/03:25-30`) exists to prevent.
+
+---
+
+## 3. Concrete upgrades folded into the plan
+
+### ADOPT-NOW — small, $0, stdlib, in-lane (landed in this PR)
+
+- **✅ Orphan-detection in `validate_model`.** Keystone validated fields but not topology, so a component on no flow received zero arrivals and a misleading 0% utilisation (`prototype/keystone/simulation.py` `_arrivals` seeds every component to `0.0`). Genesys runs structural connectivity *before* simulating (`Genesys source/kernel/simulator/model/ModelCheckerDefaultImpl1.cpp`). Now `prototype/keystone/ingestion.py` `orphan_components()` + `validate_model(..., require_connected=True)` fail closed on an orphan. **Verified caveat (the adversarial pass caught it):** we adopted *only* the orphan half — a companion "sink-termination" check would have falsely rejected the real `ticket_booking` browse flow, which legitimately ends at a `REPLICA` (`prototype/keystone/blueprints/ticket_booking.py:53-56`). Reconciliation opts out (`require_connected=False`) and instead surfaces each unwired component as a **soft conflict** (`prototype/keystone/reconciliation.py`) — visible, never silently simulated, never hard-halting an otherwise-valid merge (flow-merge stays a v2 lever, ADR-004). **Activation note (ADR-002):** because `ClaudeIngestor` validates its single extracted model strictly, real ingestion now **fails closed** when the LLM lists a component it forgot to wire into a flow (a common extraction slip) — the "before any real upload" gate should account for this (pinned by `tests/test_ingestion.py::test_orphan_component_from_llm_raises`). `validate_model` also now rejects a flow-less model outright, so the engine can never hit an empty-`max()` on a path-less model.
+- **✅ A smoke-test tier in the gate.** `prototype/tests/test_smoke_e2e.py` runs the offline `intent → ingest → council → simulate → report` loop on stub providers and asserts the report's mandatory sections (incl. "Where this is wrong") — **structure only, never a metric value**. Mirrors Genesys's deliberate unit/smoke split (`Genesys documentation/kernel-tests-build-roadmap-2026-1.md`). Protects CLAUDE.md's load-bearing offline-loop promise via `scripts/check.sh`.
+- **✅ A generated "show your work" trace.** `SimulationResult.derivation` (`prototype/keystone/simulation.py`) records the deterministic steps that produced each headline number (arrivals → ρ → bottleneck → breakpoint → latency → percentiles), rendered as a "How these numbers were computed" section in `prototype/keystone/report.py`. It restates the engine's own output as provenance — it never introduces a number the engine did not produce, and no LLM is involved. Genesys's `TraceManager` is the reference (`Genesys source/kernel/simulator/TraceManager.h`); we took the idea, not its 10-level channel machinery. Complements the "Where this is wrong" caveats (how-computed vs where-wrong) and advances `docs/03:17` ("no bare numbers").
+
+### V2-REFERENCE — banked behind an ADR; do not build now
+
+- **The DES kernel itself** — an event-calendar + step loop in the `simulation.py` lineage, as the *only* number-producer (`Genesys Model.h:312`, `ModelSimulation.cpp:189`). Tied to the `docs/02:89` GAP.
+- **Replications + warm-up + a replication-derived confidence interval** to replace the heuristic `_confidence(rho_max)` string (`simulation.py:_confidence`). Genesys derives a t-distribution half-width across replications (`Genesys StatisticsDefaultImpl1.cpp:113`). Meaningful only once stochastic sampling exists; the *earned* band is the L1→L2 calibration deliverable (`docs/03 §5`), not a port of replication machinery the analytical engine has no input for.
+- **An explicit, surfaced RNG seed** recorded in provenance — Genesys hardcodes its seed and never re-seeds per replication (`Genesys source/kernel/statistics/SamplerDefaultImpl1.h`), the anti-pattern to avoid when v2 stochastic sampling lands.
+- **JSON-first design-as-code export** over the dataclasses for the Canonical Model Store (`docs/02:56`) — never a hand-rolled DSL: Genesys's `.gen` parser still leaks silent wrong answers years in (`Genesys source/parser/PARSER_ANALYSIS.md`).
+- **The polymorphic provider-client seam** (transport core + thin per-provider adapters; Local needs no key, for the $0 path) — only when a second backend is ADR-funded (`Genesys source/tools/AIAssistant/AIProviderClient_if.h`).
+- **Granular deny-by-default capability flags + an append-only AI audit log** at council/ingestor activation. Genesys's four permission booleans default `false` (`Genesys AIAssistant_if.h:96-99`) and every LLM call writes a key-free JSONL audit entry (`Genesys source/tools/AIAssistant/AIAuditLog.h:18-31`). These harden the ADR-002 "before any real upload" gate — but `simulate()` must **never** sit behind an LLM-grantable flag.
+- **A factorial-sweep structure for F6 what-ifs** that runs the *real engine* at each grid point and **never fits a response surface** (a fitted surface would emit a non-engine number).
+- **A phase-gated, audited ADR-003 delivery layer** (versioned `/api/v1`, real JSON parser, payload/timeout/auth limits before any run endpoint), pre-empting Genesys's web-roadmap PARTIAL findings (`Genesys documentation/web-application-roadmap-2026-03-30.md`).
+
+### REFUSE — anti-patterns, with the receipt
+
+- **Multi-paradigm breadth** before depth (`Genesys plugin_components_method_matrix.md`). Hold the v1 single-paradigm freeze (`CLAUDE.md`).
+- **Embedded executable code in the model** — Genesys's `PythonForG` runs user code at dispatch time (`Genesys source/plugins/components/ExternalIntegration/PythonForG.h`). Maximal violation of both non-negotiables at once: keep `Component` strictly declarative (`prototype/keystone/model.py:39`); forbid any code/expression field on import.
+- **Warm-up / transient / replication-reset logic on the steady-state analytical engine** (cargo-culting DES machinery onto a closed form).
+- **A custom DSL + parser**, a **fitted DOE response surface**, and **commercial/licence gating inside the model validator** (`Genesys source/kernel/simulator/model/ModelCheckerDefaultImpl1.cpp`).
+- **Any "preview"/"estimated" number rendered by an orchestration or UI layer without running `simulate()`** — Genesys's optimizer GUI shows "a simple progress plot fed by safe preview values while the backend still has no real algorithm" (`Genesys documentation/developersCommunication/optimizer-workstation-roadmap-2026-04-16.md`). A plausible figure no engine computed is the exact failure mode to never reproduce.
+
+---
+
+## 4. The one line we must guard (and Genesys mostly did)
+
+Genesys's number-producing paths read the metric off the engine and print it unchanged (`Genesys AIAssistantDefaultImpl.cpp:1475`); the LLM produces structure and prose, the engine produces every number — our prime directive, **proven viable at full DES scale**. The one place Genesys *blurred* it (a UI plot "fed by safe preview values" with no backend algorithm) is the warning we encode. So we borrow Genesys's **mechanisms** — the event calendar, replication statistics, the fail-closed `NaN`, the audit log, the deny-by-default flags — but never let any of them become a path by which a value is *born* or *mutated* outside `simulation.py`. Every future seam (the v2 DES, a what-if sweep, a remote `/api/v1/simulation/run`, an LLM prose summary) must read engine-produced values **by typed field** and never re-derive, estimate, or preview a metric.
+
+---
+
+*This is a proposal for Bifola to ratify. The three ADOPT-NOW items shipped in this PR are small, $0, stdlib, and offline, and change no v1 scope; every V2-REFERENCE item remains gated behind its own ADR.*

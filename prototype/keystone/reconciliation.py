@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from keystone.ingestion import IngestError, IngestResult, validate_model
+from keystone.ingestion import IngestError, IngestResult, orphan_components, validate_model
 from keystone.model import Assumption, SystemModel, Workload
 
 
@@ -188,8 +188,21 @@ def reconcile(results: list[IngestResult]) -> ReconciliationOutcome:
         assumptions=assumptions, domain_flags=domain_flags)
 
     gaps = _detect_gaps(merged)
+
+    # A component contributed by a source whose flows were NOT merged is left unwired
+    # (flow-merge across prose is a v2 lever, ADR-004). The engine would silently report it
+    # at 0% utilisation, so surface each orphan as a SOFT conflict — visible to the user,
+    # never auto-dropped — rather than hard-halting the otherwise-valid merge.
+    for cid in orphan_components(merged):
+        conflicts.append(Conflict(
+            subject=cid, kind="unwired-component", a_ref="merged model",
+            a_value="on no flow (engine would show a misleading 0% utilisation)",
+            b_ref="resolve", b_value="wire it into a flow or drop it; flow-merge is a v2 lever (ADR-004)",
+            severity="soft"))
+
     try:
-        validate_model(merged)   # fail closed: never hand the engine a bad merged model
+        # Orphans are flagged above as soft conflicts, so don't let them hard-halt the merge.
+        validate_model(merged, require_connected=False)   # fail closed on every OTHER structural fault
     except IngestError as e:
         conflicts.append(Conflict("merged-model", "invalid", "validation", str(e), "-", "-", "hard"))
         return ReconciliationOutcome(None, ReconciliationReport(conflicts, gaps, duplications), halted=True)

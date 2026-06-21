@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from keystone.ingestion import IngestResult, Source, ingest_corpus, validate_model
+from keystone.ingestion import IngestError, IngestResult, Source, ingest_corpus, validate_model
 from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
 from keystone.reconciliation import reconcile, render_reconciliation_report
 
@@ -46,7 +46,17 @@ class TestReconcile(unittest.TestCase):
         self.assertFalse(out.halted)
         self.assertEqual(set(out.model.components), {"lb", "app", "db"})
         self.assertEqual(out.report.hard_conflicts, [])
-        validate_model(out.model)  # does not raise
+        # m2 contributed `db` but no flow, so it is unwired in the merged model: kept (never
+        # auto-dropped) but surfaced as a SOFT conflict so it is never silently simulated at 0%.
+        unwired = [c for c in out.report.conflicts if c.kind == "unwired-component"]
+        self.assertTrue(unwired and unwired[0].subject == "db", "orphan db should be flagged")
+        self.assertEqual(unwired[0].severity, "soft")  # MUST be soft: never hard-halt, never auto-drop
+        self.assertEqual(out.report.hard_conflicts, [])
+        # The merged model is structurally sound apart from the flagged orphan; strict
+        # connectivity (the single-model engine contract) correctly rejects that orphan.
+        validate_model(out.model, require_connected=False)  # does not raise
+        with self.assertRaises(IngestError):
+            validate_model(out.model)  # strict: an unwired component must not reach the engine
 
     def test_hard_conflict_kind_mismatch_halts(self):
         m1 = _model("A", [_comp("store", K.SQL_DB)], [Flow("f", 1.0, [FlowStep("store")])])

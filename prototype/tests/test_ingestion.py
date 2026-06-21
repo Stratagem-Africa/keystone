@@ -20,8 +20,8 @@ from keystone.report import render
 from keystone.simulation import simulate
 from keystone.ingestion import (
     ClaudeIngestor, DeterministicStubIngestor, IngestError, Source,
-    build_envelope, detect_high_stakes, make_ingestor, scan_and_redact_secrets,
-    validate_model, _FENCE, _FENCE_END, _MAX_DOC_CHARS,
+    build_envelope, detect_high_stakes, make_ingestor, orphan_components,
+    scan_and_redact_secrets, validate_model, _FENCE, _FENCE_END, _MAX_DOC_CHARS,
 )
 
 _CLEAN = json.dumps({
@@ -223,6 +223,23 @@ class TestFailClosedValidation(unittest.TestCase):
         with self.assertRaises(IngestError):
             self._ingest({"components": [], "flows": []})
 
+    def test_orphan_component_from_llm_raises(self):
+        # The LLM lists a component it never wires into a flow (a common extraction slip — e.g.
+        # naming a monitoring/logging node). With at least one flow present, _build_model does NOT
+        # synthesize a catch-all flow, so the unwired component is a fatal orphan: the single-model
+        # contract fails closed rather than hand the engine a model that would show it at a
+        # misleading 0% utilisation. (Pins the real-path behaviour change; see docs/13 ADOPT-NOW.)
+        with self.assertRaises(IngestError):
+            self._ingest({
+                "name": "x",
+                "workload": {"system_rps": 1000, "description": "x"},
+                "components": [
+                    {"id": "app", "kind": "app_server", "per_instance_rps": 1000},
+                    {"id": "monitoring", "kind": "external_api", "per_instance_rps": 1000},
+                ],
+                "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "app"}]}],
+            })
+
     def test_no_json_object_raises(self):
         with self.assertRaises(IngestError):
             make_ingestor("claude", model="m", client=FakeLLM("there is no json here")).ingest(Source(text="x"))
@@ -291,6 +308,25 @@ class TestADR002ReviewFixes(unittest.TestCase):
         m.components["a"].instances = 10
         with self.assertRaises(IngestError):
             validate_model(m)
+
+    def test_validate_rejects_orphan_component(self):
+        # 'ghost' is on no flow -> the engine would report a misleading 0% utilisation.
+        m = SystemModel(
+            name="x",
+            components={
+                "a": Component("a", ComponentKind.APP_SERVER, "A", per_instance_rps=1000.0),
+                "ghost": Component("ghost", ComponentKind.CACHE, "Ghost", per_instance_rps=1000.0),
+            },
+            flows=[Flow("f", 1.0, [FlowStep("a")])], workload=Workload(100.0))
+        self.assertEqual(orphan_components(m), ["ghost"])
+        with self.assertRaises(IngestError):
+            validate_model(m)
+        # the connectivity check is opt-out (reconciliation flags orphans as soft conflicts).
+        validate_model(m, require_connected=False)  # does not raise
+        # once wired, it validates strictly too.
+        m.flows.append(Flow("g", 0.0, [FlowStep("ghost")]))
+        self.assertEqual(orphan_components(m), [])
+        validate_model(m)  # does not raise
 
     def test_duplicate_component_id_raises(self):
         payload = json.dumps({

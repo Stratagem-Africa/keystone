@@ -86,6 +86,6 @@ Buy: LLM (Claude), auth, object storage, vector store. Build: ingestion/reconcil
 
 ## 8. Known gaps (`GAP` — shortfall + fix)
 
-- No DES engine in v1 → analytical model now; DES in v2 (`GAP`: fidelity ceiling on complex async topologies until then).
+- No DES engine in v1 → analytical model now; DES in v2 (`GAP`: fidelity ceiling on complex async topologies until then). **Reference design:** [Genesys-Simulator](https://github.com/rlcancian/Genesys-Simulator) is an open-source DES platform whose kernel (a chronologically-sorted future-event calendar + a step loop) is the concrete shape this deferred engine would take; it independently validates the same LLM-reasons/engine-computes boundary and is a cautionary tale on scope. Lessons (ADOPT-NOW / V2-REFERENCE / REFUSE) are mined and verified in `docs/13-Prior-Art-Genesys.md`.
 - No eval harness yet for council output quality → Doc 03 defines it; build before external traffic (`GAP`).
 - Knowledge Base unbuilt → curate a seed corpus before first real design (`GAP`).
