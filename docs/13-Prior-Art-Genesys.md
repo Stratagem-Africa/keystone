@@ -62,4 +62,6 @@ Genesys's number-producing paths read the metric off the engine and print it unc
 
 ---
 
+**Where these lessons now live (folded into the owning docs; this doc stays the cited rationale):** the engine's derivation trace + the v2 DES reference design → `docs/02 §4`; LLM-layer capability gating → `docs/02 §6`; the "show your work" transparency mechanism + the confidence-band mechanism (heuristic now → replication-derived interval later) → `docs/03 §2-3`; the F5 validated/derivation run and the F6 factorial-sweep discipline → `docs/04`; the v2 DES kernel + replication intervals + surfaced seed → `docs/06` Phase 3.
+
 *This is a proposal for Bifola to ratify. The three ADOPT-NOW items shipped in this PR are small, $0, stdlib, and offline, and change no v1 scope; every V2-REFERENCE item remains gated behind its own ADR.*

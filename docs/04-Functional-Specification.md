@@ -42,11 +42,11 @@ Decisions covered: language/framework/libraries, datastore, cache, pub/sub, comp
 
 ## F5 · Simulation (`FR-5`)
 
-Deterministic analytical run of the single-region core (LB, app servers, SQL + replicas, cache, queue, object store). Outputs, **each with model + confidence band**: bottleneck component, breakpoint (max sustainable load), p50/p95/p99 per path, SPOFs, headroom before re-architecture, rough multi-cloud monthly cost.
+Deterministic analytical run of the single-region core (LB, app servers, SQL + replicas, cache, queue, object store). Outputs, **each with model + confidence band**: bottleneck component, breakpoint (max sustainable load), p50/p95/p99 per path, SPOFs, headroom before re-architecture, rough multi-cloud monthly cost. Every figure is accompanied by a generated **derivation** ("how these numbers were computed" — the engine's own steps, not prose; `docs/13`). The v1 band is a heuristic; the v2 DES upgrade replaces it with **replication-derived intervals** (`docs/13`, Doc 03 §3). The model is **fail-closed validated** before the run — including connectivity, so an orphan component can never surface a misleading 0% utilisation (`docs/13`).
 
 ## F6 · What-if interrogation (`FR-6`)
 
-User mutates inputs — "10× traffic", "kill Postgres", "add a read replica", "swap to a queue" — and Keystone re-simulates, showing the **delta** and which ADRs are affected. This is the retention feature; it must feel instant and playful.
+User mutates inputs — "10× traffic", "kill Postgres", "add a read replica", "swap to a queue" — and Keystone re-simulates, showing the **delta** and which ADRs are affected. This is the retention feature; it must feel instant and playful. A systematic multi-variable sweep (a factorial design over inputs — a v2 lever) re-runs the **real engine at every grid point**; Keystone never fits a response surface or interpolates a metric, which would emit a number the engine did not compute (`docs/13`, REFUSE).
 
 ## F7 · Outputs & export (`FR-7`)
 

@@ -14,7 +14,7 @@ Therefore Keystone's correctness standard is not "pristine." It is **calibrated,
 ## 2. The four pillars of trust
 
 1. **Separation — the LLM reasons, the engine computes (`MUST`).** No metric ever originates from the language model. Numbers come only from the deterministic engine; the model parameterises and explains. A reviewer can always trace a number to a formula, not a generation.
-2. **Transparency — no bare numbers (`MUST`).** Every quantitative output ships with: the **model/formula** used, the **assumptions** it rests on (each editable), and a **confidence band**. We copy SysSimulator's discipline of an explicit "where this is wrong" section on every report.
+2. **Transparency — no bare numbers (`MUST`).** Every quantitative output ships with: the **model/formula** used, the **assumptions** it rests on (each editable), and a **confidence band**. We copy SysSimulator's discipline of an explicit "where this is wrong" section on every report. The engine also emits a generated **"how these numbers were computed" derivation** — its own deterministic steps, never prose — so provenance is *shown*, not asserted (`docs/13`, ADOPT-NOW; prior art: Genesys's execution trace).
 3. **Provenance — honesty by tag (`MUST`).** Per the Playbook, every claim is `GROUNDED` (a benchmark or calibrated datum proves it), `GAP` (right standard, not yet met — states the shortfall), or `ASSUMPTION` (unverified). The product **never** renders an `ASSUMPTION` as `GROUNDED`.
 4. **Calibration — earned, not asserted (`MUST` over time).** Accuracy improves only by comparing predictions to reality and tightening the model. This is the moat and the path to enterprise-grade.
 
@@ -28,6 +28,8 @@ Therefore Keystone's correctness standard is not "pristine." It is **calibrated,
 | L3 | **Enterprise-grade** | Field-calibrated **and** independently auditable; accuracy SLAs per domain; reproducible; SOC2-adjacent controls. The Fortune-500 bar. | External audit + sustained measured accuracy + security posture. |
 
 **v1 ships at L0 and says so.** "Elite correctness" is **L3 — a destination reached through L1→L2, not a launch claim.** Marketing that skips levels is prohibited by NFR-2.
+
+> **On confidence bands (the mechanism).** v1's band is a utilisation-derived *heuristic*, not a statistical interval. The **earned** band comes later — from the v2 DES engine's **replications** (a t-interval across runs) and from field calibration (L2) — and never from an LLM. The engine **fails closed** (no fake zero band on insufficient data) rather than imply false precision. Both mechanisms are corroborated by prior art (Genesys's DES + statistics layer, `docs/13`).
 
 ## 4. How accuracy is measured (the eval harness — `MUST` before external traffic)
 
