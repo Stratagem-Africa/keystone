@@ -31,7 +31,7 @@ Therefore Keystone's correctness standard is not "pristine." It is **calibrated,
 
 ## 4. How accuracy is measured (the eval harness — `MUST` before external traffic)
 
-- **Simulation eval.** A fixed library of reference systems with known/benchmarked behaviour; the engine's predictions are scored against them; per-component error envelopes are published and regression-tested (deterministic, seeded — Playbook `QUA-EN`).
+- **Simulation eval.** A fixed library of reference systems with known/benchmarked behaviour; the engine's predictions are scored against them; per-component error envelopes are published and regression-tested (deterministic, seeded — Playbook `QUA-EN`). The published envelope is a **per-(reference-system × metric) error table** under an explicit metric (e.g. MAPE) — never a single headline accuracy number — and **scoped to a stated support matrix** (the configurations it was validated on). *Worked reference (prior art):* Alibaba's [Tair KVCache HiSim](https://github.com/alibaba/tair-kvcache) predicts LLM-inference latency/throughput from trace replay and reports a per-(model × cache-tier × metric) MAPE table with errors <5%, explicitly bounded to *SGLang v0.5.6.post2 / Qwen3 / H20* — the exact shape to copy when this harness is built (a deeper study of its design is deferred to that point).
 - **Council eval.** A graded set of design problems with expert-reviewed "good answers"; the council's recommendations are scored for soundness, and — critically — for **calibration of its own confidence** (does stated confidence match hit rate?). Blind peer review is used to reduce sycophancy/herding.
 - **Reconciliation eval.** Document sets with planted conflicts; measured on whether Keystone surfaces every conflict (recall) without inventing false ones (precision).
 - **Hallucination guard (Overlay G).** Any council claim citing a benchmark/precedent that does not resolve in the Knowledge Base is dropped and the dependent recommendation re-derived (`AIE-K4-01`: a citation that doesn't resolve is *invented*).
@@ -42,6 +42,8 @@ Therefore Keystone's correctness standard is not "pristine." It is **calibrated,
 2. Users (incentivised) report real-world actuals — a load test, a production metric.
 3. Aggregated deltas correct the component models and tighten confidence bands.
 4. Published accuracy improves; new users inherit a sharper model. The dataset compounds and **cannot be bought** by an incumbent.
+
+> **Calibration must stay inspectable, and must not breach the prime directive.** Corrections are **explicit, auditable factors** (per component/metric), not an opaque re-fit — a reviewer can see *why* a number moved. Prior art: HiSim corrects predictions with named `prefill/decode_scale_factor` calibration constants that adjust predicted latency, with real-world request **traces** as the actuals source. The invariant: calibration only adjusts the engine's **inputs / correction factors**, never the math — the deterministic engine stays the sole producer of numbers (§2 pillar 1).
 
 ## 6. Trust guardrails (what Keystone refuses to do)
 
