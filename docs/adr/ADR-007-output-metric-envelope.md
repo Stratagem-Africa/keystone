@@ -1,6 +1,6 @@
 # ADR-007 — Output `Metric` envelope (close the input/output honesty asymmetry)
 
-**Status:** **Proposed** — awaiting Bifola ratification; **not applied**. Touches the trust-critical engine output + report rendering, so per CLAUDE.md (schema / trust core) **AI proposes, a human ratifies**; it must land via branch → PR → review gate with an invariant test, never self-applied.
+**Status:** **Accepted & implemented** (2026-06-22) — ratified by Bifola. Of the two open calls: chose the **parallel `metrics: dict[str, Metric]`** (additive, low blast-radius) over retyping every field, and the report renders a **"Headline metrics (model · confidence)"** table. The engine-only-construction invariant is enforced by `prototype/tests/test_metric_envelope.py`. At L0 the numeric band stays `None` (no fabrication), as designed.
 **Date:** 2026-06-22 · **Owner:** Keystone A (Bifola)
 **Relates to:** `docs/03` §2 pillar 2 ("Transparency — no bare numbers") + the §3 "On confidence bands" note, `docs/12` §2 ("two confidence axes — keep them separate"), `prototype/keystone/simulation.py` (the sole number producer), `prototype/keystone/provenance.py` (the input-side `Grounding` envelope this mirrors), CLAUDE.md (prime directive; accuracy honesty).
 **Prior art:** the multi-repo study (`docs/13` lineage) — gem5's typed self-describing statistics (every metric is an object carrying value + unit + description, never a bare float) and HiSim's "a number never travels without its model + scope."
