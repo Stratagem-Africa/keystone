@@ -13,7 +13,7 @@ export function IntentForm() {
   const [formState, setFormState] = useState<FormState>("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!brief.trim()) return;
     setFormState("submitting");
@@ -77,9 +77,11 @@ export function IntentForm() {
           Attach a document{" "}
           <span className="normal-case tracking-normal">(optional)</span>
         </label>
-        <div
+        {/* button not div — gets Tab focus + Enter/Space activation + screen reader announcement for free */}
+        <button
+          type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="cursor-pointer rounded-lg border border-dashed border-assumption-amber px-4 py-6 text-center transition-all ease-settle duration-ui hover:bg-assumption-amber/5"
+          className="w-full cursor-pointer rounded-lg border border-dashed border-assumption-amber px-4 py-6 text-center transition-all ease-settle duration-ui hover:bg-assumption-amber/5"
         >
           {file ? (
             <p className="font-mono text-mono-data text-slate-ink">{file.name}</p>
@@ -88,7 +90,7 @@ export function IntentForm() {
               Click to attach a PDF, Markdown, or text file
             </p>
           )}
-        </div>
+        </button>
         <input
           ref={fileInputRef}
           type="file"
@@ -104,7 +106,7 @@ export function IntentForm() {
         disabled={!brief.trim() || formState === "submitting"}
         className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {formState === "submitting" ? "Sending…" : "Describe what you’re building →"}
+        {formState === "submitting" ? "Sending…" : "Send to ingestion →"}
       </button>
 
     </form>
