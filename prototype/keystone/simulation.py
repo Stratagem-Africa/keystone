@@ -180,7 +180,7 @@ def _metrics(
         "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
-        "monthly_cost": Metric(monthly_cost, "usd_per_month", "sum of component monthly compute cost",
+        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", "sum of component monthly compute cost",
                                confidence, caveats=("compute/instance only; no egress/managed pricing",)),
     }
 

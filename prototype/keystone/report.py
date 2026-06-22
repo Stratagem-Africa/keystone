@@ -53,7 +53,7 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"- **Latency (dominant path):** p50 ~{sim.p50_ms:.0f} ms · "
              f"p95 ~{sim.p95_ms:.0f} ms · p99 ~{sim.p99_ms:.0f} ms (mean {sim.mean_latency_ms:.0f} ms)")
     L.append(f"- **Single points of failure:** {', '.join(sim.spofs) if sim.spofs else 'none detected'}")
-    L.append(f"- **Estimated compute cost:** ~${sim.monthly_cost:,.0f}/month")
+    L.append(f"- **Estimated compute cost:** ~${sim.monthly_cost / 100:,.0f}/month")  # cost is cents (ADR-008)
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
@@ -69,8 +69,8 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
                 val = f"{_fmt_rps(m.value)} req/s"
             elif m.unit == "ratio":
                 val = f"{m.value * 100:.0f}%"
-            elif m.unit == "usd_per_month":
-                val = f"${m.value:,.0f}/mo"
+            elif m.unit == "usd_minor_per_month":
+                val = f"${m.value / 100:,.0f}/mo"  # value is integer cents (ADR-008)
             else:
                 val = f"{m.value:,.0f} ms"
             short_conf = m.confidence.split("(")[0].strip()

@@ -69,7 +69,10 @@ def score_blueprint(key: str, build_fn, ref_rps: float) -> ScoreCard:
     model = build_fn()
     sim = simulate(model)
 
-    verdict, factor = _cost_verdict(sim.monthly_cost, lo, hi)
+    # Engine cost is integer minor units (cents, ADR-008); the corpus cost bands are in dollars,
+    # so compare in dollars and report the scorecard cost in dollars.
+    cost_dollars = sim.monthly_cost / 100
+    verdict, factor = _cost_verdict(cost_dollars, lo, hi)
 
     # bottleneck plausibility: a named component carrying real load.
     bottleneck_ok = bool(sim.bottleneck_id) and sim.bottleneck_utilization > 0
@@ -90,7 +93,7 @@ def score_blueprint(key: str, build_fn, ref_rps: float) -> ScoreCard:
     return ScoreCard(
         key=key, name=name, category=category, ref_rps=ref_rps,
         comps_model=len(model.components), comps_truth=comps_truth,
-        cost_engine=sim.monthly_cost, cost_low=lo, cost_high=hi,
+        cost_engine=cost_dollars, cost_low=lo, cost_high=hi,
         cost_verdict=verdict, cost_factor=factor,
         bottleneck=sim.bottleneck_name, bottleneck_util=sim.bottleneck_utilization,
         bottleneck_ok=bottleneck_ok,

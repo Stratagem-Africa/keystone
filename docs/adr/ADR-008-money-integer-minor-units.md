@@ -1,6 +1,6 @@
 # ADR-008 — Cost as integer minor units (`Money`), not float dollars
 
-**Status:** **Proposed** — awaiting Bifola ratification; **not applied**. Touches **money + schema + every blueprint**, the harm-floor's reddest line, so per CLAUDE.md **AI proposes, a human ratifies**; lands via branch → PR → review gate with a migration + guard test, never self-applied.
+**Status:** **Accepted & implemented** (2026-06-22) — ratified by Bifola. Carrier open-call resolved to **plain `int` cents** (with a `Component.__post_init__` guard + a guard test) over a `Money` wrapper — lower ripple, no arithmetic threading, same harm-floor guarantee. Migration: all **203** seed cost literals ×100 (scripted, not hand-edited); scorer/report convert cents→dollars at the edge. **Verified by the unchanged-rendered-output check**: every model's rendered dollar figure and cost verdict is identical to pre-migration (33/34 in-band, total $16,930). Adversarially reviewed before merge.
 **Date:** 2026-06-22 · **Owner:** Keystone A (Bifola)
 **Relates to:** CLAUDE.md (harm floor — "no corrupted money (integer minor units only)"), `docs/12` §1 rule 5 ("Cost is integer minor units … `usd_minor_per_month` … harm floor forbids float dollars"), `prototype/keystone/model.py` (`monthly_cost_per_instance: float`), `prototype/keystone/simulation.py` (`monthly_cost` sum), `prototype/keystone/report.py` (cost render), `prototype/keystone/provenance.py` (`usd_minor_per_month` already the grounded cost unit).
 

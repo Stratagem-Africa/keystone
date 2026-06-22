@@ -270,8 +270,8 @@ def _build_model(data: dict, source: Source, clean_text: str) -> SystemModel:
             instances=max(1, int(_num(c.get("instances"), 1))),
             base_latency_ms=max(0.0, _num(c.get("base_latency_ms"), 1.0)),
             # monthly cost per instance is cloud-pricing (benchmark/KB) territory, not
-            # extracted from prose — left 0.0 (cost grounding is a documented KB GAP).
-            monthly_cost_per_instance=0.0,
+            # extracted from prose — left 0 (cost grounding is a documented KB GAP).
+            monthly_cost_per_instance=0,  # integer minor units (cents) — harm floor (ADR-008)
             provenance="assumption",
         )
     if not comps:
