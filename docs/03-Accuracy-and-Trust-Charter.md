@@ -36,6 +36,8 @@ Therefore Keystone's correctness standard is not "pristine." It is **calibrated,
 - **Reconciliation eval.** Document sets with planted conflicts; measured on whether Keystone surfaces every conflict (recall) without inventing false ones (precision).
 - **Hallucination guard (Overlay G).** Any council claim citing a benchmark/precedent that does not resolve in the Knowledge Base is dropped and the dependent recommendation re-derived (`AIE-K4-01`: a citation that doesn't resolve is *invented*).
 
+**External precedent for the error-envelope discipline (prior art).** Harvard's [gem5-Aladdin](https://github.com/harvard-acc/gem5-aladdin) earns trust for a *pre-build* (model-before-build) performance/power/area estimate by publishing a **per-(workload × metric) error envelope validated against RTL**, bounded to a stated support matrix — a second peer-reviewed anchor for the per-component-error-envelope shape above (the first being Tair KVCache HiSim). It produces zero numbers for Keystone; the targets here stay `ASSUMPTION` until Keystone's own harness runs (§7).
+
 ## 5. The calibration loop (the moat mechanism)
 
 1. Keystone records every prediction with its assumptions and confidence.
