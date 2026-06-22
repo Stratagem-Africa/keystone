@@ -56,6 +56,27 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"- **Estimated compute cost:** ~${sim.monthly_cost:,.0f}/month")
     L.append("")
 
+    # Headline metrics envelope (ADR-007): every headline number travels with the model that
+    # produced it + the engine-stability confidence — no bare numbers (Doc 03 pillar 2). The
+    # engine is the sole author of these values; this only renders them.
+    if sim.metrics:
+        L.append("## Headline metrics (model · confidence)")
+        L.append("")
+        L.append("| Metric | Value | Model | Confidence |")
+        L.append("|---|--:|---|:--|")
+        for name, m in sim.metrics.items():
+            if m.unit == "rps":
+                val = f"{_fmt_rps(m.value)} req/s"
+            elif m.unit == "ratio":
+                val = f"{m.value * 100:.0f}%"
+            elif m.unit == "usd_per_month":
+                val = f"${m.value:,.0f}/mo"
+            else:
+                val = f"{m.value:,.0f} ms"
+            short_conf = m.confidence.split("(")[0].strip()
+            L.append(f"| {name} | {val} | {m.model} | {short_conf} |")
+        L.append("")
+
     # Per-component table
     L.append("## Component load")
     L.append("")

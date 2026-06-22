@@ -14,6 +14,19 @@
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
 - **Estimated compute cost:** ~$1,045/month
 
+## Headline metrics (model · confidence)
+
+| Metric | Value | Model | Confidence |
+|---|--:|---|:--|
+| bottleneck_utilization | 69% | max rho = arrival / capacity | medium |
+| breakpoint_rps_safe | 12,240 req/s | system_rps * (85% ceiling / rho_max) | medium |
+| breakpoint_rps_theoretical | 14,400 req/s | system_rps * (1.0 / rho_max) | medium |
+| mean_latency_ms | 29 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 20 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 86 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 133 ms | exponential-tail: mean * ln(100) | medium |
+| monthly_cost | $1,045/mo | sum of component monthly compute cost | medium |
+
 ## Component load
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |

@@ -31,6 +31,36 @@ _P95_K = math.log(20)     # ~3.00
 _P99_K = math.log(100)    # ~4.61
 
 
+@dataclass(frozen=True)
+class Metric:
+    """A self-describing engine output: a number never travels without the MODEL that produced it
+    and a confidence qualifier (Doc 03 pillar 2 "no bare numbers"; ADR-007; prior art: gem5's
+    typed stats, docs/13).
+
+    Prime-directive invariant: a `Metric` is constructed ONLY by this module. The council / report
+    / UI may READ one, never build or mutate it (enforced by `tests/test_metric_envelope.py`).
+    At L0 the numeric band (`low`/`high`) stays `None` — the engine does not compute a per-metric
+    interval yet, and fabricating one would be false precision (Doc 03). A band is set only when
+    EARNED (L1 grounding / L2 calibration / v2 DES replications) and must bracket `value`."""
+    value: float
+    unit: str               # "rps" | "ms" | "usd_per_month" | "ratio"
+    model: str              # the formula that produced it, e.g. "M/M/1 sojourn W=S/(1-rho)"
+    confidence: str         # the engine-stability qualifier (NOT an input-provenance tag)
+    low: float | None = None
+    high: float | None = None
+    caveats: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if math.isnan(self.value):
+            raise ValueError("Metric.value must not be NaN")
+        if not self.model.strip():
+            raise ValueError("Metric.model (the formula that produced it) is required")
+        if (self.low is None) != (self.high is None):
+            raise ValueError("Metric band needs both low and high, or neither")
+        if self.low is not None and not (self.low <= self.value <= self.high):
+            raise ValueError("Metric band must bracket value (no fabricated precision)")
+
+
 @dataclass
 class ComponentResult:
     id: str
@@ -64,6 +94,9 @@ class SimulationResult:
     # purely from this engine's own computation (NEVER an LLM) so the report can render
     # provenance instead of trusting prose. Complements `caveats` (how-computed vs where-wrong).
     derivation: list[str] = field(default_factory=list)
+    # Self-describing envelope for the headline numbers (ADR-007): each carries its model +
+    # confidence qualifier so the report ships no bare number. Built only by `simulate()`.
+    metrics: dict[str, Metric] = field(default_factory=dict)
 
 
 def _arrivals(model: SystemModel) -> dict[str, float]:
@@ -130,6 +163,28 @@ def _derivation(
     return lines
 
 
+def _metrics(
+    rho_max: float, bp_safe: float, bp_theo: float, mean: float,
+    p50: float, p95: float, p99: float, monthly_cost: float, confidence: str,
+) -> dict[str, Metric]:
+    """The headline outputs as self-describing `Metric`s (ADR-007). Each restates a value the
+    engine already computed, tagged with the model that produced it + the engine-stability
+    confidence qualifier. No numeric band at L0 (not fabricated). Built only here."""
+    tail = ("over-states the tail; directional upper bound",)
+    safe_pct = f"{SAFE_UTILIZATION:.0%}"
+    return {
+        "bottleneck_utilization": Metric(rho_max, "ratio", "max rho = arrival / capacity", confidence),
+        "breakpoint_rps_safe": Metric(bp_safe, "rps", f"system_rps * ({safe_pct} ceiling / rho_max)", confidence),
+        "breakpoint_rps_theoretical": Metric(bp_theo, "rps", "system_rps * (1.0 / rho_max)", confidence),
+        "mean_latency_ms": Metric(mean, "ms", "sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow", confidence),
+        "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
+        "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
+        "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
+        "monthly_cost": Metric(monthly_cost, "usd_per_month", "sum of component monthly compute cost",
+                               confidence, caveats=("compute/instance only; no egress/managed pricing",)),
+    }
+
+
 def _confidence(rho_max: float) -> str:
     # Queueing estimates get unreliable as utilization approaches 1.
     if rho_max >= 1.0:
@@ -193,6 +248,7 @@ def simulate(model: SystemModel) -> SimulationResult:
         "reliable than absolute latency/cost numbers.",
     ]
 
+    conf = _confidence(rho_max)  # engine-stability qualifier, shared by the run + every Metric
     return SimulationResult(
         system_rps=model.workload.system_rps,
         bottleneck_id=bottleneck,
@@ -205,7 +261,8 @@ def simulate(model: SystemModel) -> SimulationResult:
         monthly_cost=monthly_cost,
         components=comp_results,
         spofs=spofs,
-        confidence=_confidence(rho_max),
+        confidence=conf,
         caveats=caveats,
         derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean),
+        metrics=_metrics(rho_max, bp_safe, bp_theo, mean, p50, p95, p99, monthly_cost, conf),
     )
