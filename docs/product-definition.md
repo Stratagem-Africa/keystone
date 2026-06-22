@@ -47,7 +47,7 @@ The field splits into **draw-first tools** (you architect, they render) and **si
 
 ## 7. Trust principle *(non-negotiable)*
 
-**Claude reasons. The engine computes.** Claude designs, advises, and critiques; the deterministic simulation produces the numbers. Claude never invents a throughput figure. Every estimate shows its **assumptions, confidence, and the model behind it.** We copy SysSimulator's discipline of an explicit "where this is wrong" section — honesty is the differentiator with skeptical engineer buyers.
+**Claude reasons. The engine computes.** Claude designs, advises, and critiques; the deterministic simulation produces the numbers. Claude never invents a throughput figure. Every estimate shows its **assumptions, confidence, and the model behind it.** Every report carries an explicit "where this is wrong" section — **our own discipline.** Peer simulators (e.g. SysSimulator) show confident numbers without disclosing where they came from or how accurate they are, so this honesty is **the** differentiator with skeptical engineer buyers.
 
 ## 8. v1 boundary *(frozen — resist creep)*
 
