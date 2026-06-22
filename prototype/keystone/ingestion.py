@@ -328,10 +328,32 @@ def _build_model(data: dict, source: Source, clean_text: str) -> SystemModel:
     )
 
 
-def validate_model(model: SystemModel) -> None:
-    """Fail closed on a structurally invalid model — never hand the engine a bad model."""
+def orphan_components(model: SystemModel) -> list[str]:
+    """Component ids that appear on no flow path.
+
+    The engine seeds every component to zero arrivals (`simulation.py` `_arrivals`), so an
+    unconnected component is silently reported at 0% utilisation — a misleading false 'ok'.
+    Returned sorted for a stable message; callers decide whether that is fatal (single
+    model -> yes) or a flagged soft conflict (reconciliation's merged model -> see below)."""
+    referenced = {s.component_id for f in model.flows for s in f.path}
+    return sorted(set(model.components) - referenced)
+
+
+def validate_model(model: SystemModel, *, require_connected: bool = True) -> None:
+    """Fail closed on a structurally invalid model — never hand the engine a bad model.
+
+    `require_connected` (default True): every component must lie on at least one flow, so an
+    orphan can never reach the engine and surface a bogus 0% utilisation. Reconciliation
+    passes ``require_connected=False`` because its merged model may legitimately carry a
+    component from a source whose flows were not merged (flow-merge is a v2 lever, ADR-004);
+    it surfaces each orphan as a *soft conflict* instead — visible, never silently simulated."""
     if not model.components:
         raise IngestError("model has no components")
+    # A flow-less model has no path to simulate; the engine's dominant-flow pick (`max(flows)`)
+    # would raise on the empty sequence. Fail closed here (unconditionally — independent of
+    # require_connected) so neither the single-model nor the merged path can reach that crash.
+    if not model.flows:
+        raise IngestError("model has no flows — the engine has no path to simulate")
     ids = set(model.components)
     for f in model.flows:
         if not f.path:
@@ -348,6 +370,13 @@ def validate_model(model: SystemModel) -> None:
     total = sum(f.share for f in model.flows)
     if model.flows and not (0.9 <= total <= 1.1):
         raise IngestError(f"flow shares sum to {total:.2f}, expected ~1.0")
+    if require_connected:
+        orphans = orphan_components(model)
+        if orphans:
+            raise IngestError(
+                f"component(s) {orphans} are on no flow — the engine would report a misleading "
+                "0% utilisation for them. Wire each into a flow, or remove it."
+            )
     if not math.isfinite(model.workload.system_rps) or model.workload.system_rps < 0:
         raise IngestError("workload.system_rps must be finite and non-negative")
     for c in model.components.values():

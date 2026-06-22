@@ -57,6 +57,24 @@ class TestSimulation(unittest.TestCase):
         self.assertIn("PostgreSQL primary (r7g.large)", sim.spofs)
         self.assertIn("Redis cache (r7g.large)", sim.spofs)
 
+    def test_derivation_names_the_bottleneck_and_is_deterministic(self):
+        # The generated "show your work" trace records the actual computed bottleneck and is
+        # reproducible. It is provenance, not a metric source -- it only restates engine output.
+        sim = simulate(url_shortener.build(system_rps=10_000, cache_hit_rate=0.90))
+        self.assertTrue(sim.derivation)
+        joined = "\n".join(sim.derivation)
+        self.assertIn("Bottleneck", joined)
+        self.assertIn(sim.bottleneck_name, joined)
+        self.assertEqual(sim.derivation, simulate(url_shortener.build(
+            system_rps=10_000, cache_hit_rate=0.90)).derivation)
+
+    def test_derivation_handles_no_bottleneck(self):
+        # Degenerate zero-load model: nothing sees arrivals, so there is no bottleneck. The trace
+        # must still render (omitting the bottleneck line) and never raise (the `if bn:` branch).
+        sim = simulate(url_shortener.build(system_rps=0))
+        self.assertTrue(sim.derivation)
+        self.assertNotIn("Bottleneck =", "\n".join(sim.derivation))
+
 
 if __name__ == "__main__":
     unittest.main()

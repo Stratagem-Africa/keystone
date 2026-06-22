@@ -37,7 +37,7 @@ Phased plan. Each phase names its **accuracy level** (Doc 03) and its **tier** (
 
 ## Phase 3 — Depth & defensibility *(~9 → ~18 months)*  ·  Tier-1  ·  Accuracy L2
 
-- **Discrete-event simulation engine** (the v2 fidelity upgrade) for async/streaming/mesh topologies.
+- **Discrete-event simulation engine** (the v2 fidelity upgrade) for async/streaming/mesh topologies. Reference design: Genesys-Simulator's kernel — an event calendar + step loop, with per-run **replications → earned confidence intervals** (replacing the v1 heuristic) and an explicit, surfaced RNG seed (`docs/13`). Stays the sole producer of numbers.
 - Multi-region + chaos/failure-injection simulation.
 - Repo & cloud import (infer architecture from code/IaC; later, drift detection vs reality).
 - Community reference-architecture library (network effect).

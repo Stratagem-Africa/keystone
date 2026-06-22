@@ -20,10 +20,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from keystone.model import SystemModel
+from keystone.model import Flow, SystemModel
 
 SAFE_UTILIZATION = 0.85   # conventional "run hot" ceiling
 _RHO_CEIL = 0.999         # guard against divide-by-zero as rho -> 1
+# Exponential-tail percentile multipliers. Defined once and used by BOTH the engine and its
+# derivation trace, so the "show your work" line can never drift from the math actually applied.
+_P50_K = math.log(2)      # ~0.69
+_P95_K = math.log(20)     # ~3.00
+_P99_K = math.log(100)    # ~4.61
 
 
 @dataclass
@@ -54,6 +59,11 @@ class SimulationResult:
     spofs: list[str]
     confidence: str
     caveats: list[str] = field(default_factory=list)
+    # Generated "show your work" trace: the deterministic steps that produced the numbers
+    # above (arrivals -> rho -> bottleneck -> breakpoint -> latency -> percentiles). Derived
+    # purely from this engine's own computation (NEVER an LLM) so the report can render
+    # provenance instead of trusting prose. Complements `caveats` (how-computed vs where-wrong).
+    derivation: list[str] = field(default_factory=list)
 
 
 def _arrivals(model: SystemModel) -> dict[str, float]:
@@ -68,6 +78,56 @@ def _arrivals(model: SystemModel) -> dict[str, float]:
 def _mm1_sojourn_ms(service_ms: float, rho: float) -> float:
     rho = min(rho, _RHO_CEIL)
     return service_ms / (1.0 - rho)
+
+
+def _fmt_rps(x: float) -> str:
+    return "unbounded" if x == float("inf") else f"{x:,.0f}"
+
+
+def _derivation(
+    model: SystemModel,
+    comps: dict[str, ComponentResult],
+    dom: Flow,
+    rho_max: float,
+    bottleneck_id: str | None,
+    bp_safe: float,
+    bp_theo: float,
+    mean: float,
+) -> list[str]:
+    """The deterministic derivation of every headline number (a generated audit trail).
+
+    Each line restates a step the engine actually executed above, using the values it
+    computed. This is provenance, not a metric source: it never introduces a number the
+    engine did not already produce, and no language model is involved (prime directive)."""
+    sys_rps = model.workload.system_rps
+    flow_split = ", ".join(f"{f.name} {f.share:.0%}" for f in model.flows) or "no flows"
+    lines = [
+        f"Offered load: {_fmt_rps(sys_rps)} req/s split across {len(model.flows)} flow(s) "
+        f"by share ({flow_split}).",
+        "Arrival per component = sum over flows of system_rps * flow.share * visit_prob along "
+        "its path (open Jackson network).",
+        "Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.",
+    ]
+    bn = comps.get(bottleneck_id) if bottleneck_id else None
+    if bn:
+        lines.append(
+            f"Bottleneck = highest rho -> {bn.name} at rho={rho_max:.2f} "
+            f"({_fmt_rps(bn.arrival_rps)} / {_fmt_rps(bn.capacity_rps)} rps)."
+        )
+    lines.append(
+        f"Max sustainable load = system_rps * (ceiling / rho_max): "
+        f"safe@{SAFE_UTILIZATION:.0%} ~ {_fmt_rps(bp_safe)} req/s, "
+        f"theoretical@100% ~ {_fmt_rps(bp_theo)} req/s."
+    )
+    lines.append(
+        f"Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant "
+        f"flow ('{dom.name}', {dom.share:.0%} share) -> mean {mean:.0f} ms."
+    )
+    lines.append(
+        "Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x "
+        f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f} (over-states the tail; treat as a directional upper bound)."
+    )
+    return lines
 
 
 def _confidence(rho_max: float) -> str:
@@ -114,9 +174,9 @@ def simulate(model: SystemModel) -> SimulationResult:
     mean = sum(comp_results[s.component_id].mean_latency_ms * s.visit_prob for s in dom.path)
 
     # Exponential-tail percentile approximation (conservative on the tail).
-    p50 = mean * math.log(2)          # ~0.69 * mean
-    p95 = mean * math.log(20)         # ~3.00 * mean
-    p99 = mean * math.log(100)        # ~4.61 * mean
+    p50 = mean * _P50_K
+    p95 = mean * _P95_K
+    p99 = mean * _P99_K
 
     monthly_cost = sum(c.monthly_cost for c in model.components.values())
 
@@ -147,4 +207,5 @@ def simulate(model: SystemModel) -> SimulationResult:
         spofs=spofs,
         confidence=_confidence(rho_max),
         caveats=caveats,
+        derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean),
     )

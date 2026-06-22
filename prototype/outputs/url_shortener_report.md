@@ -68,6 +68,16 @@
 | Cache cold / stampede (hit-rate 0%) | PostgreSQL primary (r7g.large) | 125% | 6,800 |
 | 10x traffic (100k rps) | App tier (t4g.medium x12) | 694% | 12,240 |
 
+## How these numbers were computed
+
+- Offered load: 10,000 req/s split across 2 flow(s) by share (redirect 99%, create 1%).
+- Arrival per component = sum over flows of system_rps * flow.share * visit_prob along its path (open Jackson network).
+- Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
+- Bottleneck = highest rho -> App tier (t4g.medium x12) at rho=0.69 (10,000 / 14,400 rps).
+- Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
+- Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 29 ms.
+- Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
+
 ## Where this is wrong (read before trusting a number)
 
 - Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
