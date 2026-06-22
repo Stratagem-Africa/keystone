@@ -1,19 +1,11 @@
+import Link from "next/link";
+import { Nav } from "@/components/Nav";
 import { Metric } from "@/components/Metric";
 
 export default function Home() {
   return (
     <>
-      {/* Nav */}
-      <nav className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-slate-ink border-b border-steel">
-        {/* Wordmark — grotesque/sans, lowercase per docs/09 §2.1 */}
-        <span className="font-sans font-semibold tracking-tight text-paper">
-          keystone
-        </span>
-        {/* Accuracy-ladder badge — docs/09 §3.6 */}
-        <span className="font-mono text-provenance text-ink-muted border border-steel rounded px-2 py-px">
-          L0 · Directional
-        </span>
-      </nav>
+      <Nav />
 
       {/* Hero — slate-ink, the "instrument panel" surface */}
       <section className="flex-1 flex flex-col items-center justify-center bg-slate-ink text-paper px-6 py-24 text-center gap-8">
@@ -48,6 +40,14 @@ export default function Home() {
             model="placeholder — wire to API"
           />
         </div>
+
+        {/* CTA — links to the intent input page */}
+        <Link
+          href="/design"
+          className="font-sans text-label font-medium px-6 py-3 rounded-full bg-paper text-slate-ink transition-all ease-settle duration-ui hover:bg-mist"
+        >
+          Describe what you&apos;re building →
+        </Link>
 
         <p className="font-mono text-provenance text-ink-muted">
           We&apos;ll tell you when we&apos;re guessing.
