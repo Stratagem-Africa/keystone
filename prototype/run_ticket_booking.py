@@ -40,7 +40,7 @@ def main() -> None:
     print("=" * 74)
     print(f"Baseline ({baseline.workload.description}) @ {sim.system_rps:,.0f} rps")
     print(f"  bottleneck : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
-    print(f"  max safe   : {sim.breakpoint_rps_safe:,.0f} rps · compute ${sim.monthly_cost:,.0f}/mo")
+    print(f"  max safe   : {sim.breakpoint_rps_safe:,.0f} rps · compute ${sim.monthly_cost / 100:,.0f}/mo")  # cost is cents (ADR-008)
     print("-" * 74)
     print("WHAT-IF (the retention feature — F6):")
     for label, w in whatifs:

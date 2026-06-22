@@ -25,7 +25,7 @@ def _random_model(rng: random.Random) -> SystemModel:
             per_instance_rps=rng.uniform(100.0, 50_000.0),
             instances=rng.randint(1, 8),
             base_latency_ms=rng.uniform(0.1, 50.0),
-            monthly_cost_per_instance=rng.uniform(0.0, 500.0),
+            monthly_cost_per_instance=rng.randint(0, 50_000),  # integer minor units (cents, ADR-008)
         )
         for cid in ids
     }

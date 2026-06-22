@@ -1,6 +1,6 @@
 # ADR-008 — Cost as integer minor units (`Money`), not float dollars
 
-**Status:** **Proposed** — awaiting Bifola ratification; **not applied**. Touches **money + schema + every blueprint**, the harm-floor's reddest line, so per CLAUDE.md **AI proposes, a human ratifies**; lands via branch → PR → review gate with a migration + guard test, never self-applied.
+**Status:** **Accepted & implemented** (2026-06-22) — ratified by Bifola. Carrier open-call resolved to **plain `int` cents** (with a `Component.__post_init__` guard + a guard test) over a `Money` wrapper — lower ripple, no arithmetic threading, same harm-floor guarantee. Migration: all **203** seed cost literals ×100 (scripted, not hand-edited); scorer/report convert cents→dollars at the edge. **Verified by the unchanged-rendered-output check**: every model's rendered dollar figure and cost verdict is identical to pre-migration (33/34 in-band, total $16,930). Adversarially reviewed before merge.
 **Date:** 2026-06-22 · **Owner:** Keystone A (Bifola)
 **Relates to:** CLAUDE.md (harm floor — "no corrupted money (integer minor units only)"), `docs/12` §1 rule 5 ("Cost is integer minor units … `usd_minor_per_month` … harm floor forbids float dollars"), `prototype/keystone/model.py` (`monthly_cost_per_instance: float`), `prototype/keystone/simulation.py` (`monthly_cost` sum), `prototype/keystone/report.py` (cost render), `prototype/keystone/provenance.py` (`usd_minor_per_month` already the grounded cost unit).
 
@@ -62,6 +62,8 @@ A test asserting `Money` rejects floats/negatives, that arithmetic stays integer
 - Any cost is stored or summed as a `float` after this lands → harm-floor breach (the guard test must fail).
 - A blueprint/reference-model cost is mis-converted (off by 100×) → caught by value-by-value review + the unchanged-rendered-output check.
 - A grounded `usd_minor_per_month` cost is added to a seed cost in a different unit → unit-mismatch breach.
+
+**Tracked follow-up (the grounded-cost seam — inert today).** The harm-floor int-guard is enforced on `Component.monthly_cost_per_instance` (at construction), but `Grounding.value` / `BenchmarkDatapoint` are still `float` (`provenance.py`, `benchmark_corpus.py`), so a *future* grounded cost would be float cents. This is inert now (the KB is empty and **no code applies a grounding to `monthly_cost_per_instance`** — verified: costs are only set at construction, never by attribute assignment). **Before any cost-grounding-application step lands** (ADR-006 territory): (1) require `isinstance(value, int)` for `unit == "usd_minor_per_month"` in `Grounding.__post_init__` (and stop the unconditional `float(...)` coercion for the cost unit in `_parse_datapoint`); (2) route every apply-grounding write through the `Component` constructor (or re-validate), never bare attribute assignment, so `__post_init__` cannot be bypassed.
 
 ## Consequences
 

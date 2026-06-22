@@ -4,6 +4,7 @@
 
 **Offered load:** 5,000 req/s — 95% browse / 5% book (steady state)
 **Overall confidence:** medium (directional; within the model's reliable band)
+**Reproduce:** engine v0.0.1 · model 'Ticket Booking' · deterministic (identical inputs → identical output)
 
 ## Verdict
 
@@ -12,6 +13,19 @@
 - **Latency (dominant path):** p50 ~21 ms · p95 ~93 ms · p99 ~142 ms (mean 31 ms)
 - **Single points of failure:** Load balancer, Seat-availability cache, Booking request queue, Inventory DB (seats)
 - **Estimated compute cost:** ~$895/month
+
+## Headline metrics (model · confidence)
+
+| Metric | Value | Model | Confidence |
+|---|--:|---|:--|
+| bottleneck_utilization | 62% | max rho = arrival / capacity | medium |
+| breakpoint_rps_safe | 6,800 req/s | system_rps * (85% ceiling / rho_max) | medium |
+| breakpoint_rps_theoretical | 8,000 req/s | system_rps * (1.0 / rho_max) | medium |
+| mean_latency_ms | 31 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 21 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 93 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 142 ms | exponential-tail: mean * ln(100) | medium |
+| monthly_cost | $895/mo | sum of component monthly compute cost | medium |
 
 ## Component load
 
@@ -71,6 +85,16 @@
 |---|---|--:|--:|
 | Flash sale: 8× traffic, browsing → buying (50% book) | Inventory DB (seats) | 667% | 5,100 |
 | Mild on-sale: 2× traffic, 20% book | Booking app tier | 125% | 6,800 |
+
+## How these numbers were computed
+
+- Offered load: 5,000 req/s split across 2 flow(s) by share (browse 95%, book 5%).
+- Arrival per component = sum over flows of system_rps * flow.share * visit_prob along its path (open Jackson network).
+- Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
+- Bottleneck = highest rho -> Booking app tier at rho=0.62 (5,000 / 8,000 rps).
+- Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 6,800 req/s, theoretical@100% ~ 8,000 req/s.
+- Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('browse', 95% share) -> mean 31 ms.
+- Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
 
 ## Where this is wrong (read before trusting a number)
 

@@ -43,7 +43,7 @@ class Component:
     per_instance_rps: float           # service capacity per instance (req/s)
     instances: int = 1
     base_latency_ms: float = 1.0      # service time with no contention
-    monthly_cost_per_instance: float = 0.0
+    monthly_cost_per_instance: int = 0  # integer MINOR UNITS (USD cents/month) — harm floor: no float money (ADR-008)
     provenance: str = "assumption"    # component default: GROUNDED | GAP | ASSUMPTION
     # Per-metric grounding evidence (ADR-006/docs/12). A capacity becomes GROUNDED only when the
     # KB attaches a `Grounding` (value + band + citations) under that metric name; otherwise the
@@ -52,6 +52,17 @@ class Component:
     # changes the input number, never the math). `scaled()` shares components, which is correct: a
     # what-if keeps the same capacities, so the same groundings apply.
     groundings: dict[str, Grounding] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Harm floor (ADR-008): money is integer minor units (cents) — never a float (rounding
+        # corrupts money). `bool` is an int subclass, so exclude it explicitly.
+        c = self.monthly_cost_per_instance
+        if isinstance(c, bool) or not isinstance(c, int):
+            raise TypeError(
+                f"monthly_cost_per_instance must be an int in minor units (cents), not {type(c).__name__} "
+                f"({c!r}) — float money is forbidden by the harm floor")
+        if c < 0:
+            raise ValueError(f"monthly_cost_per_instance must be non-negative, got {c}")
 
     def provenance_of(self, metric: str) -> str:
         """GROUNDED if this metric carries grounding evidence, else the component default."""

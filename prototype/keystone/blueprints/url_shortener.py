@@ -24,16 +24,16 @@ def build(system_rps: float = 10_000, cache_hit_rate: float = CACHE_HIT_RATE) ->
     components = {
         "lb": Component("lb", ComponentKind.LOAD_BALANCER, "Application Load Balancer",
                         per_instance_rps=30_000, instances=1, base_latency_ms=1.0,
-                        monthly_cost_per_instance=25, provenance="ASSUMPTION"),
+                        monthly_cost_per_instance=2500, provenance="ASSUMPTION"),
         "app": Component("app", ComponentKind.APP_SERVER, "App tier (t4g.medium x12)",
                          per_instance_rps=1_200, instances=12, base_latency_ms=8.0,
-                         monthly_cost_per_instance=35, provenance="ASSUMPTION"),
+                         monthly_cost_per_instance=3500, provenance="ASSUMPTION"),
         "cache": Component("cache", ComponentKind.CACHE, "Redis cache (r7g.large)",
                            per_instance_rps=100_000, instances=1, base_latency_ms=0.5,
-                           monthly_cost_per_instance=180, provenance="ASSUMPTION"),
+                           monthly_cost_per_instance=18000, provenance="ASSUMPTION"),
         "db": Component("db", ComponentKind.SQL_DB, "PostgreSQL primary (r7g.large)",
                         per_instance_rps=8_000, instances=1, base_latency_ms=5.0,
-                        monthly_cost_per_instance=420, provenance="ASSUMPTION"),
+                        monthly_cost_per_instance=42000, provenance="ASSUMPTION"),
     }
 
     flows = [

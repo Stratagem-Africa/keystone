@@ -43,7 +43,7 @@ class Metric:
     interval yet, and fabricating one would be false precision (Doc 03). A band is set only when
     EARNED (L1 grounding / L2 calibration / v2 DES replications) and must bracket `value`."""
     value: float
-    unit: str               # "rps" | "ms" | "usd_per_month" | "ratio"
+    unit: str               # "rps" | "ms" | "usd_minor_per_month" | "ratio"
     model: str              # the formula that produced it, e.g. "M/M/1 sojourn W=S/(1-rho)"
     confidence: str         # the engine-stability qualifier (NOT an input-provenance tag)
     low: float | None = None
@@ -180,7 +180,7 @@ def _metrics(
         "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
-        "monthly_cost": Metric(monthly_cost, "usd_per_month", "sum of component monthly compute cost",
+        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", "sum of component monthly compute cost",
                                confidence, caveats=("compute/instance only; no egress/managed pricing",)),
     }
 

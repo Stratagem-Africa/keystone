@@ -21,8 +21,9 @@ class TestTicketBookingModel(unittest.TestCase):
         self.assertEqual(category, "event_driven")
         self.assertTrue(in_scope)
         self.assertEqual(len(model.components), comps_truth)   # 8 components
-        # baseline compute cost lands inside the documented band
-        self.assertTrue(lo <= simulate(model).monthly_cost <= hi)
+        # baseline compute cost lands inside the documented band. Engine cost is integer minor
+        # units (cents, ADR-008); the corpus band is in dollars, so compare in dollars.
+        self.assertTrue(lo <= simulate(model).monthly_cost / 100 <= hi)
 
     def test_baseline_bottleneck_is_app_tier(self):
         sim = simulate(ticket_booking.build())
