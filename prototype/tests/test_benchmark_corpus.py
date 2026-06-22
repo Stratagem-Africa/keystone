@@ -1,6 +1,7 @@
 """Tests for the curated-benchmark plumbing (docs/12 Phase 1): the datapoint schema, the JSONL
 loader, the context-matching CuratedKnowledgeBase, the corpus QA validator, and Component
-carrying grounding evidence. No real data; deterministic; offline.
+carrying grounding evidence — plus a regression check that the shipped corpus.jsonl stays
+clean. Deterministic; offline.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import tempfile
 import unittest
 
 from keystone.benchmarks.benchmark_corpus import (
-    BenchmarkDatapoint, CuratedKnowledgeBase, load_corpus,
+    DEFAULT_CORPUS_PATH, BenchmarkDatapoint, CuratedKnowledgeBase, load_corpus,
 )
 from keystone.benchmarks.validate_corpus import validate_corpus
 from keystone.knowledge_base import KnowledgeBase, make_knowledge_base
@@ -169,13 +170,30 @@ class TestCorpusQAValidator(unittest.TestCase):
         b = _dp(value=40_000, confidence_low=34_000, confidence_high=46_000)  # identical context, different value
         self.assertTrue(any("contradiction" in p for p in validate_corpus([a, b])))
 
+    def test_shipped_corpus_is_clean(self):
+        # Regression guard: the REAL corpus.jsonl that ships must always load + pass the curation
+        # gates. (Independent human citation review is still required — docs/12 §5 layer 3.)
+        dps = load_corpus(DEFAULT_CORPUS_PATH)
+        self.assertGreater(len(dps), 0, "a curated corpus is shipped")
+        self.assertEqual(validate_corpus(dps), [], "shipped corpus must pass the curation QA")
+
 
 class TestFactoryAndComponentEvidence(unittest.TestCase):
-    def test_curated_provider_builds_and_grounds_nothing_by_default(self):
+    def test_default_provider_is_stub_and_grounds_nothing(self):
+        # The DEFAULT provider is the stub: it grounds NOTHING, so every value honestly stays
+        # ASSUMPTION until the curated provider is explicitly activated (Bifola's trigger).
+        kb = make_knowledge_base()  # default -> stub
+        self.assertIsNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance"))
+
+    def test_curated_provider_loads_shipped_corpus_and_grounds(self):
         kb = make_knowledge_base("curated")
         self.assertIsInstance(kb, CuratedKnowledgeBase)
         self.assertIsInstance(kb, KnowledgeBase)        # satisfies the protocol
-        self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "per_instance_rps"))  # no corpus shipped
+        # the shipped corpus grounds what we have cited evidence for...
+        self.assertIsNotNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance"))
+        # ...and honestly grounds NOTHING where we deliberately have no datapoint (app-server
+        # throughput is too workload-dependent to ground generically — docs/12 §4).
+        self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "per_instance_rps"))
 
     def test_component_reports_grounded_per_metric(self):
         g = Grounding(80_000, "rps", 68_000, 92_000, (_cite(),))
