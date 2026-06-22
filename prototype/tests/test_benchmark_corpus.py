@@ -189,10 +189,15 @@ class TestFactoryAndComponentEvidence(unittest.TestCase):
         kb = make_knowledge_base("curated")
         self.assertIsInstance(kb, CuratedKnowledgeBase)
         self.assertIsInstance(kb, KnowledgeBase)        # satisfies the protocol
-        # the shipped corpus grounds what we have cited evidence for...
-        self.assertIsNotNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance"))
-        # ...and honestly grounds NOTHING where we deliberately have no datapoint (app-server
-        # throughput is too workload-dependent to ground generically — docs/12 §4).
+        # grounds a SPECIFIC cloud's cited cost (realistic usage — you name your instance/region)
+        self.assertIsNotNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance",
+                                       context={"instance_type": "cache.r6g.large"}))
+        # multi-cloud safety: asked WITHOUT naming a cloud, the corpus's clouds DISAGREE (AWS ~$150
+        # vs GCP ~$403), so it refuses to guess one for you rather than pick (docs/12 — refuse on a
+        # poor/ambiguous match; better ASSUMPTION than a wrong number).
+        self.assertIsNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance"))
+        # ...and grounds NOTHING where we deliberately have no datapoint (app-server throughput is
+        # too workload-dependent to ground generically — docs/12 §4).
         self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "per_instance_rps"))
 
     def test_component_reports_grounded_per_metric(self):
