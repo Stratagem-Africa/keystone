@@ -4,10 +4,43 @@ Run from prototype/:  python3 -m unittest discover -s tests -v
 """
 from __future__ import annotations
 
+import math
+import random
 import unittest
 
-from keystone.blueprints import url_shortener
+from keystone.benchmarks.reference_models import REFERENCE_MODELS
+from keystone.blueprints import ticket_booking, url_shortener
+from keystone.model import Component, ComponentKind, Flow, FlowStep, SystemModel, Workload
 from keystone.simulation import simulate, SAFE_UTILIZATION
+
+
+def _random_model(rng: random.Random) -> SystemModel:
+    """A random-but-valid SystemModel for property-fuzzing engine invariants (prior art: DST
+    seeded input-space search, docs/13). Every component lands on >=1 flow so it sees load."""
+    kinds = list(ComponentKind)
+    ids = [f"c{i}" for i in range(rng.randint(2, 6))]
+    comps = {
+        cid: Component(
+            cid, rng.choice(kinds), f"C{cid}",
+            per_instance_rps=rng.uniform(100.0, 50_000.0),
+            instances=rng.randint(1, 8),
+            base_latency_ms=rng.uniform(0.1, 50.0),
+            monthly_cost_per_instance=rng.uniform(0.0, 500.0),
+        )
+        for cid in ids
+    }
+    raw = [rng.random() + 0.01 for _ in range(rng.randint(1, 2))]
+    total = sum(raw)
+    flows, covered = [], set()
+    for i, w in enumerate(raw):
+        path_ids = rng.sample(ids, rng.randint(1, len(ids)))
+        covered.update(path_ids)
+        flows.append(Flow(f"f{i}", w / total, [FlowStep(c, visit_prob=rng.uniform(0.1, 1.0)) for c in path_ids]))
+    missing = [c for c in ids if c not in covered]
+    if missing:
+        flows[0].path.extend(FlowStep(c) for c in missing)
+    return SystemModel(name="fuzz", components=comps, flows=flows,
+                       workload=Workload(system_rps=rng.uniform(100.0, 100_000.0)))
 
 
 class TestSimulation(unittest.TestCase):
@@ -74,6 +107,43 @@ class TestSimulation(unittest.TestCase):
         sim = simulate(url_shortener.build(system_rps=0))
         self.assertTrue(sim.derivation)
         self.assertNotIn("Bottleneck =", "\n".join(sim.derivation))
+
+    def test_determinism_corpus_wide(self):
+        # Run the WHOLE reference corpus twice and assert byte-identical results, failing AT the
+        # diverging model (prior art: madsim — fail at the source, not on a rolled-up scalar). This
+        # strengthens the single-blueprint 3-scalar check above to full-result equality everywhere.
+        for key, build_fn, _ref_rps in REFERENCE_MODELS:  # build_fn is a 0-arg thunk
+            model = build_fn()
+            self.assertEqual(simulate(model), simulate(model),
+                             f"non-deterministic engine output for reference model {key!r}")
+        for label, model in (("url_shortener", url_shortener.build()),
+                             ("ticket_booking", ticket_booking.build())):
+            self.assertEqual(simulate(model), simulate(model),
+                             f"non-deterministic engine output for blueprint {label!r}")
+
+    def test_engine_invariants_property_fuzz(self):
+        # Seeded property-fuzz over random valid models (prior art: DST multi-seed input search).
+        # Fixed seed -> deterministic gate; on failure we print the seed+iteration to reproduce.
+        SEED = 20260622
+        rng = random.Random(SEED)
+        for i in range(200):
+            model = _random_model(rng)
+            try:
+                sim = simulate(model)
+                for cid, r in sim.components.items():
+                    self.assertTrue(math.isfinite(r.utilization) and r.utilization >= 0.0)
+                    self.assertTrue(math.isfinite(r.mean_latency_ms) and r.mean_latency_ms >= 0.0)
+                self.assertLessEqual(sim.p50_ms, sim.p95_ms)
+                self.assertLessEqual(sim.p95_ms, sim.p99_ms)
+                if sim.bottleneck_id is not None:
+                    self.assertIn(sim.bottleneck_id, model.components)
+                # breakpoint is load-invariant in an open network: doubling load must not move it.
+                sim2 = simulate(model.scaled(model.workload.system_rps * 2))
+                if math.isfinite(sim.breakpoint_rps_safe) and sim.breakpoint_rps_safe > 0:
+                    self.assertAlmostEqual(sim.breakpoint_rps_safe / sim2.breakpoint_rps_safe, 1.0, places=6)
+            except AssertionError:
+                print(f"\n[property-fuzz] invariant FAILED at SEED={SEED} iteration={i}\n  model={model}")
+                raise
 
 
 if __name__ == "__main__":

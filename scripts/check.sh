@@ -16,6 +16,20 @@ echo "==> Test suite  (python3 -m unittest discover -s tests)"
 python3 -m unittest discover -s tests 2>&1 | tail -n 4
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
+# Cross-process determinism gate (prior art: madsim/RisingWave DST, docs/13). The engine must be a
+# pure function of its inputs: identical output across two processes with DIFFERENT hash seeds.
+# Catches hash-order/iteration nondeterminism an in-process "run twice" test cannot. The engine
+# produces the digest; this only compares it (prime directive intact).
+echo; echo "==> Determinism gate  (engine output stable across PYTHONHASHSEED)"
+d0=$(PYTHONHASHSEED=0 python3 -m keystone.benchmarks.determinism 2>/dev/null)
+d1=$(PYTHONHASHSEED=1 python3 -m keystone.benchmarks.determinism 2>/dev/null)
+if printf '%s' "$d0" | grep -Eq '^[0-9a-f]{64}$' && [ "$d0" = "$d1" ]; then
+  echo "   ok: corpus digest ${d0:0:16}… identical across hash seeds"
+else
+  echo "   ❌ engine output not hash-seed stable (or the digest run errored):"
+  echo "      seed0=${d0:-<empty/error>}"; echo "      seed1=${d1:-<empty/error>}"; status=1
+fi
+
 if command -v ruff >/dev/null 2>&1; then
   echo; echo "==> ruff check ."
   ruff check . || status=1
