@@ -43,7 +43,7 @@ class Metric:
     interval yet, and fabricating one would be false precision (Doc 03). A band is set only when
     EARNED (L1 grounding / L2 calibration / v2 DES replications) and must bracket `value`."""
     value: float
-    unit: str               # "rps" | "ms" | "usd_per_month" | "ratio"
+    unit: str               # "rps" | "ms" | "usd_minor_per_month" | "ratio"
     model: str              # the formula that produced it, e.g. "M/M/1 sojourn W=S/(1-rho)"
     confidence: str         # the engine-stability qualifier (NOT an input-provenance tag)
     low: float | None = None

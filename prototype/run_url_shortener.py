@@ -49,7 +49,7 @@ def main() -> None:
           f"(theoretical {sim.breakpoint_rps_theoretical:,.0f})")
     print(f"Latency p50/p95/p99 : {sim.p50_ms:.0f} / {sim.p95_ms:.0f} / {sim.p99_ms:.0f} ms")
     print(f"SPOFs            : {', '.join(sim.spofs) or 'none'}")
-    print(f"Compute cost     : ${sim.monthly_cost:,.0f}/mo")
+    print(f"Compute cost     : ${sim.monthly_cost / 100:,.0f}/mo")  # cost is cents (ADR-008)
     print(f"Confidence       : {sim.confidence}")
     print("-" * 70)
     print("WHAT-IF:")

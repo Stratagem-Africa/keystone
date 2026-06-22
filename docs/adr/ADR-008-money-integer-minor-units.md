@@ -63,6 +63,8 @@ A test asserting `Money` rejects floats/negatives, that arithmetic stays integer
 - A blueprint/reference-model cost is mis-converted (off by 100×) → caught by value-by-value review + the unchanged-rendered-output check.
 - A grounded `usd_minor_per_month` cost is added to a seed cost in a different unit → unit-mismatch breach.
 
+**Tracked follow-up (the grounded-cost seam — inert today).** The harm-floor int-guard is enforced on `Component.monthly_cost_per_instance` (at construction), but `Grounding.value` / `BenchmarkDatapoint` are still `float` (`provenance.py`, `benchmark_corpus.py`), so a *future* grounded cost would be float cents. This is inert now (the KB is empty and **no code applies a grounding to `monthly_cost_per_instance`** — verified: costs are only set at construction, never by attribute assignment). **Before any cost-grounding-application step lands** (ADR-006 territory): (1) require `isinstance(value, int)` for `unit == "usd_minor_per_month"` in `Grounding.__post_init__` (and stop the unconditional `float(...)` coercion for the cost unit in `_parse_datapoint`); (2) route every apply-grounding write through the `Component` constructor (or re-validate), never bare attribute assignment, so `__post_init__` cannot be bypassed.
+
 ## Consequences
 
 Makes "money is integer minor units" structural rather than aspirational, closing a standing policy-vs-code gap before any real money path exists — at the cost of a reviewed one-time dollar→cents migration across the seed corpus. Rendered output is unchanged. Nothing here touches the prime directive (cost is still engine-summed; only its representation changes).
