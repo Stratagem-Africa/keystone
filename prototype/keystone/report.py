@@ -3,6 +3,7 @@ canonical model, the council ADRs, and the deterministic simulation result -- wi
 the mandatory 'where this is wrong' section (Doc 03)."""
 from __future__ import annotations
 
+from keystone import __version__ as _ENGINE_VERSION
 from keystone.model import SystemModel
 from keystone.council import ADR, is_high_stakes
 from keystone.simulation import SimulationResult
@@ -26,6 +27,11 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append("")
     L.append(f"**Offered load:** {_fmt_rps(sim.system_rps)} req/s — {model.workload.description}")
     L.append(f"**Overall confidence:** {sim.confidence}")
+    # Reproduction handle (prior art: MadRaft's seed-as-handle, docs/13). The engine is a pure,
+    # deterministic function of the model, so (engine version + model) reproduces this run exactly;
+    # a seed is reserved for future stochastic what-ifs (it does not affect today's analytical run).
+    L.append(f"**Reproduce:** engine v{_ENGINE_VERSION} · model {model.name!r} · "
+             "deterministic (identical inputs → identical output)")
     L.append("")
 
     # Mandatory high-stakes block (Doc 03 §6 MUST; ADR-001 C1 defence-in-depth).

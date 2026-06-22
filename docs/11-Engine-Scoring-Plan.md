@@ -14,7 +14,7 @@ Doc 03 makes correctness the differentiator and an **eval harness a MUST before 
 
 `syssimulator_blueprints.py` is **metadata**: per blueprint `(component_count, monthly_cost_band, category, v1_scope)`. It contains **no runnable model, no ground-truth bottleneck, and no breakpoint.** Therefore:
 
-- The engine can only be scored on a blueprint that has a **hand-built `SystemModel`** (`benchmarks/reference_models.py`). Building the rest of the 34 in-scope models is a tracked **GAP** (and is partly what the ingestion layer will eventually automate).
+- The engine can only be scored on a blueprint that has a **hand-built `SystemModel`** (`benchmarks/reference_models.py`). **All 34 in-scope models are now built** (`REFERENCE_MODELS`); field-calibrating their capacities remains the open GAP (and is partly what the ingestion layer will eventually automate).
 - The only hard ground-truth signals are **cost band** and **component count**.
 
 ## 3. What is scored (and the honest caveat on each)
@@ -26,22 +26,31 @@ Per Doc 03 §3, L0 is *"right order of magnitude; bottleneck identification reli
 | **Cost band** | engine compute-cost vs `[low, high]`: `in-band` / `near` (≤3× outside) / `oom` (≤10×) / `off` (>10×) | **Scale-dependent** — the band's reference scale is undocumented; a model run heavier than the band assumes reads "over" with a correct engine. Cost is **compute-only** (no egress/managed pricing) → should land at/below an all-in band. A miss is usually **model calibration, not engine error.** |
 | **Bottleneck** | engine names a real, saturatable component | **No ground-truth bottleneck** in the corpus → plausibility check, not scored-vs-truth. |
 | **Breakpoint** | max sustainable load is **invariant** to current offered load (re-run at 2×) | A correctness property of the linear open network, not a vs-truth score. |
-| **Determinism** | identical result on a re-run | Engine MUST be reproducible (seeded). |
+| **Determinism** | identical result on a re-run **and across processes** (different `PYTHONHASHSEED`) | Engine MUST be reproducible. Gated, not asserted (see §3.1). |
 | **Component count** | model vs documented | **Informational** — reference models capture the simulated **hot path**, a subset of the full architecture. |
 
-**The engine's math is exact given a model** (the 7 engine unit tests pin it). This harness scores the **(reference-model + engine) pipeline**; capacities/costs are seed `ASSUMPTION`s, so calibration error belongs to the model, not the engine.
+**The engine's math is exact given a model** (the engine unit tests pin it). This harness scores the **(reference-model + engine) pipeline**; capacities/costs are seed `ASSUMPTION`s, so calibration error belongs to the model, not the engine.
+
+### 3.1 Determinism is gated, not asserted (prior art: madsim / RisingWave DST, `docs/13`)
+
+Deterministic-simulation-testing practice teaches that determinism **rots silently** and must be *gated*, not assumed in one spot. So the engine path is guarded three ways, all in the merge gate (`scripts/check.sh`):
+1. **Corpus-wide re-run equality** — `test_determinism_corpus_wide` simulates every one of the 34 reference models (+ blueprints) twice and asserts the **full result object** is identical, failing **at** the diverging model (madsim's "fail at the source, not on a rolled-up scalar").
+2. **Cross-process hash-seed stability** — `scripts/check.sh` runs `keystone.benchmarks.determinism` in two processes with different `PYTHONHASHSEED` and compares a sha256 corpus digest; this catches dict/set-iteration nondeterminism an in-process check cannot.
+3. **Seeded property-fuzz** — `test_engine_invariants_property_fuzz` runs 200 random valid models from a fixed seed and asserts engine invariants (0 ≤ utilisation, finite non-negative latency, ordered percentiles, bottleneck is a real component, breakpoint load-invariance), printing the seed on failure to reproduce.
+
+A determinism **footgun checklist** for the engine path lives in `CONTRIBUTING.md` (set/dict iteration, `hash()` randomisation, unseeded `random`/`time`/`uuid`, float-reduction order). The digest module only *reads* engine output to fingerprint it — it produces no metric (prime directive).
 
 ## 4. L0 acceptance (what "good enough for L0" means)
 
-- **Bottleneck identification: reliable** — every in-scope reference model names a plausible bottleneck. *(Currently 5/5.)*
-- **Breakpoint: stable + deterministic** — invariant to offered load; reproducible. *(5/5.)*
-- **Cost: order-of-magnitude** — within an order of magnitude of the band; in-band when the reference model is built at the band's scale. *(4/5 in-band; URL Shortener reads 7× over because its seed model is a 12-instance high-traffic deployment vs a small-deployment band — a calibration note, not an engine error.)*
+- **Bottleneck identification: reliable** — every in-scope reference model names a plausible bottleneck. *(34/34.)*
+- **Breakpoint: stable + deterministic** — invariant to offered load; reproducible (and hash-seed stable, §3.1). *(34/34.)*
+- **Cost: order-of-magnitude** — within an order of magnitude of the band; in-band when the reference model is built at the band's scale. *(33/34 in-band; URL Shortener reads out-of-band because its seed model is a 12-instance high-traffic deployment vs a small-deployment band — a calibration note, not an engine error.)*
 
 L0 does **not** claim exact cost/latency. The scorecard ships a permanent "where this is wrong" section.
 
 ## 5. The L0 → L1 path
 
-1. **Build the reference corpus** — a `SystemModel` per in-scope blueprint at a documented reference load (the current GAP: 5/34).
+1. **Build the reference corpus** — a `SystemModel` per in-scope blueprint at a documented reference load (**done: 34/34**; field-calibration of their capacities is the remaining GAP).
 2. **Field-calibrate capacities** to published, version-pinned component benchmarks → per-component **error envelopes** (the L1 gate, Doc 03 §3). This needs the Knowledge Base (unbuilt).
 3. **Regression-test** the scorecard so accuracy cannot silently regress (this PR wires `score_all()` + tests).
 4. **Publish** per-component error envelopes once L1 data exists — never before.

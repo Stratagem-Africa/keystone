@@ -49,4 +49,18 @@ anyway (`gh pr merge` is a plain git op). For each contributor PR, the reviewer 
 - **Accuracy honesty:** no bare numbers; never present an `ASSUMPTION` as `GROUNDED`.
 - **Harm floor:** no committed secrets; uploads are untrusted input to the LLM.
 
+## Determinism footgun checklist (engine-path code review)
+The engine must be a **pure function of its inputs** — "same corpus + seed → same result" (`docs/04`). The
+merge gate enforces this (`scripts/check.sh` runs the corpus twice across hash seeds; see `docs/11` §3.1),
+but catch it in review too. On any change under `prototype/keystone/simulation.py` (or anything it calls),
+reject these unless provably output-irrelevant:
+- **Iteration over `set`/`dict` whose order can affect a result** (a sum's float order, a "first match", a
+  list build) — sort first, or iterate a stable sequence.
+- **`hash()`-dependent ordering** (relies on `PYTHONHASHSEED`) — the cross-process gate will fail this.
+- **Unseeded nondeterminism:** `random` without a passed seed, `time`/`datetime.now`, `uuid` — none belong
+  on the number path.
+- **Float-reduction order** that varies run to run (parallelism, set-order sums).
+- **Anything the LLM/UI/orchestration layer computes into a number** — that's a prime-directive breach, not
+  just a determinism one.
+
 See [`docs/07`](docs/07-Team-and-Roadmap.md) §5–6 and [`docs/08`](docs/08-Work-Breakdown.md) for the full plan.

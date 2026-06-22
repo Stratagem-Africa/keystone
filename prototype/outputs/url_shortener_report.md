@@ -4,6 +4,7 @@
 
 **Offered load:** 10,000 req/s — 99:1 read:write, cache-aside
 **Overall confidence:** medium (directional; within the model's reliable band)
+**Reproduce:** engine v0.0.1 · model 'URL Shortener' · deterministic (identical inputs → identical output)
 
 ## Verdict
 
