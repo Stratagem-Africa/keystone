@@ -30,6 +30,13 @@ else
   echo "      seed0=${d0:-<empty/error>}"; echo "      seed1=${d1:-<empty/error>}"; status=1
 fi
 
+# Grounding-corpus gate (docs/12 §5). The curated benchmark datapoints must pass the curation QA
+# (tier band-floors, corroboration counts, mandatory context note, no same-context contradictions)
+# before they can ship. Independent human citation review is still required (not automatable).
+echo; echo "==> Corpus gate  (curated grounding datapoints pass the curation QA)"
+python3 -m keystone.benchmarks.validate_corpus 2>&1 | tail -n 1
+[ "${PIPESTATUS[0]}" -eq 0 ] || status=1
+
 if command -v ruff >/dev/null 2>&1; then
   echo; echo "==> ruff check ."
   ruff check . || status=1
