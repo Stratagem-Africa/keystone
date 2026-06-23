@@ -29,6 +29,26 @@ _RHO_CEIL = 0.999         # guard against divide-by-zero as rho -> 1
 _P50_K = math.log(2)      # ~0.69
 _P95_K = math.log(20)     # ~3.00
 _P99_K = math.log(100)    # ~4.61
+_MICRO_PER_CENT = 10_000  # 1 cent = 10_000 micro-USD (ADR-009 usage-rate fixed point)
+
+
+def _cost_breakdown(model: SystemModel) -> dict[str, int]:
+    """Monthly cost split into compute + usage lines, all integer CENTS (ADR-008/ADR-009 Tier 1).
+    Usage = each component's egress/storage/request volumes × the model's per-unit rates (micro-USD),
+    rounded to cents per line so the shown lines sum to the total. Zero volumes → zero usage (existing
+    models unchanged). The engine is the sole producer of these numbers (prime directive)."""
+    r = model.pricing
+    egress_micro = storage_micro = request_micro = 0
+    for c in model.components.values():
+        egress_micro += c.egress_gb_per_month * r.egress_micro_usd_per_gb
+        storage_micro += c.storage_gb * r.storage_micro_usd_per_gb_month
+        request_micro += (c.requests_per_month * r.request_micro_usd_per_thousand) // 1000
+    return {
+        "compute": sum(c.monthly_cost for c in model.components.values()),   # already integer cents
+        "egress": round(egress_micro / _MICRO_PER_CENT),
+        "storage": round(storage_micro / _MICRO_PER_CENT),
+        "requests": round(request_micro / _MICRO_PER_CENT),
+    }
 
 
 @dataclass(frozen=True)
@@ -97,6 +117,8 @@ class SimulationResult:
     # Self-describing envelope for the headline numbers (ADR-007): each carries its model +
     # confidence qualifier so the report ships no bare number. Built only by `simulate()`.
     metrics: dict[str, Metric] = field(default_factory=dict)
+    # Monthly cost split into compute + usage lines, integer cents (ADR-009 Tier 1). Sums to monthly_cost.
+    cost_breakdown: dict[str, int] = field(default_factory=dict)
 
 
 def _arrivals(model: SystemModel) -> dict[str, float]:
@@ -180,8 +202,9 @@ def _metrics(
         "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
-        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", "sum of component monthly compute cost",
-                               confidence, caveats=("compute/instance only; no egress/managed pricing",)),
+        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month",
+                               "compute + usage (egress/storage/requests) at ASSUMPTION rates",
+                               confidence, caveats=("usage at uncited seed rates; no discounts/SaaS yet",)),
     }
 
 
@@ -233,7 +256,8 @@ def simulate(model: SystemModel) -> SimulationResult:
     p95 = mean * _P95_K
     p99 = mean * _P99_K
 
-    monthly_cost = sum(c.monthly_cost for c in model.components.values())
+    cost_breakdown = _cost_breakdown(model)
+    monthly_cost = sum(cost_breakdown.values())   # compute + usage, integer cents (ADR-009 Tier 1)
 
     caveats = [
         "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
@@ -242,8 +266,9 @@ def simulate(model: SystemModel) -> SimulationResult:
         "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).",
         "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
         "treat p95/p99 as upper-bound directional figures.",
-        "Cost is compute/instance only; data-transfer/egress and managed-service pricing "
-        "nuances are not yet modelled.",
+        "Cost = per-instance compute + declared usage (egress/storage/requests) at ASSUMPTION "
+        "rates (ADR-009 Tier 1); usage is 0 unless a component declares it, and the rates are "
+        "uncited seeds until grounded. Discounts (reserved/spot) and other services are not yet modelled.",
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
@@ -265,4 +290,5 @@ def simulate(model: SystemModel) -> SimulationResult:
         caveats=caveats,
         derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean),
         metrics=_metrics(rho_max, bp_safe, bp_theo, mean, p50, p95, p99, monthly_cost, conf),
+        cost_breakdown=cost_breakdown,
     )

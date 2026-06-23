@@ -12,7 +12,7 @@
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
 - **Latency (dominant path):** p50 ~20 ms · p95 ~86 ms · p99 ~133 ms (mean 29 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
-- **Estimated compute cost:** ~$1,045/month
+- **Estimated monthly cost:** ~$1,045/month
 
 ## Headline metrics (model · confidence)
 
@@ -25,7 +25,7 @@
 | p50_ms | 20 ms | exponential-tail: mean * ln(2) | medium |
 | p95_ms | 86 ms | exponential-tail: mean * ln(20) | medium |
 | p99_ms | 133 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $1,045/mo | sum of component monthly compute cost | medium |
+| monthly_cost | $1,045/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
 
 ## Component load
 
@@ -97,7 +97,7 @@
 - Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
-- Cost is compute/instance only; data-transfer/egress and managed-service pricing nuances are not yet modelled.
+- Cost = per-instance compute + declared usage (egress/storage/requests) at ASSUMPTION rates (ADR-009 Tier 1); usage is 0 unless a component declares it, and the rates are uncited seeds until grounded. Discounts (reserved/spot) and other services are not yet modelled.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 
 ## Assumptions (each editable)

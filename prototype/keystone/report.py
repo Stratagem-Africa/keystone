@@ -53,7 +53,15 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"- **Latency (dominant path):** p50 ~{sim.p50_ms:.0f} ms · "
              f"p95 ~{sim.p95_ms:.0f} ms · p99 ~{sim.p99_ms:.0f} ms (mean {sim.mean_latency_ms:.0f} ms)")
     L.append(f"- **Single points of failure:** {', '.join(sim.spofs) if sim.spofs else 'none detected'}")
-    L.append(f"- **Estimated compute cost:** ~${sim.monthly_cost / 100:,.0f}/month")  # cost is cents (ADR-008)
+    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.0f}/month")  # cost is cents (ADR-008)
+    # Cost breakdown (ADR-009 Tier 1) — only when usage is declared, so compute-only models are unchanged.
+    bd = sim.cost_breakdown
+    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests")):
+        parts = [f"compute ${bd['compute'] / 100:,.0f}"]
+        for k in ("egress", "storage", "requests"):
+            if bd.get(k):
+                parts.append(f"{k} ${bd[k] / 100:,.0f}")
+        L.append(f"  - breakdown: {' · '.join(parts)} /month (usage at **ASSUMPTION** rates — ADR-009)")
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
