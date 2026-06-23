@@ -123,22 +123,48 @@ class Assumption:
     provenance: str = "ASSUMPTION"    # GROUNDED | GAP | ASSUMPTION
 
 
+# Compute pricing models → integer **basis points** (per-10_000) of the on-demand list price that you
+# still PAY (ADR-009 Tier 2 discount lever). Real deployments rarely pay list: a 1–3yr commitment or
+# interruptible spot cuts the compute bill 40–90%, so "full price" overstates a believable bill ~2×.
+# Values are published-range **ASSUMPTION** ballparks (AWS-class); grounding the exact ratios with
+# citations is a tracked follow-up. `on_demand` is 10_000 bp (100% — the default), so any model that
+# does not opt into a discount is byte-for-byte unchanged. Integer bp keeps the discount math money-safe
+# (the engine applies it with round-half-up integer arithmetic — never a float; harm floor, ADR-008).
+COMPUTE_PRICING_RETAINED_BP = {
+    "on_demand":    10_000,   # list price, no commitment — the default
+    "reserved_1yr":  6_000,   # ~40% off — 1-year commitment (reserved instance / savings plan)
+    "reserved_3yr":  4_000,   # ~60% off — 3-year commitment
+    "spot":          2_000,   # ~80% off — interruptible spot/preemptible (70–90% published range)
+}
+
+
 @dataclass
 class PricingRates:
-    """Per-unit cloud rates for usage-based cost (ADR-009 Tier 1). Stored as integer **micro-USD**
-    per unit (1 USD = 1_000_000 micro-USD; 1 cent = 10_000 micro-USD) so sub-cent rates are exact;
-    the engine rounds the usage TOTAL to integer cents (harm floor, ADR-008 — money is never a float).
-    Defaults are real-ballpark AWS-class **ASSUMPTION** seeds; grounding them with citations (like the
-    per-instance costs) is a tracked follow-up."""
+    """Per-unit cloud rates for usage-based cost (ADR-009 Tier 1) + the compute pricing model (Tier 2).
+    Rates are integer **micro-USD** per unit (1 USD = 1_000_000 micro-USD; 1 cent = 10_000 micro-USD)
+    so sub-cent rates are exact; the engine rounds the usage TOTAL to integer cents (harm floor, ADR-008
+    — money is never a float). Defaults are real-ballpark AWS-class **ASSUMPTION** seeds; grounding them
+    with citations (like the per-instance costs) is a tracked follow-up."""
     egress_micro_usd_per_gb: int = 90_000          # ~$0.09/GB internet egress (AWS-class) — ASSUMPTION
     storage_micro_usd_per_gb_month: int = 23_000   # ~$0.023/GB-month (S3 Standard-class) — ASSUMPTION
     request_micro_usd_per_thousand: int = 1_000    # ~$1.00 per million requests — ASSUMPTION
+    # Tier 2 discount lever: which compute pricing model the bill assumes. Default `on_demand` = list
+    # price = no change to existing cost numbers. Applied to COMPUTE ONLY (per ADR-009 §2).
+    compute_pricing: str = "on_demand"
 
     def __post_init__(self) -> None:
         for name in ("egress_micro_usd_per_gb", "storage_micro_usd_per_gb_month", "request_micro_usd_per_thousand"):
             v = getattr(self, name)
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise ValueError(f"{name} must be a non-negative int (micro-USD), got {v!r}")
+        if self.compute_pricing not in COMPUTE_PRICING_RETAINED_BP:
+            raise ValueError(
+                f"compute_pricing must be one of {sorted(COMPUTE_PRICING_RETAINED_BP)}, got {self.compute_pricing!r}")
+
+    @property
+    def compute_retained_bp(self) -> int:
+        """Basis points (per-10_000) of on-demand compute list price actually paid under this model."""
+        return COMPUTE_PRICING_RETAINED_BP[self.compute_pricing]
 
 
 @dataclass

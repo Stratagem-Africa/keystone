@@ -25,7 +25,7 @@
 | p50_ms | 20 ms | exponential-tail: mean * ln(2) | medium |
 | p95_ms | 86 ms | exponential-tail: mean * ln(20) | medium |
 | p99_ms | 133 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $1,045.00/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
+| monthly_cost | $1,045.00/mo | compute (× pricing model) + usage (egress/storage/requests) at ASSUMPTION rates | medium |
 
 ## Component load
 
@@ -91,13 +91,14 @@
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
 - Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 29 ms.
 - Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
+- Monthly cost = compute $1,045.00 = $1,045.00 (integer cents; usage rates ASSUMPTION).
 
 ## Where this is wrong (read before trusting a number)
 
 - Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
-- Cost = per-instance compute + declared usage (egress/storage/requests) at ASSUMPTION rates (ADR-009 Tier 1); usage is 0 unless a component declares it, and the rates are uncited seeds until grounded. Discounts (reserved/spot) and other services are not yet modelled.
+- Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios that are uncited ASSUMPTION seeds. Usage is 0 unless a component declares it. AI/LLM and SaaS costs are not yet modelled.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 
 ## Assumptions (each editable)

@@ -4,6 +4,7 @@
 
 **Offered load:** 100 req/s — placeholder workload (stub — document not read)
 **Overall confidence:** medium-high (lightly loaded; estimates most reliable here)
+**Reproduce:** engine v0.0.1 · model 'URL Shortener (from note)' · deterministic (identical inputs → identical output)
 
 ## Verdict
 
@@ -11,7 +12,20 @@
 - **Max sustainable load:** ~850 req/s at the 85% safe ceiling · ~1,000 req/s theoretical
 - **Latency (dominant path):** p50 ~12 ms · p95 ~52 ms · p99 ~80 ms (mean 17 ms)
 - **Single points of failure:** Load balancer, Primary database
-- **Estimated compute cost:** ~$0/month
+- **Estimated monthly cost:** ~$0.00/month
+
+## Headline metrics (model · confidence)
+
+| Metric | Value | Model | Confidence |
+|---|--:|---|:--|
+| bottleneck_utilization | 10% | max rho = arrival / capacity | medium-high |
+| breakpoint_rps_safe | 850 req/s | system_rps * (85% ceiling / rho_max) | medium-high |
+| breakpoint_rps_theoretical | 1,000 req/s | system_rps * (1.0 / rho_max) | medium-high |
+| mean_latency_ms | 17 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium-high |
+| p50_ms | 12 ms | exponential-tail: mean * ln(2) | medium-high |
+| p95_ms | 52 ms | exponential-tail: mean * ln(20) | medium-high |
+| p99_ms | 80 ms | exponential-tail: mean * ln(100) | medium-high |
+| monthly_cost | $0.00/mo | compute (× pricing model) + usage (egress/storage/requests) at ASSUMPTION rates | medium-high |
 
 ## Component load
 
@@ -60,12 +74,23 @@
 **Kill criteria (revisit this decision if):**
 - Going to external/production traffic with 1 DB + 1 cache
 
+## How these numbers were computed
+
+- Offered load: 100 req/s split across 1 flow(s) by share (request 100%).
+- Arrival per component = sum over flows of system_rps * flow.share * visit_prob along its path (open Jackson network).
+- Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
+- Bottleneck = highest rho -> App server at rho=0.10 (100 / 1,000 rps).
+- Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 850 req/s, theoretical@100% ~ 1,000 req/s.
+- Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('request', 100% share) -> mean 17 ms.
+- Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
+- Monthly cost = compute $0.00 = $0.00 (integer cents; usage rates ASSUMPTION).
+
 ## Where this is wrong (read before trusting a number)
 
 - Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
-- Cost is compute/instance only; data-transfer/egress and managed-service pricing nuances are not yet modelled.
+- Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios that are uncited ASSUMPTION seeds. Usage is 0 unless a component declares it. AI/LLM and SaaS costs are not yet modelled.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 
 ## Assumptions (each editable)

@@ -30,13 +30,23 @@ _P50_K = math.log(2)      # ~0.69
 _P95_K = math.log(20)     # ~3.00
 _P99_K = math.log(100)    # ~4.61
 _MICRO_PER_CENT = 10_000  # 1 cent = 10_000 micro-USD (ADR-009 usage-rate fixed point)
+_BP_FULL = 10_000         # basis-point denominator (per-10_000) for the compute discount lever
+_BP_HALF = _BP_FULL // 2  # round-half-up offset, so the discount stays pure-integer money (no float)
+
+
+def _discount_compute(list_cents: int, retained_bp: int) -> int:
+    """Apply the compute pricing model (ADR-009 Tier 2): the cents actually paid = list × retained_bp,
+    with round-half-up done in PURE INTEGER arithmetic (harm floor — money never touches a float).
+    on_demand (retained_bp = 10_000) returns `list_cents` unchanged, so existing numbers are identical."""
+    return (list_cents * retained_bp + _BP_HALF) // _BP_FULL
 
 
 def _cost_breakdown(model: SystemModel) -> dict[str, int]:
-    """Monthly cost split into compute + usage lines, all integer CENTS (ADR-008/ADR-009 Tier 1).
-    Usage = each component's egress/storage/request volumes × the model's per-unit rates (micro-USD),
-    rounded to cents per line so the shown lines sum to the total. Zero volumes → zero usage (existing
-    models unchanged). The engine is the sole producer of these numbers (prime directive)."""
+    """Monthly cost split into compute + usage lines, all integer CENTS (ADR-008/ADR-009 Tiers 1–2).
+    Compute = per-instance compute × the pricing-model discount (Tier 2). Usage = each component's
+    egress/storage/request volumes × the model's per-unit rates (micro-USD), rounded to cents per line
+    so the shown lines sum to the total. Zero volumes + on_demand pricing → existing models unchanged.
+    The engine is the sole producer of these numbers (prime directive)."""
     r = model.pricing
     egress_micro = storage_micro = request_acc = 0
     for c in model.components.values():
@@ -45,8 +55,9 @@ def _cost_breakdown(model: SystemModel) -> dict[str, int]:
         # accumulate the numerator (requests × rate-per-1000) and divide ONCE, so no per-component
         # truncation bias — the request line is exact to the cent (review nit).
         request_acc += c.requests_per_month * r.request_micro_usd_per_thousand
+    list_compute = sum(c.monthly_cost for c in model.components.values())   # on-demand list, integer cents
     return {
-        "compute": sum(c.monthly_cost for c in model.components.values()),   # already integer cents
+        "compute": _discount_compute(list_compute, r.compute_retained_bp),   # Tier 2 discount applied
         "egress": round(egress_micro / _MICRO_PER_CENT),
         "storage": round(storage_micro / _MICRO_PER_CENT),
         "requests": round(request_acc / (1000 * _MICRO_PER_CENT)),
@@ -121,6 +132,10 @@ class SimulationResult:
     metrics: dict[str, Metric] = field(default_factory=dict)
     # Monthly cost split into compute + usage lines, integer cents (ADR-009 Tier 1). Sums to monthly_cost.
     cost_breakdown: dict[str, int] = field(default_factory=dict)
+    # On-demand (list) compute before the Tier-2 pricing discount, integer cents. Equals
+    # cost_breakdown["compute"] under on_demand; lets the report show "list → charged (−X%)" honestly.
+    compute_list_cents: int = 0
+    compute_pricing: str = "on_demand"   # which pricing model produced the compute line (ADR-009 Tier 2)
 
 
 def _arrivals(model: SystemModel) -> dict[str, float]:
@@ -150,6 +165,8 @@ def _derivation(
     bp_safe: float,
     bp_theo: float,
     mean: float,
+    cost_breakdown: dict[str, int],
+    compute_list_cents: int,
 ) -> list[str]:
     """The deterministic derivation of every headline number (a generated audit trail).
 
@@ -184,6 +201,24 @@ def _derivation(
         "Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x "
         f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f} (over-states the tail; treat as a directional upper bound)."
     )
+    # Cost derivation: list compute -> pricing discount -> + usage lines (all integer cents).
+    charged = cost_breakdown.get("compute", 0)
+    pricing = model.pricing.compute_pricing
+    usage_bits = ", ".join(
+        f"{k} ${cost_breakdown[k] / 100:,.2f}" for k in ("egress", "storage", "requests")
+        if cost_breakdown.get(k)
+    )
+    if pricing != "on_demand" and compute_list_cents != charged:
+        off = 1 - (charged / compute_list_cents) if compute_list_cents else 0.0
+        lines.append(
+            f"Compute pricing '{pricing}': list ${compute_list_cents / 100:,.2f} -> "
+            f"charged ${charged / 100:,.2f} ({off:.0%} off, ASSUMPTION discount ratio)."
+        )
+    lines.append(
+        f"Monthly cost = compute ${charged / 100:,.2f}"
+        + (f" + usage ({usage_bits})" if usage_bits else "")
+        + f" = ${sum(cost_breakdown.values()) / 100:,.2f} (integer cents; usage rates ASSUMPTION)."
+    )
     return lines
 
 
@@ -205,8 +240,8 @@ def _metrics(
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month",
-                               "compute + usage (egress/storage/requests) at ASSUMPTION rates",
-                               confidence, caveats=("usage at uncited seed rates; no discounts/SaaS yet",)),
+                               "compute (× pricing model) + usage (egress/storage/requests) at ASSUMPTION rates",
+                               confidence, caveats=("usage + discount ratios are uncited seeds; no SaaS/AI cost yet",)),
     }
 
 
@@ -259,7 +294,8 @@ def simulate(model: SystemModel) -> SimulationResult:
     p99 = mean * _P99_K
 
     cost_breakdown = _cost_breakdown(model)
-    monthly_cost = sum(cost_breakdown.values())   # compute + usage, integer cents (ADR-009 Tier 1)
+    monthly_cost = sum(cost_breakdown.values())   # compute + usage, integer cents (ADR-009 Tiers 1–2)
+    compute_list_cents = sum(c.monthly_cost for c in model.components.values())  # on-demand list (pre-discount)
 
     caveats = [
         "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
@@ -268,9 +304,10 @@ def simulate(model: SystemModel) -> SimulationResult:
         "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).",
         "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
         "treat p95/p99 as upper-bound directional figures.",
-        "Cost = per-instance compute + declared usage (egress/storage/requests) at ASSUMPTION "
-        "rates (ADR-009 Tier 1); usage is 0 unless a component declares it, and the rates are "
-        "uncited seeds until grounded. Discounts (reserved/spot) and other services are not yet modelled.",
+        "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
+        "(egress/storage/requests) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to "
+        "on_demand list price; reserved/spot apply published-range discount ratios that are uncited "
+        "ASSUMPTION seeds. Usage is 0 unless a component declares it. AI/LLM and SaaS costs are not yet modelled.",
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
@@ -290,7 +327,10 @@ def simulate(model: SystemModel) -> SimulationResult:
         spofs=spofs,
         confidence=conf,
         caveats=caveats,
-        derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean),
+        derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean,
+                               cost_breakdown, compute_list_cents),
         metrics=_metrics(rho_max, bp_safe, bp_theo, mean, p50, p95, p99, monthly_cost, conf),
         cost_breakdown=cost_breakdown,
+        compute_list_cents=compute_list_cents,
+        compute_pricing=model.pricing.compute_pricing,
     )
