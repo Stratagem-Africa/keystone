@@ -55,15 +55,25 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"- **Single points of failure:** {', '.join(sim.spofs) if sim.spofs else 'none detected'}")
     # Money is rendered at 2 decimals so sub-dollar / fractional-cost lines survive and the breakdown
     # reconciles to the total (the integer-cent math is exact; only the display formats it).
-    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.2f}/month")  # cost is cents (ADR-008)
-    # Cost breakdown (ADR-009 Tier 1) — only when usage is declared, so compute-only models are unchanged.
+    discounted = sim.compute_pricing != "on_demand" and sim.compute_list_cents != sim.cost_breakdown.get("compute")
+    pricing_tag = f" · _{sim.compute_pricing} pricing_" if discounted else ""
+    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.2f}/month{pricing_tag}")  # cents (ADR-008)
+    # Cost breakdown (ADR-009 Tiers 1–2) — shown when usage is declared OR a non-list pricing model is
+    # chosen, so plain compute-only/on-demand models are unchanged.
     bd = sim.cost_breakdown
-    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests")):
-        parts = [f"compute ${bd['compute'] / 100:,.2f}"]
+    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests") or discounted):
+        # Honest compute line: under a discount, show list -> charged so the discount is never hidden.
+        if discounted:
+            compute_part = (f"compute ${bd['compute'] / 100:,.2f} "
+                            f"(_{sim.compute_pricing}_, from ${sim.compute_list_cents / 100:,.2f} list)")
+        else:
+            compute_part = f"compute ${bd['compute'] / 100:,.2f}"
+        parts = [compute_part]
         for k in ("egress", "storage", "requests"):
             if bd.get(k):
                 parts.append(f"{k} ${bd[k] / 100:,.2f}")
-        L.append(f"  - breakdown: {' · '.join(parts)} /month (usage at **ASSUMPTION** rates — ADR-009)")
+        L.append(f"  - breakdown: {' · '.join(parts)} /month "
+                 "(usage rates **+ discount ratios** are ASSUMPTION — ADR-009)")
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
