@@ -22,14 +22,14 @@ def _model(**usage) -> SystemModel:
 
 class TestUsageCost(unittest.TestCase):
     def test_default_rates_compute_known_usage_cost(self):
-        # 1000 GB egress @ ~$0.09, 500 GB storage @ ~$0.023/mo, 10M requests @ ~$1.00/M
+        # GROUNDED rates (grounded_pricing_rates.json): egress $0.09/GB, storage $0.021/GB-mo, requests $3.00/1M
         sim = simulate(_model(egress_gb_per_month=1000, storage_gb=500, requests_per_month=10_000_000))
         bd = sim.cost_breakdown
         self.assertEqual(bd["compute"], 5000)      # $50.00
-        self.assertEqual(bd["egress"], 9000)       # 1000 × $0.09  = $90.00
-        self.assertEqual(bd["storage"], 1150)      # 500  × $0.023 = $11.50
-        self.assertEqual(bd["requests"], 1000)     # 10M  × $1/M   = $10.00
-        self.assertEqual(sim.monthly_cost, 5000 + 9000 + 1150 + 1000)   # $161.50
+        self.assertEqual(bd["egress"], 9000)       # 1000 × $0.09   = $90.00
+        self.assertEqual(bd["storage"], 1050)      # 500  × $0.021  = $10.50
+        self.assertEqual(bd["requests"], 3000)     # 10M  × $3/M    = $30.00
+        self.assertEqual(sim.monthly_cost, 5000 + 9000 + 1050 + 3000)   # $180.50
         self.assertIsInstance(sim.monthly_cost, int)   # harm floor: integer cents
 
     def test_no_usage_is_compute_only(self):

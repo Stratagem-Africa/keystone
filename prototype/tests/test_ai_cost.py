@@ -25,12 +25,12 @@ def _model(**llm) -> SystemModel:
 
 class TestAICost(unittest.TestCase):
     def test_worked_example(self):
-        # 10M input tokens @ ~$0.80/1M = $8.00; 2M output @ ~$4.00/1M = $8.00 → ai $16.00
+        # GROUNDED rates: input $0.50/1M, output $4.00/1M → 10M in = $5.00, 2M out = $8.00, ai $13.00
         sim = simulate(_model(llm_input_tokens_per_month=10_000_000,
                               llm_output_tokens_per_month=2_000_000))
-        self.assertEqual(sim.cost_breakdown["ai"], 1600)          # $16.00
+        self.assertEqual(sim.cost_breakdown["ai"], 1300)          # $13.00 (500 + 800)
         self.assertEqual(sim.cost_breakdown["compute"], 5000)     # compute untouched
-        self.assertEqual(sim.monthly_cost, 5000 + 1600)
+        self.assertEqual(sim.monthly_cost, 5000 + 1300)
         self.assertIsInstance(sim.cost_breakdown["ai"], int)      # harm floor: integer cents
 
     def test_output_priced_higher_than_input(self):
@@ -54,8 +54,8 @@ class TestAICost(unittest.TestCase):
         a = Component("a", K.APP_SERVER, "A", per_instance_rps=1.0, llm_input_tokens_per_month=1)
         b = Component("b", K.APP_SERVER, "B", per_instance_rps=1.0, llm_input_tokens_per_month=1)
         m = SystemModel("ai", {"a": a, "b": b}, [Flow("f", 1.0, [FlowStep("a")])], Workload(1.0))
-        # 2 tokens × 800 micro/1k = 1600 micro = 0.16 micro-cents → rounds to 0 cents, but the SUM path
-        # must be exact: assert it equals round((1+1)*800 / (1000*10_000)) == 0 and reconciles.
+        # 2 tokens × 500 micro/1k = 1000 micro → rounds to 0 cents, but the SUM path
+        # must be exact: assert it equals round((1+1)*500 / (1000*10_000)) == 0 and reconciles.
         sim = simulate(m)
         self.assertEqual(sim.cost_breakdown["ai"], 0)
         self.assertEqual(sum(sim.cost_breakdown.values()), sim.monthly_cost)

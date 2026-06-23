@@ -131,16 +131,17 @@ class Assumption:
 
 # Compute pricing models → integer **basis points** (per-10_000) of the on-demand list price that you
 # still PAY (ADR-009 Tier 2 discount lever). Real deployments rarely pay list: a 1–3yr commitment or
-# interruptible spot cuts the compute bill 40–90%, so "full price" overstates a believable bill ~2×.
-# Values are published-range **ASSUMPTION** ballparks (AWS-class); grounding the exact ratios with
-# citations is a tracked follow-up. `on_demand` is 10_000 bp (100% — the default), so any model that
-# does not opt into a discount is byte-for-byte unchanged. Integer bp keeps the discount math money-safe
-# (the engine applies it with round-half-up integer arithmetic — never a float; harm floor, ADR-008).
+# interruptible spot cuts the compute bill, so "full price" overstates a believable bill.
+# Values were RESEARCHED + 3x adversarially verified (see `benchmarks/grounded_pricing_rates.json`,
+# 2026-06-23) — central = % off RETAINED as bp; pending Bifola's ratification of the citations.
+# `on_demand` is 10_000 bp (100% — the default), so any model that does not opt into a discount is
+# byte-for-byte unchanged. Integer bp keeps the discount math money-safe (round-half-up integer
+# arithmetic — never a float; harm floor, ADR-008).
 COMPUTE_PRICING_RETAINED_BP = {
     "on_demand":    10_000,   # list price, no commitment — the default
-    "reserved_1yr":  6_000,   # ~40% off — 1-year commitment (reserved instance / savings plan)
-    "reserved_3yr":  4_000,   # ~60% off — 3-year commitment
-    "spot":          2_000,   # ~80% off — interruptible spot/preemptible (70–90% published range)
+    "reserved_1yr":  7_000,   # ~30% off — 1yr no-upfront flexible (band 28–42% off); GROUNDED T2, 2/3 verified
+    "reserved_3yr":  4_500,   # ~55% off — 3yr commitment (band 46–72% off); GROUNDED T1, 3/3 verified
+    "spot":          2_300,   # ~77% off — interruptible spot/preemptible (band 55–91% off); GROUNDED T1, 2/3 verified
 }
 
 
@@ -149,16 +150,16 @@ class PricingRates:
     """Per-unit cloud rates for usage-based cost (ADR-009 Tier 1) + the compute pricing model (Tier 2).
     Rates are integer **micro-USD** per unit (1 USD = 1_000_000 micro-USD; 1 cent = 10_000 micro-USD)
     so sub-cent rates are exact; the engine rounds the usage TOTAL to integer cents (harm floor, ADR-008
-    — money is never a float). Defaults are real-ballpark AWS-class **ASSUMPTION** seeds; grounding them
-    with citations (like the per-instance costs) is a tracked follow-up."""
-    egress_micro_usd_per_gb: int = 90_000          # ~$0.09/GB internet egress (AWS-class) — ASSUMPTION
-    storage_micro_usd_per_gb_month: int = 23_000   # ~$0.023/GB-month (S3 Standard-class) — ASSUMPTION
-    request_micro_usd_per_thousand: int = 1_000    # ~$1.00 per million requests — ASSUMPTION
-    # AI/LLM per-token rates (ADR-009 Tier 2 part 2), micro-USD per 1_000 tokens. Output is dearer than
-    # input. Seeds are a small-fast-model class ballpark (~$0.80/1M in, ~$4.00/1M out) — ASSUMPTION;
-    # real model prices vary 100×, so this is a placeholder until a model is chosen + grounded.
-    llm_input_micro_usd_per_1k_tokens: int = 800    # ~$0.80 per 1M input tokens — ASSUMPTION
-    llm_output_micro_usd_per_1k_tokens: int = 4_000  # ~$4.00 per 1M output tokens — ASSUMPTION
+    — money is never a float). Defaults were RESEARCHED + 3x adversarially verified (devil's-advocate)
+    against real vendor/aggregator pricing pages — see `benchmarks/grounded_pricing_rates.json` (2026-06-23)
+    for the value, band, tier, and citations of each. Pending Bifola's ratification of the citations."""
+    egress_micro_usd_per_gb: int = 90_000          # $0.09/GB internet egress, US first paid tier (band 0.087–0.12); GROUNDED T2, 3/3
+    storage_micro_usd_per_gb_month: int = 21_000   # $0.021/GB-mo object storage standard (band 0.018–0.0253); GROUNDED T2, 3/3
+    request_micro_usd_per_thousand: int = 3_000    # $3.00 per 1M API-gateway requests (band 1.00–3.50); GROUNDED T1, 3/3 (was a 3x-low guess)
+    # AI/LLM per-token rates (ADR-009 Tier 2 part 2), micro-USD per 1_000 tokens. Output dearer than input.
+    # Small/fast model class (GPT-4o-mini / Haiku / Gemini Flash) — real prices vary widely, see the band.
+    llm_input_micro_usd_per_1k_tokens: int = 500    # $0.50 per 1M input tokens (band 0.10–1.00); GROUNDED T1, 3/3
+    llm_output_micro_usd_per_1k_tokens: int = 4_000  # $4.00 per 1M output tokens (band 0.40–9.00); GROUNDED T1, 1/3 — band corrected by verifiers
     # Tier 2 discount lever: which compute pricing model the bill assumes. Default `on_demand` = list
     # price = no change to existing cost numbers. Applied to COMPUTE ONLY (per ADR-009 §2).
     compute_pricing: str = "on_demand"
