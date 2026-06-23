@@ -219,10 +219,13 @@ def _derivation(
             f"Compute pricing '{pricing}': list ${compute_list_cents / 100:,.2f} -> "
             f"charged ${charged / 100:,.2f} ({off:.0%} off, ASSUMPTION discount ratio)."
         )
+    # Name AI rates explicitly when an AI line is present — AI token prices are a placeholder model
+    # class (real prices vary ~100×), a stronger caveat than the generic usage rates (honesty review).
+    rate_note = "usage/AI rates ASSUMPTION" if cost_breakdown.get("ai") else "usage rates ASSUMPTION"
     lines.append(
         f"Monthly cost = compute ${charged / 100:,.2f}"
         + (f" + usage ({usage_bits})" if usage_bits else "")
-        + f" = ${sum(cost_breakdown.values()) / 100:,.2f} (integer cents; usage rates ASSUMPTION)."
+        + f" = ${sum(cost_breakdown.values()) / 100:,.2f} (integer cents; {rate_note})."
     )
     return lines
 
