@@ -1,6 +1,6 @@
 # ADR-009 — Cost model v2: a usage-based ("per-use") layer + the cost taxonomy
 
-**Status:** **Proposed** — awaiting Bifola's decision on **scope** (which tiers below to build). No code until ratified. Touches the engine's cost computation + the model schema + the grounding metrics, so per CLAUDE.md (schema / money / trust-core) **AI proposes, a human ratifies**.
+**Status:** **Accepted** (2026-06-23 — Bifola: "all your recommendations") → build **Tier 1 now, Tier 2 next, defer the rest, on-prem out**. **Tier 1 (usage-based egress/storage/requests) is implemented** (PR #68, gated + adversarially reviewed; existing costs verified byte-unchanged). Tier 2 (reserved/spot discount lever + AI/LLM token cost) and **grounding the usage rates with citations** are the tracked next steps. Touches the engine's cost computation + model schema + money, so per CLAUDE.md it landed via branch → PR → review-gate, never self-applied unprompted.
 **Date:** 2026-06-23 · **Owner:** Keystone A (Bifola)
 **Relates to:** `docs/04` F5 (sim outputs incl. cost), ADR-008 (money = integer minor units), ADR-006 + `docs/12` (the grounding KB — new per-unit rates would be grounded the same way), `prototype/keystone/simulation.py` (the sole producer of numbers), `prototype/keystone/report.py` (the "cost is compute/instance only…" caveat this closes).
 
