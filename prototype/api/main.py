@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
 from keystone.simulation import simulate
+from keystone.ingestion import scan_and_redact_secrets
+from api.jobs import create_job
 
 app = FastAPI(title="Keystone API", version="0.1.0")
 
@@ -62,6 +64,9 @@ class DesignRequest(BaseModel):
     # clean 422 at the edge and the engine only ever sees a sane value.
     system_rps: float = Field(10_000, gt=0, le=10_000_000)
 
+class IntentRequest(BaseModel):
+    text: str = Field(..., min_length=10, max_length=10_000)
+
 
 @app.post("/design")
 def design(req: DesignRequest) -> dict:
@@ -80,6 +85,22 @@ def design(req: DesignRequest) -> dict:
         "simulation": dataclasses.asdict(sim_result),
         "adrs": [dataclasses.asdict(adr) for adr in adrs],
     })
+
+@app.post("/intent")
+def submit_intent(req: IntentRequest) -> dict:
+    # Scan the raw text for secrets BEFORE storing anything (harm floor rule).
+    clean_text, secrets_found = scan_and_redact_secrets(req.text)
+    # Create a job record and get back a job_id straight away.
+    job = create_job(intent_text=clean_text, secrets_found=secrets_found)
+    # Build the response. warnings tells the frontend if any secrets were redacted.
+    response: dict = {"job_id": job.job_id, "status": job.status}
+    if secrets_found:
+        response["warnings"] = [f"secrets redacted on intake: {', '.join(secrets_found)}"]
+
+    return response
+
+
+    
 
 
 if __name__ == "__main__":
