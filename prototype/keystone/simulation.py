@@ -42,25 +42,30 @@ def _discount_compute(list_cents: int, retained_bp: int) -> int:
 
 
 def _cost_breakdown(model: SystemModel) -> dict[str, int]:
-    """Monthly cost split into compute + usage lines, all integer CENTS (ADR-008/ADR-009 Tiers 1–2).
-    Compute = per-instance compute × the pricing-model discount (Tier 2). Usage = each component's
-    egress/storage/request volumes × the model's per-unit rates (micro-USD), rounded to cents per line
-    so the shown lines sum to the total. Zero volumes + on_demand pricing → existing models unchanged.
-    The engine is the sole producer of these numbers (prime directive)."""
+    """Monthly cost split into compute + usage + AI lines, all integer CENTS (ADR-008/ADR-009 Tiers 1–2).
+    Compute = per-instance compute × the pricing-model discount (Tier 2 part 1). Usage = each component's
+    egress/storage/request volumes × the model's per-unit rates. AI = LLM input/output token volumes ×
+    per-1K-token rates (Tier 2 part 2). All rates are micro-USD; each line accumulates its numerator and
+    divides ONCE, rounded to cents, so the shown lines sum to the total with no per-component truncation
+    bias. Zero volumes + on_demand pricing → existing models unchanged. The engine is the sole producer
+    of these numbers (prime directive)."""
     r = model.pricing
-    egress_micro = storage_micro = request_acc = 0
+    egress_micro = storage_micro = request_acc = token_acc = 0
     for c in model.components.values():
         egress_micro += c.egress_gb_per_month * r.egress_micro_usd_per_gb
         storage_micro += c.storage_gb * r.storage_micro_usd_per_gb_month
-        # accumulate the numerator (requests × rate-per-1000) and divide ONCE, so no per-component
-        # truncation bias — the request line is exact to the cent (review nit).
+        # accumulate each per-1000-unit numerator and divide ONCE (below), so no per-component
+        # truncation bias — the request/AI lines are exact to the cent (review nit).
         request_acc += c.requests_per_month * r.request_micro_usd_per_thousand
+        token_acc += (c.llm_input_tokens_per_month * r.llm_input_micro_usd_per_1k_tokens
+                      + c.llm_output_tokens_per_month * r.llm_output_micro_usd_per_1k_tokens)
     list_compute = sum(c.monthly_cost for c in model.components.values())   # on-demand list, integer cents
     return {
         "compute": _discount_compute(list_compute, r.compute_retained_bp),   # Tier 2 discount applied
         "egress": round(egress_micro / _MICRO_PER_CENT),
         "storage": round(storage_micro / _MICRO_PER_CENT),
         "requests": round(request_acc / (1000 * _MICRO_PER_CENT)),
+        "ai": round(token_acc / (1000 * _MICRO_PER_CENT)),   # LLM tokens (per-1K rate) → cents
     }
 
 
@@ -205,7 +210,7 @@ def _derivation(
     charged = cost_breakdown.get("compute", 0)
     pricing = model.pricing.compute_pricing
     usage_bits = ", ".join(
-        f"{k} ${cost_breakdown[k] / 100:,.2f}" for k in ("egress", "storage", "requests")
+        f"{k} ${cost_breakdown[k] / 100:,.2f}" for k in ("egress", "storage", "requests", "ai")
         if cost_breakdown.get(k)
     )
     if pricing != "on_demand" and compute_list_cents != charged:
@@ -240,8 +245,8 @@ def _metrics(
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month",
-                               "compute (× pricing model) + usage (egress/storage/requests) at ASSUMPTION rates",
-                               confidence, caveats=("usage + discount ratios are uncited seeds; no SaaS/AI cost yet",)),
+                               "compute (× pricing model) + usage (egress/storage/requests) + AI tokens at ASSUMPTION rates",
+                               confidence, caveats=("usage/AI/discount ratios are uncited seeds; no third-party SaaS cost yet",)),
     }
 
 
@@ -305,9 +310,11 @@ def simulate(model: SystemModel) -> SimulationResult:
         "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
         "treat p95/p99 as upper-bound directional figures.",
         "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
-        "(egress/storage/requests) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to "
-        "on_demand list price; reserved/spot apply published-range discount ratios that are uncited "
-        "ASSUMPTION seeds. Usage is 0 unless a component declares it. AI/LLM and SaaS costs are not yet modelled.",
+        "(egress/storage/requests) + AI/LLM tokens (input/output) at ASSUMPTION rates (ADR-009 Tiers 1–2). "
+        "Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. "
+        "AI token rates are a placeholder model class (real prices vary ~100× by model). All these rates "
+        "are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. "
+        "Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope.",
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]

@@ -61,7 +61,7 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     # Cost breakdown (ADR-009 Tiers 1–2) — shown when usage is declared OR a non-list pricing model is
     # chosen, so plain compute-only/on-demand models are unchanged.
     bd = sim.cost_breakdown
-    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests") or discounted):
+    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests") or bd.get("ai") or discounted):
         # Honest compute line: under a discount, show list -> charged so the discount is never hidden.
         if discounted:
             compute_part = (f"compute ${bd['compute'] / 100:,.2f} "
@@ -69,11 +69,11 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
         else:
             compute_part = f"compute ${bd['compute'] / 100:,.2f}"
         parts = [compute_part]
-        for k in ("egress", "storage", "requests"):
+        for k in ("egress", "storage", "requests", "ai"):
             if bd.get(k):
                 parts.append(f"{k} ${bd[k] / 100:,.2f}")
         L.append(f"  - breakdown: {' · '.join(parts)} /month "
-                 "(usage rates **+ discount ratios** are ASSUMPTION — ADR-009)")
+                 "(usage / AI / discount ratios are **ASSUMPTION** — ADR-009)")
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
