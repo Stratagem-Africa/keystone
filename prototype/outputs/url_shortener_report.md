@@ -12,7 +12,7 @@
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
 - **Latency (dominant path):** p50 ~20 ms · p95 ~86 ms · p99 ~133 ms (mean 29 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
-- **Estimated monthly cost:** ~$1,045/month
+- **Estimated monthly cost:** ~$1,045.00/month
 
 ## Headline metrics (model · confidence)
 
@@ -25,7 +25,7 @@
 | p50_ms | 20 ms | exponential-tail: mean * ln(2) | medium |
 | p95_ms | 86 ms | exponential-tail: mean * ln(20) | medium |
 | p99_ms | 133 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $1,045/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
+| monthly_cost | $1,045.00/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
 
 ## Component load
 

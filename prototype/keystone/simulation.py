@@ -38,16 +38,18 @@ def _cost_breakdown(model: SystemModel) -> dict[str, int]:
     rounded to cents per line so the shown lines sum to the total. Zero volumes → zero usage (existing
     models unchanged). The engine is the sole producer of these numbers (prime directive)."""
     r = model.pricing
-    egress_micro = storage_micro = request_micro = 0
+    egress_micro = storage_micro = request_acc = 0
     for c in model.components.values():
         egress_micro += c.egress_gb_per_month * r.egress_micro_usd_per_gb
         storage_micro += c.storage_gb * r.storage_micro_usd_per_gb_month
-        request_micro += (c.requests_per_month * r.request_micro_usd_per_thousand) // 1000
+        # accumulate the numerator (requests × rate-per-1000) and divide ONCE, so no per-component
+        # truncation bias — the request line is exact to the cent (review nit).
+        request_acc += c.requests_per_month * r.request_micro_usd_per_thousand
     return {
         "compute": sum(c.monthly_cost for c in model.components.values()),   # already integer cents
         "egress": round(egress_micro / _MICRO_PER_CENT),
         "storage": round(storage_micro / _MICRO_PER_CENT),
-        "requests": round(request_micro / _MICRO_PER_CENT),
+        "requests": round(request_acc / (1000 * _MICRO_PER_CENT)),
     }
 
 

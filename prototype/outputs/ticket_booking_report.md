@@ -12,7 +12,7 @@
 - **Max sustainable load:** ~6,800 req/s at the 85% safe ceiling · ~8,000 req/s theoretical
 - **Latency (dominant path):** p50 ~21 ms · p95 ~93 ms · p99 ~142 ms (mean 31 ms)
 - **Single points of failure:** Load balancer, Seat-availability cache, Booking request queue, Inventory DB (seats)
-- **Estimated monthly cost:** ~$895/month
+- **Estimated monthly cost:** ~$895.00/month
 
 ## Headline metrics (model · confidence)
 
@@ -25,7 +25,7 @@
 | p50_ms | 21 ms | exponential-tail: mean * ln(2) | medium |
 | p95_ms | 93 ms | exponential-tail: mean * ln(20) | medium |
 | p99_ms | 142 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $895/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
+| monthly_cost | $895.00/mo | compute + usage (egress/storage/requests) at ASSUMPTION rates | medium |
 
 ## Component load
 
