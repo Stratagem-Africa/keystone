@@ -53,7 +53,17 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append(f"- **Latency (dominant path):** p50 ~{sim.p50_ms:.0f} ms · "
              f"p95 ~{sim.p95_ms:.0f} ms · p99 ~{sim.p99_ms:.0f} ms (mean {sim.mean_latency_ms:.0f} ms)")
     L.append(f"- **Single points of failure:** {', '.join(sim.spofs) if sim.spofs else 'none detected'}")
-    L.append(f"- **Estimated compute cost:** ~${sim.monthly_cost / 100:,.0f}/month")  # cost is cents (ADR-008)
+    # Money is rendered at 2 decimals so sub-dollar / fractional-cost lines survive and the breakdown
+    # reconciles to the total (the integer-cent math is exact; only the display formats it).
+    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.2f}/month")  # cost is cents (ADR-008)
+    # Cost breakdown (ADR-009 Tier 1) — only when usage is declared, so compute-only models are unchanged.
+    bd = sim.cost_breakdown
+    if bd and (bd.get("egress") or bd.get("storage") or bd.get("requests")):
+        parts = [f"compute ${bd['compute'] / 100:,.2f}"]
+        for k in ("egress", "storage", "requests"):
+            if bd.get(k):
+                parts.append(f"{k} ${bd[k] / 100:,.2f}")
+        L.append(f"  - breakdown: {' · '.join(parts)} /month (usage at **ASSUMPTION** rates — ADR-009)")
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
@@ -70,7 +80,7 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
             elif m.unit == "ratio":
                 val = f"{m.value * 100:.0f}%"
             elif m.unit == "usd_minor_per_month":
-                val = f"${m.value / 100:,.0f}/mo"  # value is integer cents (ADR-008)
+                val = f"${m.value / 100:,.2f}/mo"  # integer cents → 2dp dollars (ADR-008)
             else:
                 val = f"{m.value:,.0f} ms"
             short_conf = m.confidence.split("(")[0].strip()
