@@ -240,7 +240,7 @@ def _metrics(
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month",
-                               "compute × pricing-model discount + usage (egress/storage/requests) at ASSUMPTION rates",
+                               "compute (× pricing model) + usage (egress/storage/requests) at ASSUMPTION rates",
                                confidence, caveats=("usage + discount ratios are uncited seeds; no SaaS/AI cost yet",)),
     }
 
