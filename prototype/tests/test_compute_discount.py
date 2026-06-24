@@ -33,8 +33,8 @@ class TestComputeDiscount(unittest.TestCase):
         self.assertEqual(sim.monthly_cost, 10_000)
 
     def test_published_range_discounts(self):
-        # list $100 → reserved_1yr 40% off, reserved_3yr 60% off, spot 80% off (ASSUMPTION ratios)
-        for pricing, expected in (("reserved_1yr", 6_000), ("reserved_3yr", 4_000), ("spot", 2_000)):
+        # list $100 → GROUNDED: reserved_1yr 30% off, reserved_3yr 55% off, spot 77% off (bp retained)
+        for pricing, expected in (("reserved_1yr", 7_000), ("reserved_3yr", 4_500), ("spot", 2_300)):
             sim = simulate(_model(pricing))
             self.assertEqual(sim.cost_breakdown["compute"], expected, pricing)
             self.assertEqual(sim.compute_list_cents, 10_000, pricing)   # list always the un-discounted price
@@ -55,11 +55,11 @@ class TestComputeDiscount(unittest.TestCase):
         self.assertEqual(sum(sim.cost_breakdown.values()), sim.monthly_cost)
 
     def test_rounding_is_half_up_integer(self):
-        # list = 10_003 cents, reserved_3yr (×0.40) = 4001.2 → 4001; pure-integer, no float drift
+        # list = 10_003 cents, reserved_3yr (×0.45 retained) = 4501.35 → 4501; pure-integer, no float drift
         c = Component("c", K.APP_SERVER, "C", per_instance_rps=1.0, monthly_cost_per_instance=10_003)
         m = SystemModel("u", {"c": c}, [Flow("f", 1.0, [FlowStep("c")])], Workload(1.0),
                         pricing=PricingRates(compute_pricing="reserved_3yr"))
-        self.assertEqual(simulate(m).cost_breakdown["compute"], 4001)
+        self.assertEqual(simulate(m).cost_breakdown["compute"], 4501)
 
     def test_unknown_pricing_model_rejected(self):
         with self.assertRaises(ValueError):

@@ -1,0 +1,175 @@
+{
+  "_about": "Grounded evidence for the ADR-009 cost RATES (PricingRates + compute discount lever). Each rate was researched from real vendor/aggregator pricing pages and then attacked by 3 independent devil's-advocate verifiers (lenses: citation-resolution / unit-region-SKU / cherry-pick-band), each of which re-fetched the cited URLs. Values are integer engine units (micro-USD per the rate's unit; basis points RETAINED for discounts). This file is the durable, human-ratifiable record — AI proposes, a human (Bifola) ratifies the citations before this is treated as GROUNDED. Region/SKU scope is US-East / standard tiers. measured_date 2026-06-23. NOT YET wired into the engine KB (KB_PROVIDER stays stub); the PricingRates seed values mirror the `engine_value` central here.",
+  "verification_method": "research + 3x adversarial verification (devil's-advocate, refute-by-default); citations independently re-fetched; load-bearing rates spot-checked again by the lead before encoding",
+  "measured_date": "2026-06-23",
+  "rates": [
+    {
+      "id": "egress",
+      "engine_field": "PricingRates.egress_micro_usd_per_gb",
+      "engine_value": 90000,
+      "engine_band": [87000, 120000],
+      "engine_unit": "micro_usd_per_gb",
+      "natural_central": 0.09,
+      "natural_band": [0.087, 0.12],
+      "natural_unit": "USD/GB",
+      "tier": "T2",
+      "confirm_count": 3,
+      "context_note": "US region (us-east-1/equiv) standard internet data-transfer-OUT, first paid tier after the 100GB/mo free tier, ~1-10TB/mo band. Central 0.09 = AWS rate; band spans Azure 0.087 to GCP Premium-default 0.12.",
+      "caveat": "Strict 1-10TB GCP Premium is 0.11; 0.12 is GCP's 0-1TB entry sub-tier (every workload's first TB bills at 0.12 on default Premium). Rate steps DOWN above 10TB (AWS 0.085 / Azure 0.083 / GCP 0.08). Non-US regions cost materially more (Sao Paulo ~0.15). Inter-region/CDN/peering egress are separate SKUs, out of scope.",
+      "citations": [
+        {"source": "AWS (via leanopstech)", "url": "https://leanopstech.com/blog/aws-data-transfer-pricing-2026/", "quoted": "100 GB - 10 TB: $0.09/GB", "conditions": "us-east-1, internet egress, after 100GB free"},
+        {"source": "Azure (via egresscost.com)", "url": "https://egresscost.com/azure/", "quoted": "First 10 TB: $0.087/GB", "conditions": "Zone 1, after 100GB free"},
+        {"source": "Google Cloud (via cloudbolt)", "url": "https://www.cloudbolt.io/gcp-cost-optimization/gcp-egress-pricing/", "quoted": "$0.12/GiB Premium 0-1TB; $0.11 at 1-10TB", "conditions": "Premium tier default, US source region"},
+        {"source": "Cross-check aggregator", "url": "https://egresscost.com/", "quoted": "AWS $0.09; Azure $0.087; GCP $0.12 /GB", "conditions": "aggregator, US entry tier"}
+      ],
+      "adversarial_summary": "3/3 confirmed. Every cited URL re-fetched and contained its number; rates independently corroborated by search. Only finding: the 0.12 band-high is GCP's 0-1TB entry rate (vs 0.11 strict 1-10TB) — disclosed, legitimate as a real-workload ceiling. Band clears the T2 floor."
+    },
+    {
+      "id": "storage",
+      "engine_field": "PricingRates.storage_micro_usd_per_gb_month",
+      "engine_value": 21000,
+      "engine_band": [18000, 25300],
+      "engine_unit": "micro_usd_per_gb_month",
+      "natural_central": 0.021,
+      "natural_band": [0.018, 0.0253],
+      "natural_unit": "USD/GB-month",
+      "tier": "T2",
+      "confirm_count": 3,
+      "context_note": "Object storage STANDARD/hot tier, US-East single-region/LRS, first paid tier (first 50TB/mo). Storage only. Per-provider: AWS S3 0.023, Azure Blob Hot 0.018, GCS 0.020-0.022. Central 0.021 ~ four-point mean.",
+      "caveat": "Headline per-GB is a small slice of real object-storage spend once requests/retrieval/egress are added. Rates tier down above 50TB; geo-redundant ~2x. Band high 0.0253 = GCP us-east4 (N. Virginia) equivalent.",
+      "citations": [
+        {"source": "AWS S3 (CloudZero)", "url": "https://www.cloudzero.com/blog/s3-pricing/", "quoted": "$0.023/GB-mo first 50TB", "conditions": "S3 Standard us-east-1, storage only"},
+        {"source": "Azure Blob (nOps)", "url": "https://www.nops.io/blog/azure-storage-pricing/", "quoted": "Hot $0.018 first 50TB", "conditions": "Block Blob Hot, LRS, East US"},
+        {"source": "Cross-provider (Finout)", "url": "https://www.finout.io/blog/cloud-storage-pricing-comparison", "quoted": "S3 $0.023; GCS $0.020; Azure $0.018 /GB", "conditions": "US, single-region, storage only"},
+        {"source": "Google Cloud Storage (CloudZero)", "url": "https://www.cloudzero.com/blog/gcp-storage-pricing/", "quoted": "$0.022/GB-mo", "conditions": "Standard, us-east1/us-central1"}
+      ],
+      "adversarial_summary": "3/3 confirmed; all 4 URLs re-fetched verbatim. Minor: a one-month Finout date typo, a GCS 0.020-vs-0.022 split (both in band). Band widened high to 0.0253 (GCP N. Virginia) to honestly span the spread and clear the T2 floor (~17.4%)."
+    },
+    {
+      "id": "requests",
+      "engine_field": "PricingRates.request_micro_usd_per_thousand",
+      "engine_value": 3000,
+      "engine_band": [1000, 3500],
+      "engine_unit": "micro_usd_per_thousand_requests",
+      "natural_central": 3.0,
+      "natural_band": [1.0, 3.5],
+      "natural_unit": "USD per 1,000,000 requests",
+      "tier": "T1",
+      "confirm_count": 3,
+      "context_note": "Managed API-gateway per-request charge at entry tier, us-east-1. Comparable serverless SKUs cluster $3.00-$3.50/M (GCP API Gateway $3.00, Azure APIM Consumption $3.50, AWS REST $3.50), with AWS HTTP API $1.00/M the low anchor. Central $3.00 = GCP list; band [1.00, 3.50].",
+      "caveat": "SKU choice dominates: AWS HTTP vs REST is a 3.5x swing. Central $3.00 leans above the arithmetic midpoint (conservative for a money model). Tiers down at high volume. Excludes free tiers + separate data-transfer-out. Apigee/Kong (heavier enterprise) excluded.",
+      "citations": [
+        {"source": "AWS API Gateway (official, T1)", "url": "https://aws.amazon.com/api-gateway/pricing/", "quoted": "HTTP APIs $1.00/M; REST APIs $3.50/M (first 300M)", "conditions": "us-east-1, pay-as-you-go — re-confirmed first-party by the lead"},
+        {"source": "Multi-provider (Zuplo 2026)", "url": "https://zuplo.com/learning-center/api-gateway-pricing-comparison-2026", "quoted": "AWS HTTP $1.00/M; AWS REST $3.50/M; Azure APIM ~$3.50/M", "conditions": "independent 2026 comparison"},
+        {"source": "Google Cloud API Gateway (apigatewaycost.com)", "url": "https://apigatewaycost.com/google-cloud", "quoted": "2M-1B: $3.00/M; >1B: $1.50/M", "conditions": "aggregator restating GCP list; first 2M/mo free"},
+        {"source": "Azure APIM (apigatewaycost.com)", "url": "https://apigatewaycost.com/azure", "quoted": "$3.50/1M calls", "conditions": "APIM Consumption tier; first 1M/mo free"}
+      ],
+      "adversarial_summary": "3/3 confirmed; all citations re-fetched, AWS first-party page verified. CORRECTS THE SEED: the old $1.00/M guess was 3x too low — three of four comparable SKUs sit at $3.00-$3.50/M. $1.00 floor is AWS's cheapest single SKU (real list, not promo). Conservative central."
+    },
+    {
+      "id": "llm_input",
+      "engine_field": "PricingRates.llm_input_micro_usd_per_1k_tokens",
+      "engine_value": 500,
+      "engine_band": [100, 1000],
+      "engine_unit": "micro_usd_per_1k_tokens",
+      "natural_central": 0.5,
+      "natural_band": [0.1, 1.0],
+      "natural_unit": "USD per 1,000,000 input tokens",
+      "tier": "T1",
+      "confirm_count": 3,
+      "context_note": "Standard input/prompt token price, small/fast model class, June 2026. Anchors: OpenAI gpt-5.4-mini $0.75/M, Anthropic Claude Haiku 4.5 $1.00/M, Gemini 2.5 Flash $0.30/M, Flash-Lite $0.10/M (floor). Central $0.50/M ~ cross-provider median.",
+      "caveat": "Base/standard on-demand list, global first-party APIs. Excludes cached-read (~0.1x), batch (-50%), regional premiums. Output runs ~4-5x higher (priced separately). Even cheaper SKUs (nano/DeepSeek-class ~$0.14) sit at/inside the floor. Recheck if a newer Haiku ships.",
+      "citations": [
+        {"source": "Anthropic (vendor)", "url": "https://platform.claude.com/docs/en/about-claude/pricing", "quoted": "Claude Haiku 4.5 $1/MTok input", "conditions": "base on-demand, first-party API"},
+        {"source": "Google (vendor)", "url": "https://ai.google.dev/gemini-api/docs/pricing", "quoted": "Gemini 2.5 Flash $0.30; Flash-Lite $0.10 /1M input", "conditions": "paid standard tier — re-confirmed by the lead"},
+        {"source": "OpenAI (vendor)", "url": "https://developers.openai.com/api/docs/pricing", "quoted": "gpt-5.4-mini $0.75/1M input", "conditions": "standard on-demand"},
+        {"source": "Anthropic corroboration (CloudZero)", "url": "https://www.cloudzero.com/blog/claude-api-pricing/", "quoted": "Claude Haiku 4.5 $1.00/M input", "conditions": "aggregator"}
+      ],
+      "adversarial_summary": "3/3 confirmed; all vendor docs re-fetched against live pages. Cheaper nano/DeepSeek SKUs exist but fall within the $0.10 floor, so the omission biases the central UP (conservative). Transient 403 on OpenAI URL resolved on retry. 90% half-width band, far above the T1 floor."
+    },
+    {
+      "id": "llm_output",
+      "engine_field": "PricingRates.llm_output_micro_usd_per_1k_tokens",
+      "engine_value": 4000,
+      "engine_band": [400, 9000],
+      "engine_unit": "micro_usd_per_1k_tokens",
+      "natural_central": 4.0,
+      "natural_band": [0.4, 9.0],
+      "natural_unit": "USD per 1,000,000 output tokens",
+      "tier": "T1",
+      "confirm_count": 1,
+      "context_note": "Standard (non-batch, non-cached) output token list, small/fast class, June 2026. Anchors: OpenAI gpt-5.4-nano $1.25 / gpt-5.4-mini $4.50; Anthropic Haiku 4.5 $5.00; Gemini Flash-Lite $0.40 / Flash $2.50 / Gemini 3.5 Flash $9.00 (current-gen ceiling). Central $4.00; band $0.40-$9.00.",
+      "caveat": "WEAKEST-CONFIRMED of the eight (1/3 on first attempt: two verifiers correctly REFUTED my original too-narrow $0.40-$5.00 band, which excluded the current Gemini 3.5 Flash $9.00). The corrected band is the honest one they converged on. The class spans ~22x. If Keystone's council/ingestion runs on Haiku specifically, use $5.00 (Haiku 4.5), not the $4.00 cross-provider center. Re-verify LLM prices quarterly.",
+      "citations": [
+        {"source": "Anthropic (vendor)", "url": "https://platform.claude.com/docs/en/about-claude/pricing", "quoted": "Claude Haiku 4.5 $5/MTok output", "conditions": "standard non-batch"},
+        {"source": "Google (vendor)", "url": "https://ai.google.dev/gemini-api/docs/pricing", "quoted": "Flash-Lite $0.40; Flash $2.50; Gemini 3.5 Flash $9.00 /1M output", "conditions": "standard tier — re-confirmed by the lead"},
+        {"source": "OpenAI (vendor)", "url": "https://developers.openai.com/api/docs/pricing", "quoted": "gpt-5.4-nano $1.25; gpt-5.4-mini $4.50 /1M output", "conditions": "GPT-5.4 small/fast tier"},
+        {"source": "OpenAI corroboration (aipricing.guru)", "url": "https://www.aipricing.guru/openai-pricing/", "quoted": "GPT-5.4 mini $4.50; nano $1.25 output", "conditions": "aggregator (T2)"}
+      ],
+      "adversarial_summary": "1/3 — two verifiers REFUTED the first proposal as too narrow/too low (it capped at Haiku $5.00 and excluded the current Gemini 3.5 Flash $9.00, building the central on superseded SKUs). Both re-fetched live pages and converged on band $0.40-$9.00, central ~$4.00. Well-sourced (3 live vendor citations), so groundable at the corrected band, not the original."
+    },
+    {
+      "id": "reserved_1yr",
+      "engine_field": "COMPUTE_PRICING_RETAINED_BP['reserved_1yr']",
+      "engine_value": 7000,
+      "engine_band": [5800, 7200],
+      "engine_unit": "basis_points_retained",
+      "natural_central": 30,
+      "natural_band": [28, 42],
+      "natural_unit": "% off on-demand",
+      "tier": "T2",
+      "confirm_count": 2,
+      "context_note": "1-year commitment, NO-UPFRONT, general-purpose Linux compute, US, % off on-demand. Central 30% off (7000 bp retained) = conservative flexible cross-provider anchor (AWS Compute SP, GCP Compute Flexible CUD 28%). Resource-locked operating point ~37-42% off is the band's upper end.",
+      "caveat": "No vendor publishes a clean '1yr no-upfront %' table. AWS's 30%/40% example is explicitly hypothetical AND partial-upfront. CORRECTS THE SEED DOWN: the old 40% off (6000 bp) was optimistic; realistic 1yr general-purpose is ~36-37% off (resource-locked) and ~28-30% (flexible). Vendor 'up to 55/72%' headlines are 3yr/all-upfront/memory-optimized maxima.",
+      "citations": [
+        {"source": "AWS Savings Plans (vendor doc)", "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/sp-applying.html", "quoted": "Compute SP 30%, EC2 Instance SP 40% (1yr partial-upfront, labelled hypothetical)", "conditions": "us-east-1 worked example"},
+        {"source": "Google Cloud CUD (vendor doc)", "url": "https://docs.cloud.google.com/compute/docs/instances/committed-use-discounts-overview", "quoted": "1yr flexible CUD 28%; resource-based up to 55%", "conditions": "Compute Engine, monthly billing"},
+        {"source": "AWS (Usage.ai)", "url": "https://www.usage.ai/blogs/aws/savings-plans/ec2/1-year-vs-3-year/", "quoted": "1yr No Upfront 40-47%; m5.xlarge 1yr All-Upfront ~50%", "conditions": "aggregator; mixes flexible vs resource-locked"}
+      ],
+      "adversarial_summary": "2/3 — the cherry-pick verifier correctly refuted the original 55% top edge (it conflated 3yr/memory-optimized maxima). Independent search confirmed realistic 1yr general-purpose ~36-37% off. High edge lowered 55%->42% off. 30% off is the conservative cross-provider central."
+    },
+    {
+      "id": "reserved_3yr",
+      "engine_field": "COMPUTE_PRICING_RETAINED_BP['reserved_3yr']",
+      "engine_value": 4500,
+      "engine_band": [2800, 5400],
+      "engine_unit": "basis_points_retained",
+      "natural_central": 55,
+      "natural_band": [46, 72],
+      "natural_unit": "% off on-demand",
+      "tier": "T1",
+      "confirm_count": 3,
+      "context_note": "3-year compute commitment, standard general-purpose VM, US-East, All-Upfront, % off on-demand. Central 55% off (4500 bp retained) is a conservative cross-provider blend (AWS vendor 3yr 60%; Usage.ai m5.large 65%; GCP general-purpose flexible CUD 46% sets the floor). 72% ceiling is a SKU-specific marketing maximum.",
+      "caveat": "Varies by commitment product (AWS Standard RI vs GCP flexible vs resource-based CUD vs Azure RI), VM family, region, OS, payment. 55% off ~ correction up from the old 60% off seed toward the conservative cross-provider blend (GCP general-purpose is only 46% off). 72% off achievable only for specific high-end SKUs with max payment. Watch: MS retires older Azure RI SKUs from 2026-07-01.",
+      "citations": [
+        {"source": "AWS EC2 Reserved Instances (vendor)", "url": "https://aws.amazon.com/ec2/pricing/reserved-instances/", "quoted": "3yr 60% avg, up to 72% off; 1yr 40%", "conditions": "Standard RI — re-confirmed first-party by the lead"},
+        {"source": "Google Cloud CUD (vendor doc)", "url": "https://docs.cloud.google.com/compute/docs/instances/committed-use-discounts-overview", "quoted": "3yr flexible 46%; resource-based up to 55%/70%", "conditions": "Compute Engine 3yr"},
+        {"source": "Azure (ProsperOps)", "url": "https://www.prosperops.com/blog/azure-savings-plan-vs-reserved-instances/", "quoted": "up to 72% vs PAYG (1 or 3 yr)", "conditions": "Azure Reserved VM Instances"},
+        {"source": "AWS (Usage.ai)", "url": "https://www.usage.ai/blogs/aws/reserved-instances/", "quoted": "m5.large 3yr All-Upfront 65%; up to 72%", "conditions": "aggregator corroboration"}
+      ],
+      "adversarial_summary": "3/3 confirmed, no value change. AWS vendor (60%/up-to-72%), GCP (46% flexible), ProsperOps (Azure up-to-72%), Usage.ai (m5.large 65%) all re-fetched verbatim. 72% is used as band ceiling only (not central); 55% is conservative vs the AWS/Azure ~60-62% cluster; floor 46% = GCP verified general-purpose. ~24% half-width, clears T1."
+    },
+    {
+      "id": "spot",
+      "engine_field": "COMPUTE_PRICING_RETAINED_BP['spot']",
+      "engine_value": 2300,
+      "engine_band": [900, 4500],
+      "engine_unit": "basis_points_retained",
+      "natural_central": 77,
+      "natural_band": [55, 91],
+      "natural_unit": "% off on-demand",
+      "tier": "T1",
+      "confirm_count": 2,
+      "context_note": "Spot/preemptible/interruptible compute discount, % off on-demand. Vendor ceilings: AWS/Azure 'up to 90%', GCP 'up to 91%' with explicit 60% contractual floor. Central 77% off (2300 bp retained) reflects the consensus pull below the marketing ceiling; band 55-91% captures the documented sub-60% tail (Azure VMSS 53-76%).",
+      "caveat": "Do NOT default to 90% — that's a best-case ceiling. Realistic operating point is workload-dependent across 55-91%: standalone CPU spot clusters high (86-88%), VMSS / GPU-in-constrained-region / Graviton pull down with a fat left tail below 60%. CORRECTS THE SEED DOWN from 80% off. Spot capacity is non-guaranteed (eviction: Azure 30s, AWS 2min) — treat any spot saving as conditional, not contractual.",
+      "citations": [
+        {"source": "AWS EC2 Spot (vendor)", "url": "https://aws.amazon.com/ec2/spot/", "quoted": "Save up-to 90% on On-Demand", "conditions": "EC2 Spot, varies by region/type/supply"},
+        {"source": "Google Cloud Spot (vendor blog)", "url": "https://cloud.google.com/blog/products/compute/google-cloud-spot-vm", "quoted": "between 60% and 91% off; floor at least 60%", "conditions": "Spot VMs; may change up to monthly"},
+        {"source": "Google Cloud Spot (vendor doc)", "url": "https://docs.cloud.google.com/compute/docs/instances/spot", "quoted": "up to 91% discounts", "conditions": "Spot VMs vs standard"},
+        {"source": "Azure Spot (Flexera)", "url": "https://www.flexera.com/blog/finops/azure-pricing-azure-spot-pricing-how-much-do-azure-spot-vms-really-cost/", "quoted": "up to 90%; typically 86-88% standalone, 53-76% in VMSS", "conditions": "measured Av2/Fsv2/Dv3/Ev3"},
+        {"source": "AWS Spot (nOps)", "url": "https://www.nops.io/blog/aws-spot-instance-pricing/", "quoted": "typically 70-90% cheaper", "conditions": "varies; sub-80% examples shown"}
+      ],
+      "adversarial_summary": "2/3 — the cherry-pick verifier refuted 80% as too optimistic, and BOTH confirming verifiers conceded the point (measured AWS 67-80%, GCP midpoint 75.5%, Azure VMSS below 60%). Central reconciled DOWN to 77%, floor lowered to 55% to absorb the documented left tail. All 6 citations re-fetched, zero invented."
+    }
+  ]
+}
