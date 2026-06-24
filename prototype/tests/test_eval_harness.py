@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 
 from keystone.benchmarks.eval_harness import (
-    render_eval_report, run_eval, run_recon_eval, score_recon_case, recon_cases,
+    render_eval_report, run_eval, run_grounding_eval, run_recon_eval, score_recon_case, recon_cases,
 )
 
 
@@ -30,6 +30,25 @@ class TestReconEval(unittest.TestCase):
         hard = next(s for n, s in scores.items() if "hard conflict" in n)
         self.assertIn("component-kind", hard.detected_kinds)  # the planted contradiction is caught
         self.assertTrue(hard.halt_ok)
+
+
+class TestGroundingCoverageEval(unittest.TestCase):
+    def test_coverage_tallies_are_consistent(self):
+        cov = run_grounding_eval()
+        self.assertEqual(cov.total, cov.grounded_in_band + cov.reconcile + cov.ungrounded)
+        self.assertEqual(cov.evidence_backed, cov.grounded_in_band + cov.reconcile)
+        self.assertGreater(cov.models, 0)
+        self.assertGreater(cov.total, 0)
+        self.assertGreater(cov.evidence_backed, 0)          # the grown corpus grounds SOMETHING
+        self.assertGreater(cov.ungrounded, 0)               # ...but honestly far from all
+
+    def test_report_has_honest_grounding_section(self):
+        md = render_eval_report(run_eval())
+        self.assertIn("## Input grounding", md)
+        self.assertIn("provenance", md.lower())
+        # must NOT claim it's engine-output accuracy / certification
+        self.assertIn("not engine-output accuracy", md.lower())
+        self.assertIn("still assumption", md.lower())        # the honest "early L1" read
 
 
 class TestReportHonesty(unittest.TestCase):

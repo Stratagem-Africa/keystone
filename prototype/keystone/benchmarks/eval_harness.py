@@ -7,12 +7,15 @@ section. It deliberately prints **no single bragging accuracy number** (Doc 03: 
 never overclaim) and is honest that latency/throughput error envelopes need ground truth we do
 not have yet (L1/L2), and that council reasoning quality needs the real LLM (stub today).
 
-Two evals run offline / $0:
+Three evals run offline / $0:
   - **Simulation eval** — the deterministic engine vs the SysSimulator ground-truth corpus
     (cost band, bottleneck plausibility, breakpoint stability, determinism). Delegates to
     `benchmarks.scoring` (the engine is the sole producer of numbers — prime directive).
   - **Reconciliation eval** — planted-conflict model-corpora → recall (did it surface every
     planted conflict?) + false-halt rate (did it ever halt/invent a conflict spuriously?).
+  - **Input-grounding coverage** — what fraction of the reference models' INPUT numbers now carry
+    cited benchmark evidence (GROUNDED in-band / RECONCILE / still ASSUMPTION). The honest L0→L1
+    progress metric; it measures input provenance, NOT engine-output accuracy.
 
 GATED, not faked (see the report's limits section): the council reasoning-quality + confidence-
 calibration eval (needs the real LLM) and per-component latency/throughput error envelopes
@@ -23,9 +26,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from keystone.benchmarks.benchmark_corpus import CuratedKnowledgeBase
+from keystone.benchmarks.reference_models import REFERENCE_MODELS
 from keystone.benchmarks.scoring import ScoreCard, score_all
+from keystone.grounding import enrich
 from keystone.ingestion import IngestResult
 from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
+from keystone.provenance import GROUNDABLE_METRICS
 from keystone.reconciliation import reconcile
 
 
@@ -124,16 +131,61 @@ def run_recon_eval() -> list[ReconScore]:
 
 
 # --------------------------------------------------------------------------- #
+# Input-grounding coverage eval (ADR-006, the L0→L1 lever) — what fraction of the reference models'
+# INPUT numbers are now backed by cited benchmark evidence. This measures input PROVENANCE + agreement,
+# NOT engine-output accuracy: a "grounded in-band" input is cited evidence the modeler's value sits
+# within; a "reconcile" input diverges from the evidence (flagged for a human, never auto-changed); it
+# does not certify the derived result. Evidence-only (the engine never reads a grounding value).
+# --------------------------------------------------------------------------- #
+@dataclass
+class GroundingCoverage:
+    models: int = 0
+    total: int = 0              # (component, input-metric) slots across the reference models
+    grounded_in_band: int = 0   # cited evidence AND the modeler value sits inside the cited band
+    reconcile: int = 0          # cited evidence but the modeler value is out-of-band (diverges)
+    ungrounded: int = 0         # no cited datapoint matches → stays ASSUMPTION (the honest L0 default)
+
+    @property
+    def evidence_backed(self) -> int:
+        return self.grounded_in_band + self.reconcile
+
+
+def run_grounding_eval() -> GroundingCoverage:
+    """Enrich every reference model against the curated corpus and tally input-metric provenance.
+    Deterministic + offline; reads the shipped corpus regardless of KB_PROVIDER (measures the corpus,
+    not the activation switch)."""
+    kb = CuratedKnowledgeBase.from_default_corpus()
+    cov = GroundingCoverage()
+    for _key, build_fn, _rps in REFERENCE_MODELS:
+        cov.models += 1
+        model = build_fn()
+        graded = {(g.component_id, g.metric): g for g in enrich(model, kb).groundings}
+        for cid in model.components:
+            for metric in GROUNDABLE_METRICS:
+                cov.total += 1
+                g = graded.get((cid, metric))
+                if g is None:
+                    cov.ungrounded += 1
+                elif g.in_band:
+                    cov.grounded_in_band += 1
+                else:
+                    cov.reconcile += 1
+    return cov
+
+
+# --------------------------------------------------------------------------- #
 # Unified report
 # --------------------------------------------------------------------------- #
 @dataclass
 class EvalReport:
     sim_cards: list[ScoreCard] = field(default_factory=list)
     recon_scores: list[ReconScore] = field(default_factory=list)
+    grounding: GroundingCoverage = field(default_factory=GroundingCoverage)
 
 
 def run_eval() -> EvalReport:
-    return EvalReport(sim_cards=score_all(), recon_scores=run_recon_eval())
+    return EvalReport(sim_cards=score_all(), recon_scores=run_recon_eval(),
+                      grounding=run_grounding_eval())
 
 
 def render_eval_report(rep: EvalReport) -> str:
@@ -171,12 +223,34 @@ def render_eval_report(rep: EvalReport) -> str:
     L.append(f"| No invented hard conflict (false-positive-free) | {no_fp}/{rn} |")
     L.append(f"| Halts exactly when it must (no missed/spurious halt) | {halt_ok}/{rn} |")
     L.append("")
+    g = rep.grounding
+    pct = (lambda x: f"{100 * x / g.total:.0f}%" if g.total else "—")
+    L.append("## Input grounding — input numbers backed by cited evidence (ADR-006, the L0→L1 lever)")
+    L.append("")
+    L.append(f"Across the {g.models} reference models, each component INPUT (capacity / service-time / "
+             "per-instance cost) is matched to the curated benchmark corpus. This measures input "
+             "**provenance + agreement**, NOT engine-output accuracy: a *grounded in-band* input is cited "
+             "evidence the modeler's value sits within; a *reconcile* input diverges from the evidence and "
+             "is flagged for a human (never auto-changed). It does not certify the derived result.")
+    L.append("")
+    L.append("| Dimension | Result |")
+    L.append("|---|--:|")
+    L.append(f"| Input numbers with cited evidence (grounded **or** reconcile) | {g.evidence_backed}/{g.total} ({pct(g.evidence_backed)}) |")
+    L.append(f"| …modeler value AGREES with the cited band (GROUNDED, in-band) | {g.grounded_in_band}/{g.total} ({pct(g.grounded_in_band)}) |")
+    L.append(f"| …modeler value DIVERGES from it (RECONCILE — flagged, kept) | {g.reconcile}/{g.total} ({pct(g.reconcile)}) |")
+    L.append(f"| Still ASSUMPTION (no cited datapoint matches yet) | {g.ungrounded}/{g.total} ({pct(g.ungrounded)}) |")
+    L.append("")
+    L.append("> Honest read: most inputs are still ASSUMPTION — this is **early L1**, not calibrated truth. "
+             "Coverage grows as the corpus does; a RECONCILE is a *signal to check an input*, not an engine error.")
+    L.append("")
     L.append("## Where this scorecard CANNOT say more (read before trusting it)")
     L.append("")
     for line in (
-        "Latency & throughput have **no ground truth** in the corpus, so there is **no per-component "
-        "error envelope** on them yet — only cost band + component count are checkable at L0. A real "
-        "error envelope arrives with the grounded benchmark corpus (L1) and field calibration (L2).",
+        "Input grounding (above) measures **input provenance + agreement**, NOT an engine-OUTPUT error "
+        "envelope — there is still **no per-component error envelope** on the engine's derived "
+        "latency/cost. A grounded input is cited evidence the modeler's value sits within; it does not "
+        "tell you how wrong the derived result is. Output error envelopes need field-calibrated ground "
+        "truth (L2), and most inputs are still ASSUMPTION — this is early L1.",
         "Cost band is **scale-dependent**: a reference model built heavier than the band's assumed "
         "scale reads 'over' even with a correct engine — a model-calibration note, not an engine error.",
         "The **council's reasoning quality and confidence calibration are NOT evaluated here** — that "
