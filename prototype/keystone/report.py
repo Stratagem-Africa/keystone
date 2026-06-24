@@ -263,7 +263,8 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
         # line is the summary ("N/M agree"); the rest are per-model verdicts. Empty for single-model runs.
         if a.consensus:
             L.append("")
-            L.append(f"**Cross-model consensus:** {a.consensus[0].split(': ', 1)[-1]}")
+            L.append(f"**Cross-model consensus:** {a.consensus[0].split(': ', 1)[-1]} "
+                     "— _independent models corroborating this design choice, not certifying a number._")
             for vote in a.consensus[1:]:
                 L.append(f"- {vote}")
     L.append("")
