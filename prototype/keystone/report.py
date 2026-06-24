@@ -34,7 +34,13 @@ def _grounding_section(model: SystemModel) -> list[str]:
     Gated on at least one grounding, so a model with none (the stub default) emits ZERO bytes and the
     report is byte-for-byte unchanged. The engine still computed every result above; this annotates the
     *inputs* only — GROUNDED (value inside the cited band) vs RECONCILE (outside; the modeler value was
-    kept, never overwritten). Reads evidence the model already carries; it produces no number."""
+    kept, never overwritten). Reads evidence the model already carries; it produces no number.
+
+    EVIDENCE-ONLY SEMANTICS: the "Your value" column is the model's *current* input value, which under
+    `enrich(override=False)` (the only shipped mode) IS the modeler's value. Do NOT render an
+    `enrich(override=True)` model through this section as-is — there the input has been replaced by the
+    grounded central, so "Your value" would mislabel it. A future override-aware view must read the
+    preserved original from `EnrichResult.groundings[*].modeler_value` and render it as OVERRIDDEN."""
     rows = [(c, m, c.groundings[m]) for c in model.components.values()
             for m in sorted(GROUNDABLE_METRICS) if m in c.groundings]
     if not rows:
