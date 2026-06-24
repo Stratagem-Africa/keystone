@@ -6,6 +6,7 @@ from __future__ import annotations
 from keystone import __version__ as _ENGINE_VERSION
 from keystone.model import SystemModel
 from keystone.council import ADR, is_high_stakes
+from keystone.provenance import GROUNDABLE_METRICS
 from keystone.simulation import SimulationResult
 
 
@@ -13,6 +14,63 @@ def _fmt_rps(x: float) -> str:
     if x == float("inf"):
         return "unbounded"
     return f"{x:,.0f}"
+
+
+def _fmt_grounded(metric: str, value: float, g) -> tuple[str, str, str]:
+    """(your value, grounded central, cited band) formatted for the metric's unit."""
+    if metric == "monthly_cost_per_instance":   # integer cents → dollars (ADR-008)
+        return (f"${value / 100:,.2f}/mo", f"${g.value / 100:,.2f}/mo",
+                f"${g.confidence_low / 100:,.2f}–${g.confidence_high / 100:,.2f}")
+    if metric == "base_latency_ms":
+        return (f"{value:,.2f} ms", f"{g.value:,.2f} ms",
+                f"{g.confidence_low:,.2f}–{g.confidence_high:,.2f} ms")
+    return (f"{value:,.0f} rps", f"{g.value:,.0f} rps",
+            f"{g.confidence_low:,.0f}–{g.confidence_high:,.0f} rps")
+
+
+def _grounding_section(model: SystemModel) -> list[str]:
+    """Render the cited KB evidence attached to the model's INPUT numbers (ADR-006 L0→L1).
+
+    Gated on at least one grounding, so a model with none (the stub default) emits ZERO bytes and the
+    report is byte-for-byte unchanged. The engine still computed every result above; this annotates the
+    *inputs* only — GROUNDED (value inside the cited band) vs RECONCILE (outside; the modeler value was
+    kept, never overwritten). Reads evidence the model already carries; it produces no number."""
+    rows = [(c, m, c.groundings[m]) for c in model.components.values()
+            for m in sorted(GROUNDABLE_METRICS) if m in c.groundings]
+    if not rows:
+        return []
+    L = ["## Grounding & reconciliation (input evidence)", "",
+         "Input numbers matched to **cited benchmark evidence**. The engine still computed every result "
+         "above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; "
+         "**RECONCILE** = it falls outside, and your value was **kept** (not overwritten).", "",
+         "| Component | Input | Your value | Grounded central | Cited band | Status | Source |",
+         "|---|---|--:|--:|:--:|:--|:--|"]
+    reconcile: list[tuple] = []
+    for comp, metric, g in rows:
+        v = getattr(comp, metric)
+        in_band = g.confidence_low <= v <= g.confidence_high
+        yv, gv, band = _fmt_grounded(metric, v, g)
+        status = "GROUNDED ✓" if in_band else "RECONCILE ⚠"
+        L.append(f"| {comp.name} | {metric} | {yv} | {gv} | {band} | {status} | {g.citations[0].source} |")
+        if not in_band:
+            reconcile.append((comp.name, metric, yv, gv, band))
+    L.append("")
+    if reconcile:
+        L.append("**Reconcile — your value is outside the cited band (kept, not overwritten):**")
+        for name, metric, yv, gv, band in reconcile:
+            L.append(f"- **{name}** · `{metric}`: you have **{yv}**, the cited evidence says **{gv}** "
+                     f"(band {band}). Check the context (hardware / region / workload) — the engine used "
+                     "**your** value, not the benchmark.")
+        L.append("")
+    L.append("**Evidence (resolvable sources):**")
+    seen: set[tuple[str, str]] = set()
+    for _comp, _metric, g in rows:
+        for c in g.citations:
+            if (c.source, c.reference) not in seen:
+                seen.add((c.source, c.reference))
+                L.append(f"- {c.source} — {c.reference}")
+    L.append("")
+    return L
 
 
 def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
@@ -108,6 +166,10 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
                  f"{c.utilization*100:.0f}% | {c.mean_latency_ms:.1f} | {status} |")
     L.append("")
 
+    # Input grounding (ADR-006) — cited evidence behind the input numbers, when the KB is active.
+    # Empty (zero bytes) under the stub default, so a non-grounded report is byte-for-byte unchanged.
+    L.extend(_grounding_section(model))
+
     # ADRs
     L.append("## Design decisions (council)")
     src = adrs[0].source if adrs else "stub"
@@ -159,6 +221,14 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append("")
     for cav in sim.caveats:
         L.append(f"- {cav}")
+    # When the KB grounded some inputs, say so honestly: grounded != calibrated, and the matches are
+    # by component-kind (not your exact stack), so any RECONCILE row needs a human's eye.
+    if any(c.groundings for c in model.components.values()):
+        L.append("- Some inputs above are GROUNDED to cited benchmarks matched by component **kind** "
+                 "(not your exact instance type / region / workload), so treat them as directional "
+                 "evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and "
+                 "kept **your** value — a human should check them. The citations are AI-proposed, "
+                 "pending ratification.")
     L.append("")
 
     # Assumptions ledger
