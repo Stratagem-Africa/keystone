@@ -259,6 +259,13 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
             L.append("**Kill criteria (revisit this decision if):**")
             for k in a.kill_criteria:
                 L.append(f"- {k}")
+        # Cross-model consensus (ADR-005): independent vendor models' votes on this decision. The first
+        # line is the summary ("N/M agree"); the rest are per-model verdicts. Empty for single-model runs.
+        if a.consensus:
+            L.append("")
+            L.append(f"**Cross-model consensus:** {a.consensus[0].split(': ', 1)[-1]}")
+            for vote in a.consensus[1:]:
+                L.append(f"- {vote}")
     L.append("")
 
     # What-ifs
