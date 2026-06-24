@@ -21,11 +21,14 @@ unchanged and the report renders zero new bytes. Activation is a manual `KB_PROV
 from __future__ import annotations
 
 import dataclasses
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from keystone.knowledge_base import KnowledgeBase
-from keystone.model import Component, SystemModel
-from keystone.provenance import GROUNDABLE_METRICS, Grounding
+import keystone.benchmarks as _benchmarks
+from keystone.knowledge_base import EmptyKnowledgeBase, KnowledgeBase
+from keystone.model import Component, PricingRates, SystemModel
+from keystone.provenance import GROUNDABLE_METRICS, Citation, Grounding
 # NOTE: this module deliberately does NOT depend on the engine module (keystone/simulation.py) —
 # grounding rewrites inputs, never a computed result (a reviewer-checkable separation).
 
@@ -93,3 +96,45 @@ def enrich(model: SystemModel, kb: KnowledgeBase, *, override: bool = False) -> 
     if not changed:
         return EnrichResult(model=model, groundings=found)   # strict no-op (e.g. under the stub KB)
     return EnrichResult(model=dataclasses.replace(model, components=new_components), groundings=found)
+
+
+# --------------------------------------------------------------------------- #
+# Cost-rate grounding (ADR-009 slice 2) — attach the RATIFIED rate evidence to PricingRates.
+# Unlike the component corpus (stub-gated), the rate evidence (grounded_pricing_rates.json) was
+# ratified (#71) and the rate VALUES already equal its grounded centrals; this only carries the
+# citations + band onto the model so the report can show the rates as GROUNDED. No value changes.
+# --------------------------------------------------------------------------- #
+_RATE_EVIDENCE = Path(_benchmarks.__file__).parent / "grounded_pricing_rates.json"
+
+
+def _load_rate_groundings() -> dict[str, Grounding]:
+    """Build a `Grounding` per rate id from the ratified evidence file. Each Grounding carries the
+    engine value + band + cited sources (≥1, enforced by Grounding). Read-only; produces no number."""
+    doc = json.loads(_RATE_EVIDENCE.read_text(encoding="utf-8"))
+    out: dict[str, Grounding] = {}
+    for r in doc["rates"]:
+        cites = tuple(
+            Citation(
+                source=c["source"], reference=c["url"],
+                note=f'{c["quoted"]} — {c["conditions"]}'.replace("\n", " ").replace("\r", " ")[:500],
+            )
+            for c in r["citations"]
+        )
+        low, high = r["engine_band"]
+        out[r["id"]] = Grounding(value=float(r["engine_value"]), unit=r["engine_unit"],
+                                 confidence_low=float(low), confidence_high=float(high), citations=cites)
+    return out
+
+
+def ground_pricing(model: SystemModel, kb: KnowledgeBase) -> SystemModel:
+    """Attach the ratified cost-rate evidence to `model.pricing.groundings` so the report can show the
+    rates as GROUNDED (with citation + band). Gated like the component grounding: a STRICT no-op under the
+    stub KB (returns the original model), so default reports are byte-for-byte unchanged. Never changes a
+    rate VALUE — the seeds already equal the grounded centrals (ratified #71); this only carries evidence."""
+    # `kb` is an on/off ACTIVATION GATE, not the data source: the rate evidence is the single ratified
+    # file (grounded_pricing_rates.json), independent of which component-KB is active. The stub means
+    # "grounding off" → no-op; any live KB (today only curated) means "on" → attach the ratified rates.
+    if isinstance(kb, EmptyKnowledgeBase):
+        return model
+    priced = dataclasses.replace(model.pricing, groundings=_load_rate_groundings())
+    return dataclasses.replace(model, pricing=priced)

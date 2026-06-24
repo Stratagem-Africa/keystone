@@ -79,6 +79,59 @@ def _grounding_section(model: SystemModel) -> list[str]:
     return L
 
 
+# Stable display order + natural-unit conversion for the grounded cost rates (ADR-009 slice 2).
+_RATE_ORDER = ("egress", "storage", "requests", "llm_input", "llm_output",
+               "reserved_1yr", "reserved_3yr", "spot")
+_RATE_LABEL = {"egress": "egress", "storage": "storage", "requests": "requests",
+               "llm_input": "LLM input", "llm_output": "LLM output",
+               "reserved_1yr": "reserved 1yr", "reserved_3yr": "reserved 3yr", "spot": "spot"}
+
+
+def _fmt_rate(rid: str, g) -> tuple[str, str]:
+    """(value, band) in human-friendly units, converted from the engine unit the Grounding carries."""
+    v, lo, hi = g.value, g.confidence_low, g.confidence_high
+    if rid in ("egress", "storage"):                 # micro-USD/GB(-mo) → $/GB
+        unit = "/GB-mo" if rid == "storage" else "/GB"
+        dp = 4 if rid == "storage" else 3            # storage band-high $0.0253 needs 4dp (don't under-state)
+        return (f"${v / 1e6:,.{dp}f}{unit}", f"${lo / 1e6:,.{dp}f}–${hi / 1e6:,.{dp}f}")
+    if rid == "requests":                            # micro-USD per 1k → $/1M requests
+        return (f"${v / 1000:,.2f}/1M req", f"${lo / 1000:,.2f}–${hi / 1000:,.2f}")
+    if rid in ("llm_input", "llm_output"):           # micro-USD per 1k tokens → $/1M tokens
+        return (f"${v / 1000:,.2f}/1M tok", f"${lo / 1000:,.2f}–${hi / 1000:,.2f}")
+    # discount: basis points RETAINED → % off (band edges invert: low retained = high % off)
+    return (f"{(10_000 - v) / 100:,.0f}% off", f"{(10_000 - hi) / 100:,.0f}–{(10_000 - lo) / 100:,.0f}% off")
+
+
+def _rate_evidence_section(model: SystemModel) -> list[str]:
+    """Cited evidence behind the per-unit cost RATES (ADR-009 grounding, ratified #71). Gated on
+    `pricing.groundings`, so it emits ZERO bytes when rate grounding isn't active (report unchanged).
+    The rate VALUES already equal these grounded centrals; this shows the citation + band behind each.
+    Reads evidence the model carries; produces no number."""
+    gd = model.pricing.groundings
+    if not gd:
+        return []
+    L = ["## Cost rate evidence (grounded)", "",
+         "The per-unit cost rates are matched to **cited** vendor/benchmark pricing (researched + "
+         "adversarially verified, ratified). Values are the grounded centrals; the band shows the real "
+         "provider/model spread. Rates apply only to the cost lines a model actually uses.", "",
+         "| Rate | Grounded value | Band | Source |", "|---|--:|:--:|:--|"]
+    seen: set[tuple[str, str]] = set()
+    for rid in _RATE_ORDER:
+        g = gd.get(rid)
+        if g is None:
+            continue
+        val, band = _fmt_rate(rid, g)
+        L.append(f"| {_RATE_LABEL[rid]} | {val} | {band} | {g.citations[0].source} |")
+        for c in g.citations:
+            seen.add((c.source, c.reference))
+    L.append("")
+    L.append("**Evidence (resolvable sources):**")
+    for source, reference in sorted(seen):
+        L.append(f"- {source} — {reference}")
+    L.append("")
+    return L
+
+
 def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
            whatifs: list[tuple[str, SimulationResult]] | None = None) -> str:
     L: list[str] = []
@@ -136,8 +189,11 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
         for k in ("egress", "storage", "requests", "ai"):
             if bd.get(k):
                 parts.append(f"{k} ${bd[k] / 100:,.2f}")
-        L.append(f"  - breakdown: {' · '.join(parts)} /month "
-                 "(usage / AI / discount ratios are **ASSUMPTION** — ADR-009)")
+        # The rate provenance flips when the rates carry cited evidence (ADR-009 slice 2).
+        rate_tag = ("rates **GROUNDED** to cited benchmarks — see *Cost rate evidence*"
+                    if model.pricing.groundings else
+                    "usage / AI / discount ratios are **ASSUMPTION**")
+        L.append(f"  - breakdown: {' · '.join(parts)} /month ({rate_tag} — ADR-009)")
     L.append("")
 
     # Headline metrics envelope (ADR-007): every headline number travels with the model that
@@ -172,9 +228,10 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
                  f"{c.utilization*100:.0f}% | {c.mean_latency_ms:.1f} | {status} |")
     L.append("")
 
-    # Input grounding (ADR-006) — cited evidence behind the input numbers, when the KB is active.
-    # Empty (zero bytes) under the stub default, so a non-grounded report is byte-for-byte unchanged.
+    # Input grounding (ADR-006) — cited evidence behind the input numbers + the cost rates, when the KB
+    # is active. Both empty (zero bytes) under the stub default, so a non-grounded report is unchanged.
     L.extend(_grounding_section(model))
+    L.extend(_rate_evidence_section(model))
 
     # ADRs
     L.append("## Design decisions (council)")
