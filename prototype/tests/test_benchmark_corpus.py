@@ -196,9 +196,14 @@ class TestFactoryAndComponentEvidence(unittest.TestCase):
         # vs GCP ~$403), so it refuses to guess one for you rather than pick (docs/12 — refuse on a
         # poor/ambiguous match; better ASSUMPTION than a wrong number).
         self.assertIsNone(kb.ground(ComponentKind.CACHE, "monthly_cost_per_instance"))
-        # ...and grounds NOTHING where we deliberately have no datapoint (app-server throughput is
-        # too workload-dependent to ground generically — docs/12 §4).
-        self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "per_instance_rps"))
+        # app-server throughput now grounds to an honestly-WIDE band (grown corpus, 3x-verified) — the
+        # band reflects the workload/framework spread rather than claiming false precision.
+        app_rps = kb.ground(ComponentKind.APP_SERVER, "per_instance_rps")
+        self.assertIsNotNone(app_rps)
+        self.assertTrue(app_rps.confidence_low <= app_rps.value <= app_rps.confidence_high)
+        # ...and still grounds NOTHING where we deliberately have no datapoint (app-server service-time
+        # latency stayed ASSUMPTION — its proposal didn't survive adversarial review).
+        self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "base_latency_ms"))
 
     def test_component_reports_grounded_per_metric(self):
         g = Grounding(80_000, "rps", 68_000, 92_000, (_cite(),))

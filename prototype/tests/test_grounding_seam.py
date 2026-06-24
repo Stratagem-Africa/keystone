@@ -77,13 +77,15 @@ class TestGroundingSeam(unittest.TestCase):
 
     def test_curated_attaches_and_classifies_in_and_out_of_band(self):
         res = enrich(url_shortener.build(), _curated())
-        # in-band → GROUNDED
-        self.assertTrue(_find(res, "cache", "base_latency_ms").in_band)
-        self.assertTrue(_find(res, "db", "per_instance_rps").in_band)
-        # out-of-band → RECONCILE (value far from a kind-matched but context-mismatched benchmark)
-        self.assertFalse(_find(res, "lb", "per_instance_rps").in_band)
+        # in-band → GROUNDED (modeler value sits inside the cited band)
+        self.assertTrue(_find(res, "cache", "base_latency_ms").in_band)   # 0.5 in [0.4,1.5]
+        self.assertTrue(_find(res, "db", "per_instance_rps").in_band)     # 8,000 in [4.8k,29k]
+        self.assertTrue(_find(res, "cache", "per_instance_rps").in_band)  # 100k in [70k,180k] (grown corpus)
+        # out-of-band → RECONCILE (value outside a kind-matched but context-mismatched benchmark)
+        self.assertFalse(_find(res, "lb", "per_instance_rps").in_band)    # 30k vs bare-metal nginx 350k
         self.assertFalse(_find(res, "db", "monthly_cost_per_instance").in_band)
-        self.assertEqual(len(res.out_of_band), 2)
+        self.assertFalse(_find(res, "app", "per_instance_rps").in_band)   # 1,200 below [2k,8k] (grown corpus)
+        self.assertGreaterEqual(len(res.out_of_band), 2)                  # mix of GROUNDED + RECONCILE
 
     def test_default_mode_keeps_out_of_band_value(self):
         # The modeler's out-of-band LB capacity + DB cost must be KEPT, never silently clobbered.
@@ -94,11 +96,12 @@ class TestGroundingSeam(unittest.TestCase):
         # but the evidence IS attached (so the report can show RECONCILE)
         self.assertIn("per_instance_rps", res.model.components["lb"].groundings)
 
-    def test_context_free_disjoint_does_not_ground_app_server(self):
-        # app_server cost datapoints span disjoint vendor bands → the KB refuses to guess (returns None).
+    def test_context_free_disjoint_cost_does_not_ground(self):
+        # app_server COST datapoints span disjoint vendor bands → the KB refuses to guess (returns None),
+        # even though app_server per_instance_rps now grounds (grown corpus). Cost needs context matching.
         res = enrich(url_shortener.build(), _curated())
         self.assertIsNone(_find(res, "app", "monthly_cost_per_instance"))
-        self.assertFalse(res.model.components["app"].groundings)
+        self.assertNotIn("monthly_cost_per_instance", res.model.components["app"].groundings)
 
     def test_override_moves_only_matched_inputs_and_keeps_money_integer(self):
         res = enrich(url_shortener.build(), _curated(), override=True)

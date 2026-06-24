@@ -46,25 +46,59 @@ Input numbers matched to **cited benchmark evidence**. The engine still computed
 
 | Component | Input | Your value | Grounded central | Cited band | Status | Source |
 |---|---|--:|--:|:--:|:--|:--|
+| Load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | AWS — Application Load Balancer access logs (official docs) |
 | Load balancer | per_instance_rps | 40,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
+| Booking app tier | per_instance_rps | 2,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | Sharkbench (go-gin web benchmark) |
 | Seat-availability cache | base_latency_ms | 0.50 ms | 1.00 ms | 0.40–1.50 ms | GROUNDED ✓ | Redis official documentation — How fast is Redis? (redis-benchmark) |
+| Seat-availability cache | per_instance_rps | 100,000 rps | 110,000 rps | 70,000–180,000 rps | GROUNDED ✓ | Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) |
+| Booking request queue | per_instance_rps | 20,000 rps | 10,000 rps | 1,000–50,000 rps | GROUNDED ✓ | Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) |
+| Inventory DB (seats) | base_latency_ms | 6.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
 | Inventory DB (seats) | monthly_cost_per_instance | $300.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | https://www.digitalocean.com/pricing/managed-databases |
 | Inventory DB (seats) | per_instance_rps | 3,000 rps | 8,133 rps | 4,800–29,000 rps | RECONCILE ⚠ | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
+| Read replica | per_instance_rps | 8,000 rps | 10,000 rps | 5,000–50,000 rps | GROUNDED ✓ | Google Cloud (AlloyDB official OLTP benchmark docs) |
+| Payment gateway | base_latency_ms | 120.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Probecast — Adyen API status / latency monitoring (independent third-party) |
+| Payment gateway | per_instance_rps | 5,000 rps | 100 rps | 7–140 rps | RECONCILE ⚠ | Stripe Documentation — Rate limits |
 
 **Reconcile — your value is outside the cited band (kept, not overwritten):**
 - **Load balancer** · `per_instance_rps`: you have **40,000 rps**, the cited evidence says **350,000 rps** (band 315,000–385,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
+- **Inventory DB (seats)** · `base_latency_ms`: you have **6.00 ms**, the cited evidence says **0.30 ms** (band 0.15–0.80 ms). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Inventory DB (seats)** · `monthly_cost_per_instance`: you have **$300.00/mo**, the cited evidence says **$122.10/mo** (band $109.89–$134.31). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Inventory DB (seats)** · `per_instance_rps`: you have **3,000 rps**, the cited evidence says **8,133 rps** (band 4,800–29,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
+- **Payment gateway** · `per_instance_rps`: you have **5,000 rps**, the cited evidence says **100 rps** (band 7–140 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 
 **Evidence (resolvable sources):**
+- AWS — Application Load Balancer access logs (official docs) — https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html
+- HAProxy Technologies — 'HAProxy Forwards Over 2 Million HTTP Requests per Second on a Single AWS Arm Instance' — https://www.haproxy.com/blog/haproxy-forwards-over-2-million-http-requests-per-second-on-a-single-aws-arm-instance
+- Istio — 'Best Practices: Benchmarking Service Mesh Performance' (Envoy sidecar overhead) — https://istio.io/latest/blog/2019/performance-best-practices/
 - NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) — https://ia801500.us.archive.org/31/items/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09_djvu.txt
 - Internet Archive item landing page (provenance for the OCR full-text above) — https://archive.org/details/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09
 - NGINX/F5 — NGINX Plus Sizing Guide: How We Tested (methodology, corroborates test conditions) — https://www.f5.com/company/blog/nginx/nginx-plus-sizing-guide-how-we-tested
+- Sharkbench (go-gin web benchmark) — https://sharkbench.dev/web/go-gin
+- nDmitry/web-benchmarks (GitHub) — https://github.com/nDmitry/web-benchmarks
+- DEV.to — Under Pressure: Benchmarking Node.js on a Single-Core EC2 — https://dev.to/ocodista/under-pressure-benchmarking-nodejs-on-a-single-core-ec2-5ghe
 - Redis official documentation — How fast is Redis? (redis-benchmark) — https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/
+- Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) — https://redis-doc-test.readthedocs.io/en/latest/topics/benchmarks/
+- Redis official documentation (Benchmarks, current docs) — https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/
+- OneUptime — How to Benchmark Redis Performance with redis-benchmark — https://oneuptime.com/blog/post/2026-03-31-redis-benchmark-performance/view
+- Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) — https://www.confluent.io/blog/kafka-fastest-messaging-system/
+- Factor House — Kafka topic & partition best practices (citing Confluent, LinkedIn, Netflix, Uber) — https://factorhouse.io/articles/kafka-topic-partition-best-practices
+- CloudAMQP — Part 2: RabbitMQ Best Practice for High Performance — https://www.cloudamqp.com/blog/part2-rabbitmq-best-practice-for-high-performance.html
+- computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) — https://computingforgeeks.com/database-benchmark-postgresql-mysql-mariadb/
+- DoltHub Blog — Postgres vs MySQL Sysbench Latency — https://www.dolthub.com/blog/2024-07-16-mysql-postgres-sysbench-latency/
+- faucetDB (MCP database benchmark) — https://faucetdb.ai/blog/mcp-database-benchmark/
 - https://www.digitalocean.com/pricing/managed-databases — PostgreSQL plan table, 8 GiB row
 - https://docs.digitalocean.com/products/databases/postgresql/details/pricing/ — PostgreSQL pricing overview
 - ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services — https://clickhouse.com/blog/postgresbench
 - Severalnines — Benchmarking Managed PostgreSQL Cloud Solutions: Part Two - Amazon RDS — https://severalnines.com/blog/benchmarking-managed-postgresql-cloud-solutions-part-two-amazon-rds/
+- Google Cloud (AlloyDB official OLTP benchmark docs) — https://docs.cloud.google.com/alloydb/docs/benchmark-oltp-performance-alloydb
+- Crunchy Data (PostgreSQL 13 benchmark blog) — quote CORRECTED to figures verifiers confirmed on the page — https://www.crunchydata.com/blog/postgresql-13-benchmark-memory-speed-vs.-tps
+- Severalnines (How to Benchmark PostgreSQL Performance) — https://severalnines.com/blog/benchmarking-postgresql-performance/
+- AWS (Optimizing PostgreSQL on EC2 using EBS whitepaper) — https://docs.aws.amazon.com/whitepapers/latest/optimizing-postgresql-on-ec2-using-ebs/postgresql-benchmark-observations-and-considerations.html
+- Probecast — Adyen API status / latency monitoring (independent third-party) — https://probecast.io/status/adyen-api
+- The Stripe Latency Post-Mortem Every Engineer Should Read (Medium, secondary account of Stripe's March 2022 incident) — https://medium.com/@warstories/the-stripe-latency-post-mortem-every-engineer-should-read-before-launching-their-api-6514411772f8
+- Stripe Documentation — Rate limits — https://docs.stripe.com/rate-limits
+- Adyen Docs / API Explorer — Legal Entity Management v3 Overview (rate limits) — https://docs.adyen.com/api-explorer/legalentity/3/overview
+- PayPal Developer — Payouts: Test and go live (rate limiting) — https://developer.paypal.com/docs/payouts/standard/integrate-api/test-and-go-live/
 
 ## Cost rate evidence (grounded)
 
