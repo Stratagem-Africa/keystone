@@ -210,13 +210,26 @@ class TestGroundingSeam(unittest.TestCase):
         self.assertIn("ASSUMPTION rates", stub_md)
         self.assertNotIn("GROUNDED (cited) rates", stub_md)
 
-    def test_custom_rate_is_not_falsely_certified_as_grounded(self):
-        # A model whose rate differs from the grounded central must NOT be shown as grounded (fail closed).
-        m = url_shortener.build()
-        m.pricing = PricingRates(egress_micro_usd_per_gb=300_000)   # custom $0.30/GB ≠ grounded $0.09
+    def test_custom_billed_rate_is_not_falsely_certified_as_grounded(self):
+        # A model that BILLS a custom rate (≠ grounded central) must not be swept under a blanket GROUNDED
+        # prose tag — neither the evidence table (fail closed) nor the cost caveats/derivation.
+        from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
+        comp = Component("a", K.APP_SERVER, "App", per_instance_rps=1000.0, monthly_cost_per_instance=5000,
+                         egress_gb_per_month=1000)                           # bills egress
+        m = SystemModel("t", {"a": comp}, [Flow("f", 1.0, [FlowStep("a")])], Workload(1000.0),
+                        pricing=PricingRates(egress_micro_usd_per_gb=300_000))   # custom $0.30/GB ≠ grounded
         grounded = ground_pricing(m, _curated())
-        self.assertNotIn("egress", grounded.pricing.groundings)     # custom egress left ungrounded
+        self.assertNotIn("egress", grounded.pricing.groundings)     # fail closed: custom egress not certified
         self.assertIn("requests", grounded.pricing.groundings)      # default rates still grounded
+        md = render(grounded, make_council().design(grounded), simulate(grounded))
+        self.assertNotIn("GROUNDED (cited) rates", md)              # a billed custom rate → no blanket GROUNDED
+        self.assertIn("ASSUMPTION rates", md)
+        # control: the SAME model with the default (grounded) egress rate → all billed rates grounded → GROUNDED
+        comp2 = Component("b", K.APP_SERVER, "App", per_instance_rps=1000.0, monthly_cost_per_instance=5000,
+                          egress_gb_per_month=1000)
+        m2 = SystemModel("t2", {"b": comp2}, [Flow("f", 1.0, [FlowStep("b")])], Workload(1000.0))
+        md2 = render(ground_pricing(m2, _curated()), make_council().design(m2), simulate(ground_pricing(m2, _curated())))
+        self.assertIn("GROUNDED (cited) rates", md2)
 
     def test_rate_tables_match_evidence_ids(self):
         # The hand-maintained report tables must stay in lockstep with the evidence file's rate ids.

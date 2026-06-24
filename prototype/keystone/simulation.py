@@ -319,7 +319,17 @@ def simulate(model: SystemModel) -> SimulationResult:
     # grounding value, never the math (the rate VALUES are the PricingRates fields, identical either way),
     # so it does not violate "grounding never changes a computed number" (the cost is byte-identical;
     # locked by test_rate_grounding_does_not_change_engine_cost). Stub → False → the exact ASSUMPTION text.
-    rates_grounded = bool(model.pricing.groundings)
+    # BILLED-LINE-AWARE: claim GROUNDED only if EVERY rate this model actually bills is grounded — a custom
+    # rate (omitted by ground_pricing's fail-closed match) must NOT be swept under a blanket GROUNDED tag.
+    _grounded_rates = model.pricing.groundings
+    _billed_rates: set[str] = set()
+    if cost_breakdown.get("egress"):   _billed_rates.add("egress")
+    if cost_breakdown.get("storage"):  _billed_rates.add("storage")
+    if cost_breakdown.get("requests"): _billed_rates.add("requests")
+    if cost_breakdown.get("ai"):       _billed_rates.update(("llm_input", "llm_output"))
+    if model.pricing.compute_pricing != "on_demand":
+        _billed_rates.add(model.pricing.compute_pricing)
+    rates_grounded = bool(_grounded_rates) and all(r in _grounded_rates for r in _billed_rates)
     cost_caveat = (
         "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
         "(egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). "
