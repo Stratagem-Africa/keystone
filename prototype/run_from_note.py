@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from _env import load_env, report_path
 from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.ingestion import Source, make_ingestor
@@ -27,6 +28,7 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "from_note_report.md")
 
 
 def main() -> None:
+    load_env()                              # activate local .env (council/grounding); existing env wins
     # 1. Ingest intent -> partial canonical model (+ assumptions, scan/injection notes).
     result = make_ingestor().ingest(Source(text=NOTE, name="URL Shortener (from note)"))
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
@@ -35,13 +37,16 @@ def main() -> None:
     sim = simulate(model)
     # 4. Report with the mandatory honesty section.
     md = render(model, adrs, sim)
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w") as f:
+    out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as f:
         f.write(md)
 
     print("=" * 70)
     print(f"KEYSTONE — intent -> validated design   ({model.name})")
     print("=" * 70)
+    print(f"Council            : {provider}"
+          + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
     for n in result.notes:
         print(f"  note: {n}")
     print(f"Components inferred : {', '.join(model.components)}")
@@ -50,7 +55,7 @@ def main() -> None:
     print(f"Max safe load      : {sim.breakpoint_rps_safe:,.0f} rps (engine-computed)")
     print(f"Assumptions        : {len(model.assumptions)} (all editable)")
     print("-" * 70)
-    print("Full report written to: outputs/from_note_report.md")
+    print(f"Full report written to: outputs/{os.path.basename(out)}")
 
 
 if __name__ == "__main__":

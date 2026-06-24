@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 
+from _env import load_env, report_path
 from keystone.blueprints import url_shortener
 from keystone.council import make_council
 from keystone.grounding import ground_model
@@ -48,15 +49,19 @@ def build_and_render(kb=None):
 
 
 def main() -> None:
+    load_env()                              # activate local .env (council/grounding); existing env wins
     model, sim, whatifs, md = build_and_render()
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w") as f:
+    out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as f:
         f.write(md)
 
     # Console summary
     print("=" * 70)
     print(f"KEYSTONE PHASE-0 — {model.name} @ {sim.system_rps:,.0f} rps")
     print("=" * 70)
+    print(f"Council          : {provider}"
+          + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
     print(f"Bottleneck       : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
     print(f"Max safe load    : {sim.breakpoint_rps_safe:,.0f} rps "
           f"(theoretical {sim.breakpoint_rps_theoretical:,.0f})")
@@ -70,7 +75,7 @@ def main() -> None:
         print(f"  {label:38s} -> bottleneck {w.bottleneck_name:28s} "
               f"util {w.bottleneck_utilization*100:5.0f}%  safe {w.breakpoint_rps_safe:,.0f} rps")
     print("-" * 70)
-    print(f"Full report written to: outputs/url_shortener_report.md")
+    print(f"Full report written to: outputs/{os.path.basename(out)}")
 
 
 if __name__ == "__main__":
