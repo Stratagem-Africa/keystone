@@ -7,7 +7,10 @@ engine never pulls it in.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+import urllib.request
 from typing import Protocol
 
 log = logging.getLogger("keystone.llm")
@@ -52,3 +55,70 @@ class AnthropicLLM:
             messages=[{"role": "user", "content": user}],
         )
         return "".join(b.text for b in resp.content if b.type == "text")
+
+
+class OpenAICompatibleLLM:
+    """OpenAI-compatible `/chat/completions` transport over **stdlib HTTP** — covers OpenAI (ChatGPT),
+    OpenRouter (hundreds of models, including free ones), and a local **Ollama** server, which all speak
+    the same wire API. `base_url` + the API-key env var select the provider; no SDK dependency
+    (stdlib-first, CLAUDE.md). The key is read from the environment and **never logged**.
+
+    Same `LLM` seam as `AnthropicLLM`, so the council/ingestion/consensus layers are provider-agnostic.
+    Inject a fake `LLM` for $0 offline tests; this transport only runs when a real provider is selected."""
+
+    def __init__(self, model: str, *, base_url: str, api_key_env: str | None = None, timeout: int = 120) -> None:
+        self._model = model
+        self._base_url = base_url.rstrip("/")
+        self._api_key = os.getenv(api_key_env) if api_key_env else None
+        if api_key_env and not self._api_key:
+            raise LLMError(f"{api_key_env} is not set — required for the {base_url} provider.")
+        self._timeout = timeout
+
+    def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
+        log.debug("llm call [%s] model=%s base=%s", label, self._model, self._base_url)
+        body = json.dumps({
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"   # never logged
+        req = urllib.request.Request(f"{self._base_url}/chat/completions", data=body,
+                                     headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:   # noqa: S310 (https only by config)
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:   # transport/HTTP/JSON failure — fail loud, never silently empty
+            raise LLMError(f"{label}: {self._base_url} call failed: {e}") from e
+        try:
+            return data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMError(f"{label}: unexpected response shape from {self._base_url}") from e
+
+
+# Provider registry for the OpenAI-compatible transport: name -> (base_url | None, api_key_env | None).
+# Ollama's base comes from OLLAMA_BASE_URL (local, no key); the rest are hosted + keyed.
+_OPENAI_COMPATIBLE = {
+    "openai":     ("https://api.openai.com/v1",   "OPENAI_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "ollama":     (None,                           None),
+}
+
+
+def make_llm(provider: str, model: str) -> LLM:
+    """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
+    `claude`/`anthropic` → `AnthropicLLM` (SDK); `openai`/`openrouter`/`ollama` → `OpenAICompatibleLLM`
+    (stdlib HTTP). Used by the council factory + the multi-model consensus layer."""
+    p = provider.strip().lower()
+    if p in ("claude", "anthropic"):
+        return AnthropicLLM(model)
+    if p == "ollama":
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        return OpenAICompatibleLLM(model, base_url=base, api_key_env=None)
+    if p in _OPENAI_COMPATIBLE:
+        base, key_env = _OPENAI_COMPATIBLE[p]
+        return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env)
+    raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | ollama)")
