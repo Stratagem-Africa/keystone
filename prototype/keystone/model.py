@@ -133,7 +133,7 @@ class Assumption:
 # still PAY (ADR-009 Tier 2 discount lever). Real deployments rarely pay list: a 1–3yr commitment or
 # interruptible spot cuts the compute bill, so "full price" overstates a believable bill.
 # Values were RESEARCHED + 3x adversarially verified (see `benchmarks/grounded_pricing_rates.json`,
-# 2026-06-23) — central = % off RETAINED as bp; pending Bifola's ratification of the citations.
+# 2026-06-23) — central = % off RETAINED as bp; ratified by Bifola (#71 merged on "ratify #71").
 # `on_demand` is 10_000 bp (100% — the default), so any model that does not opt into a discount is
 # byte-for-byte unchanged. Integer bp keeps the discount math money-safe (round-half-up integer
 # arithmetic — never a float; harm floor, ADR-008).

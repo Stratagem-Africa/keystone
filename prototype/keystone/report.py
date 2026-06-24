@@ -92,7 +92,8 @@ def _fmt_rate(rid: str, g) -> tuple[str, str]:
     v, lo, hi = g.value, g.confidence_low, g.confidence_high
     if rid in ("egress", "storage"):                 # micro-USD/GB(-mo) → $/GB
         unit = "/GB-mo" if rid == "storage" else "/GB"
-        return (f"${v / 1e6:,.3f}{unit}", f"${lo / 1e6:,.3f}–${hi / 1e6:,.3f}")
+        dp = 4 if rid == "storage" else 3            # storage band-high $0.0253 needs 4dp (don't under-state)
+        return (f"${v / 1e6:,.{dp}f}{unit}", f"${lo / 1e6:,.{dp}f}–${hi / 1e6:,.{dp}f}")
     if rid == "requests":                            # micro-USD per 1k → $/1M requests
         return (f"${v / 1000:,.2f}/1M req", f"${lo / 1000:,.2f}–${hi / 1000:,.2f}")
     if rid in ("llm_input", "llm_output"):           # micro-USD per 1k tokens → $/1M tokens

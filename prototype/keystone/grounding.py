@@ -131,6 +131,9 @@ def ground_pricing(model: SystemModel, kb: KnowledgeBase) -> SystemModel:
     rates as GROUNDED (with citation + band). Gated like the component grounding: a STRICT no-op under the
     stub KB (returns the original model), so default reports are byte-for-byte unchanged. Never changes a
     rate VALUE — the seeds already equal the grounded centrals (ratified #71); this only carries evidence."""
+    # `kb` is an on/off ACTIVATION GATE, not the data source: the rate evidence is the single ratified
+    # file (grounded_pricing_rates.json), independent of which component-KB is active. The stub means
+    # "grounding off" → no-op; any live KB (today only curated) means "on" → attach the ratified rates.
     if isinstance(kb, EmptyKnowledgeBase):
         return model
     priced = dataclasses.replace(model.pricing, groundings=_load_rate_groundings())
