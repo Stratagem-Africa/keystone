@@ -152,7 +152,8 @@ class PricingRates:
     so sub-cent rates are exact; the engine rounds the usage TOTAL to integer cents (harm floor, ADR-008
     — money is never a float). Defaults were RESEARCHED + 3x adversarially verified (devil's-advocate)
     against real vendor/aggregator pricing pages — see `benchmarks/grounded_pricing_rates.json` (2026-06-23)
-    for the value, band, tier, and citations of each. Pending Bifola's ratification of the citations."""
+    for the value, band, tier, and citations of each (ratified #71). `grounding.ground_pricing` attaches
+    that evidence to `groundings` (keyed by rate id) so the report can show the rates as GROUNDED."""
     egress_micro_usd_per_gb: int = 90_000          # $0.09/GB internet egress, US first paid tier (band 0.087–0.12); GROUNDED T2, 3/3
     storage_micro_usd_per_gb_month: int = 21_000   # $0.021/GB-mo object storage standard (band 0.018–0.0253); GROUNDED T2, 3/3
     request_micro_usd_per_thousand: int = 3_000    # $3.00 per 1M API-gateway requests (band 1.00–3.50); GROUNDED T1, 3/3 (was a 3x-low guess)
@@ -163,6 +164,10 @@ class PricingRates:
     # Tier 2 discount lever: which compute pricing model the bill assumes. Default `on_demand` = list
     # price = no change to existing cost numbers. Applied to COMPUTE ONLY (per ADR-009 §2).
     compute_pricing: str = "on_demand"
+    # Cited evidence per rate id (ADR-006 grounding, mirrors Component.groundings). Empty = not attached
+    # (the honest default); `grounding.ground_pricing` fills it from grounded_pricing_rates.json when the
+    # KB is active. The rate VALUES already equal the grounded centrals; this only carries the citations.
+    groundings: dict[str, Grounding] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in ("egress_micro_usd_per_gb", "storage_micro_usd_per_gb_month", "request_micro_usd_per_thousand",

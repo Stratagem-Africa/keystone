@@ -16,8 +16,9 @@ import run_url_shortener
 from keystone.benchmarks.benchmark_corpus import CuratedKnowledgeBase
 from keystone.grounding import enrich as _enrich_fn
 from keystone.blueprints import url_shortener
-from keystone.grounding import enrich
+from keystone.grounding import enrich, ground_pricing
 from keystone.knowledge_base import EmptyKnowledgeBase
+from keystone.model import COMPUTE_PRICING_RETAINED_BP, PricingRates
 from keystone.provenance import GROUNDABLE_METRICS
 from keystone.report import render
 from keystone.council import make_council
@@ -141,6 +142,49 @@ class TestGroundingSeam(unittest.TestCase):
         # Safe-default lock: enrich must NEVER move an input unless a caller explicitly opts in.
         # The shipped report path (run_url_shortener.build_and_render) never passes override=True.
         self.assertIs(inspect.signature(_enrich_fn).parameters["override"].default, False)
+
+    # ---- Cost-rate grounding (slice 2) -------------------------------------------------------- #
+
+    def test_ground_pricing_noop_under_stub(self):
+        m = url_shortener.build()
+        self.assertIs(ground_pricing(m, EmptyKnowledgeBase()), m)        # strict identity
+        self.assertFalse(m.pricing.groundings)
+
+    def test_ground_pricing_attaches_all_eight_rates_under_curated(self):
+        m = ground_pricing(url_shortener.build(), _curated())
+        self.assertEqual(set(m.pricing.groundings), {
+            "egress", "storage", "requests", "llm_input", "llm_output",
+            "reserved_1yr", "reserved_3yr", "spot"})
+        for g in m.pricing.groundings.values():
+            self.assertTrue(g.citations)                                # ≥1 cited source (Grounding invariant)
+            self.assertLessEqual(g.confidence_low, g.value)             # band brackets the value
+            self.assertLessEqual(g.value, g.confidence_high)
+
+    def test_rate_grounding_values_match_the_engine_seeds(self):
+        # The attached evidence value must equal the rate the engine actually uses (no drift).
+        m = ground_pricing(url_shortener.build(), _curated())
+        pr = PricingRates()
+        self.assertEqual(m.pricing.groundings["egress"].value, pr.egress_micro_usd_per_gb)
+        self.assertEqual(m.pricing.groundings["requests"].value, pr.request_micro_usd_per_thousand)
+        self.assertEqual(m.pricing.groundings["llm_output"].value, pr.llm_output_micro_usd_per_1k_tokens)
+        self.assertEqual(m.pricing.groundings["spot"].value, COMPUTE_PRICING_RETAINED_BP["spot"])
+
+    def test_rate_grounding_does_not_change_engine_cost(self):
+        # Evidence-only: attaching rate citations must not move the bill (prime-directive proof for rates).
+        m = url_shortener.build()
+        base = simulate(m).monthly_cost
+        grounded = simulate(ground_pricing(m, _curated())).monthly_cost
+        self.assertEqual(base, grounded)
+
+    def test_report_shows_rate_evidence_only_when_grounded(self):
+        stub_m = url_shortener.build()
+        self.assertNotIn("## Cost rate evidence", render(stub_m, make_council().design(stub_m), simulate(stub_m)))
+        m = ground_pricing(url_shortener.build(), _curated())
+        md = render(m, make_council().design(m), simulate(m))
+        self.assertIn("## Cost rate evidence", md)
+        self.assertIn("$3.00/1M req", md)         # the grounded requests rate (corrected from $1)
+        self.assertIn("77% off", md)              # the grounded spot discount
+        self.assertIn("AWS API Gateway", md)      # a citation source
 
 
 if __name__ == "__main__":

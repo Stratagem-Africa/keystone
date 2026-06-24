@@ -9,7 +9,7 @@ import os
 
 from keystone.blueprints import url_shortener
 from keystone.council import make_council
-from keystone.grounding import enrich
+from keystone.grounding import enrich, ground_pricing
 from keystone.knowledge_base import make_knowledge_base
 from keystone.simulation import simulate
 from keystone.report import render
@@ -26,8 +26,11 @@ def build_and_render(kb=None):
     # 1. Canonical model (LLM-derived in product; hand-built here for validation).
     model = url_shortener.build(system_rps=10_000, cache_hit_rate=0.90)
 
-    # 1b. Attach cited KB evidence to the input numbers (ADR-006, the L0→L1 lever).
-    model = enrich(model, kb if kb is not None else make_knowledge_base()).model
+    # 1b. Attach cited KB evidence to the input numbers + the cost rates (ADR-006, the L0→L1 lever).
+    #     Both are a strict no-op under the stub KB, so the rendered report is byte-for-byte unchanged.
+    kb = kb if kb is not None else make_knowledge_base()
+    model = enrich(model, kb).model
+    model = ground_pricing(model, kb)
 
     # 2. Council reasons. Defaults to the deterministic stub ($0, no key); set
     #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
