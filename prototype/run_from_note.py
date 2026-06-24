@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from keystone.council import make_council
+from keystone.grounding import ground_model
 from keystone.ingestion import Source, make_ingestor
 from keystone.report import render
 from keystone.simulation import simulate
@@ -28,7 +29,7 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "from_note_report.md")
 def main() -> None:
     # 1. Ingest intent -> partial canonical model (+ assumptions, scan/injection notes).
     result = make_ingestor().ingest(Source(text=NOTE, name="URL Shortener (from note)"))
-    model = result.model
+    model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
     adrs = make_council().design(model)
     sim = simulate(model)

@@ -12,6 +12,7 @@ import os
 
 from keystone.blueprints import ticket_booking
 from keystone.council import make_council
+from keystone.grounding import ground_model
 from keystone.report import render
 from keystone.simulation import simulate
 
@@ -19,7 +20,7 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "ticket_booking_report.
 
 
 def main() -> None:
-    baseline = ticket_booking.build()                 # steady state: 5k rps, 5% book
+    baseline = ground_model(ticket_booking.build())   # steady state: 5k rps, 5% book (grounding activated)
     sim = simulate(baseline)
     adrs = make_council().design(baseline)
 

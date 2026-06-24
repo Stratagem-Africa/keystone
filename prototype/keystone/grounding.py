@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import keystone.benchmarks as _benchmarks
-from keystone.knowledge_base import EmptyKnowledgeBase, KnowledgeBase
+from keystone.knowledge_base import EmptyKnowledgeBase, KnowledgeBase, make_knowledge_base
 from keystone.model import COMPUTE_PRICING_RETAINED_BP, Component, PricingRates, SystemModel
 from keystone.provenance import GROUNDABLE_METRICS, Citation, Grounding
 # NOTE: this module deliberately does NOT depend on the engine module (keystone/simulation.py) —
@@ -163,3 +164,16 @@ def ground_pricing(model: SystemModel, kb: KnowledgeBase) -> SystemModel:
         return model
     priced = dataclasses.replace(model.pricing, groundings=attached)
     return dataclasses.replace(model, pricing=priced)
+
+
+def ground_model(model: SystemModel, kb: KnowledgeBase | None = None) -> SystemModel:
+    """Report-generation entry point: attach BOTH component-input evidence (`enrich`, evidence-only) and
+    cost-rate evidence (`ground_pricing`) so the report shows GROUNDED/RECONCILE + cited rates.
+
+    ACTIVATION: `kb` defaults to the env-driven Knowledge Base with a **curated** default — grounding is
+    ON for generated reports; set `KB_PROVIDER=stub` to turn it off. The LIBRARY `make_knowledge_base()`
+    default stays `stub` (safe for programmatic/API/test callers); activation lives here, at the report
+    layer. Evidence-only — changes no computed number (the engine never reads a grounding value)."""
+    if kb is None:
+        kb = make_knowledge_base(os.getenv("KB_PROVIDER") or "curated")
+    return ground_pricing(enrich(model, kb).model, kb)

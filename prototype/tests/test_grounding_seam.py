@@ -131,15 +131,14 @@ class TestGroundingSeam(unittest.TestCase):
         scaled = m.scaled(50_000)
         self.assertIn("base_latency_ms", scaled.components["cache"].groundings)
 
-    def test_stub_report_byte_for_byte_matches_committed_golden(self):
-        # Locks the default-off no-op at the RENDER layer: the stub report must equal the committed
-        # outputs/url_shortener_report.md, so a future render tweak can't silently change stub output.
-        # Renders via the run script's own build_and_render() — same source main() writes.
+    def test_stub_report_byte_for_byte_matches_stub_fixture(self):
+        # Locks the grounding-OFF render: with KB_PROVIDER=stub the report must equal the stub fixture,
+        # so a future render tweak can't silently change the off-state output. (The DEFAULT report,
+        # url_shortener_report.md, is now grounded — see test_curated_report_byte_for_byte.)
         _, _, _, md = run_url_shortener.build_and_render(EmptyKnowledgeBase())
         golden = (Path(run_url_shortener.__file__).resolve().parent
-                  / "outputs" / "url_shortener_report.md").read_text(encoding="utf-8")
-        self.assertEqual(md, golden, "stub report drifted from the committed golden — regenerate "
-                         "outputs/url_shortener_report.md (python3 run_url_shortener.py) or fix the render change")
+                  / "outputs" / "url_shortener_report.stub.md").read_text(encoding="utf-8")
+        self.assertEqual(md, golden, "stub report drifted — regenerate outputs/url_shortener_report.stub.md")
 
     def test_override_defaults_off(self):
         # Safe-default lock: enrich must NEVER move an input unless a caller explicitly opts in.
@@ -244,11 +243,12 @@ class TestGroundingSeam(unittest.TestCase):
                 self.assertIsInstance(make_knowledge_base(), EmptyKnowledgeBase)
 
     def test_curated_report_byte_for_byte_matches_committed_golden(self):
-        # Locks the GROUNDED render (the stub golden can't catch drift inside the grounding sections).
+        # The DEFAULT (activated) report is grounded: locks the GROUNDED render incl. the grounding
+        # sections. This is the committed outputs/url_shortener_report.md (what `main()` now writes).
         _, _, _, md = run_url_shortener.build_and_render(CuratedKnowledgeBase.from_default_corpus())
         golden = (Path(run_url_shortener.__file__).resolve().parent
-                  / "outputs" / "url_shortener_report.grounded.md").read_text(encoding="utf-8")
-        self.assertEqual(md, golden, "grounded report drifted — regenerate outputs/url_shortener_report.grounded.md")
+                  / "outputs" / "url_shortener_report.md").read_text(encoding="utf-8")
+        self.assertEqual(md, golden, "grounded report drifted — regenerate outputs/url_shortener_report.md")
 
 
 if __name__ == "__main__":

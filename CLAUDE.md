@@ -99,6 +99,8 @@ Phase 0 complete (deterministic engine + loop; 56-blueprint corpus). The documen
 
 **All LLM layers default to STUB** (`COUNCIL_PROVIDER` / `INGEST_PROVIDER`); real activation is a **manual Bifola trigger** — and is gated on the council's structured-output v2 lever (ADR-001) + the model store's no-retention/tenant-isolation MUST (ADR-002) before any real upload.
 
+**Grounding (the KB) is ACTIVATED** (ADR-006; `KB_PROVIDER=curated` is now the report-generation default; the library `make_knowledge_base()` default stays `stub`; `KB_PROVIDER=stub` disables). Reports show cited **GROUNDED/RECONCILE** evidence behind input numbers + the **cost rates** — using the corpus (#64) + the ratified rate evidence (`benchmarks/grounded_pricing_rates.json`, #71). This is **evidence-only**: grounding **never changes a computed number** (the engine never reads a grounding value); it only adds the evidence sections + provenance labels, and out-of-band modeler values are flagged for reconciliation, never overwritten (override is opt-in, unshipped). The KB uses **no LLM** — it is cited data, so this does not touch the prime directive or the $0/offline rule, and the council/ingestion layers stay STUB.
+
 **Next:** reconciliation (F2, multi-doc merge + conflict report); canonical model store (docs/05, versioned + tenant-isolation); grow the reference-model corpus toward L1 calibration (needs the KB); delivery layer (FastAPI → Next.js, ADR-003 — Jem).
 
 ## What NOT to do
