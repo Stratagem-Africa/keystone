@@ -100,9 +100,6 @@ def submit_intent(req: IntentRequest) -> dict:
     return response
 
 
-    
-
-
 if __name__ == "__main__":
     import uvicorn
 

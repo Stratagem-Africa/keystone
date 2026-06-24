@@ -23,3 +23,4 @@ def create_job(intent_text: str, secrets_found: list[str]) -> Job:
 
 def get_job(job_id: str) -> Job | None:
     return _store.get(job_id)
+
