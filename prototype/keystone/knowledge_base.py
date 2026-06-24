@@ -50,7 +50,9 @@ def make_knowledge_base(provider: str | None = None) -> KnowledgeBase:
                   corpus is curated + a human review gate passes; activation is a Bifola trigger).
     - `rag`     → gated (future ADR).
     """
-    provider = (provider or os.getenv("KB_PROVIDER", "stub")).lower()
+    # Treat unset OR set-but-empty/whitespace KB_PROVIDER as the stub default (a `export KB_PROVIDER=`
+    # or empty CI secret must not crash the run — keeps the default-off/$0/offline promise).
+    provider = (provider or os.getenv("KB_PROVIDER") or "stub").strip().lower() or "stub"
     if provider not in _KNOWN_PROVIDERS:
         raise ValueError(f"unknown KB provider {provider!r} (expected one of {_KNOWN_PROVIDERS})")
     if provider == "stub":

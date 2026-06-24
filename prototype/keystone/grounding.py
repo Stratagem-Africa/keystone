@@ -27,7 +27,7 @@ from pathlib import Path
 
 import keystone.benchmarks as _benchmarks
 from keystone.knowledge_base import EmptyKnowledgeBase, KnowledgeBase
-from keystone.model import Component, PricingRates, SystemModel
+from keystone.model import COMPUTE_PRICING_RETAINED_BP, Component, PricingRates, SystemModel
 from keystone.provenance import GROUNDABLE_METRICS, Citation, Grounding
 # NOTE: this module deliberately does NOT depend on the engine module (keystone/simulation.py) —
 # grounding rewrites inputs, never a computed result (a reviewer-checkable separation).
@@ -126,15 +126,40 @@ def _load_rate_groundings() -> dict[str, Grounding]:
     return out
 
 
+# rate id → the PricingRates field whose value the engine actually bills with (the 3 discounts are the
+# global COMPUTE_PRICING_RETAINED_BP, not per-model). Used to verify "model value == grounded central"
+# before certifying a rate as GROUNDED — so a custom/edited rate is never falsely certified.
+_RATE_FIELD = {
+    "egress": "egress_micro_usd_per_gb",
+    "storage": "storage_micro_usd_per_gb_month",
+    "requests": "request_micro_usd_per_thousand",
+    "llm_input": "llm_input_micro_usd_per_1k_tokens",
+    "llm_output": "llm_output_micro_usd_per_1k_tokens",
+}
+
+
+def _model_rate_value(pricing: PricingRates, rate_id: str):
+    """The value the engine bills with for this rate id (per-model field, or the global discount bp)."""
+    field = _RATE_FIELD.get(rate_id)
+    return getattr(pricing, field) if field is not None else COMPUTE_PRICING_RETAINED_BP.get(rate_id)
+
+
 def ground_pricing(model: SystemModel, kb: KnowledgeBase) -> SystemModel:
     """Attach the ratified cost-rate evidence to `model.pricing.groundings` so the report can show the
     rates as GROUNDED (with citation + band). Gated like the component grounding: a STRICT no-op under the
     stub KB (returns the original model), so default reports are byte-for-byte unchanged. Never changes a
-    rate VALUE — the seeds already equal the grounded centrals (ratified #71); this only carries evidence."""
+    rate VALUE — only carries evidence."""
     # `kb` is an on/off ACTIVATION GATE, not the data source: the rate evidence is the single ratified
     # file (grounded_pricing_rates.json), independent of which component-KB is active. The stub means
     # "grounding off" → no-op; any live KB (today only curated) means "on" → attach the ratified rates.
     if isinstance(kb, EmptyKnowledgeBase):
         return model
-    priced = dataclasses.replace(model.pricing, groundings=_load_rate_groundings())
+    # FAIL CLOSED: certify a rate as GROUNDED only when the model's actual rate VALUE equals the grounded
+    # central. A custom/edited rate (≠ central) is left ungrounded rather than falsely shown as cited —
+    # the seed==central case (every shipped model) attaches all 8; a divergent rate is simply skipped.
+    attached = {rid: g for rid, g in _load_rate_groundings().items()
+                if _model_rate_value(model.pricing, rid) == g.value}
+    if not attached:
+        return model
+    priced = dataclasses.replace(model.pricing, groundings=attached)
     return dataclasses.replace(model, pricing=priced)
