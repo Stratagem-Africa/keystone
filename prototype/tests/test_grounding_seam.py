@@ -9,18 +9,21 @@ corpus produces the honest mixed report (in-band GROUNDED + out-of-band RECONCIL
 from __future__ import annotations
 
 import inspect
+import json
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import run_url_shortener
 from keystone.benchmarks.benchmark_corpus import CuratedKnowledgeBase
 from keystone.grounding import enrich as _enrich_fn
 from keystone.blueprints import url_shortener
-from keystone.grounding import enrich, ground_pricing
-from keystone.knowledge_base import EmptyKnowledgeBase
+from keystone.grounding import _RATE_EVIDENCE, enrich, ground_pricing
+from keystone.knowledge_base import EmptyKnowledgeBase, make_knowledge_base
 from keystone.model import COMPUTE_PRICING_RETAINED_BP, PricingRates
 from keystone.provenance import GROUNDABLE_METRICS
-from keystone.report import render
+from keystone.report import _RATE_LABEL, _RATE_ORDER, render
 from keystone.council import make_council
 from keystone.simulation import simulate
 
@@ -185,6 +188,67 @@ class TestGroundingSeam(unittest.TestCase):
         self.assertIn("$3.00/1M req", md)         # the grounded requests rate (corrected from $1)
         self.assertIn("77% off", md)              # the grounded spot discount
         self.assertIn("AWS API Gateway", md)      # a citation source
+
+    # ---- Activation-readiness fixes (final-review follow-ups) --------------------------------- #
+
+    def test_grounded_report_has_no_assumption_vs_grounded_contradiction(self):
+        # The engine's cost provenance strings must AGREE with the report's rate tag when grounded —
+        # never label the same rates both GROUNDED and ASSUMPTION (the honesty non-negotiable).
+        c = url_shortener.build().components["app"]   # reuse a real component kind
+        from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
+        comp = Component("a", K.APP_SERVER, "App", per_instance_rps=1000.0, monthly_cost_per_instance=5000,
+                         egress_gb_per_month=1000, requests_per_month=50_000_000)
+        m = SystemModel("t", {"a": comp}, [Flow("f", 1.0, [FlowStep("a")])], Workload(1000.0),
+                        pricing=PricingRates(compute_pricing="spot"))
+        grounded = ground_pricing(m, _curated())
+        md = render(grounded, make_council().design(grounded), simulate(grounded))
+        self.assertIn("GROUNDED (cited) rates", md)            # engine + report agree: GROUNDED
+        self.assertNotIn("ASSUMPTION rates", md)               # no leftover ASSUMPTION on the same rates
+        self.assertNotIn("usage rates ASSUMPTION", md)
+        # and the stub of the same model still honestly says ASSUMPTION (no false GROUNDED)
+        stub_md = render(m, make_council().design(m), simulate(m))
+        self.assertIn("ASSUMPTION rates", stub_md)
+        self.assertNotIn("GROUNDED (cited) rates", stub_md)
+
+    def test_custom_billed_rate_is_not_falsely_certified_as_grounded(self):
+        # A model that BILLS a custom rate (≠ grounded central) must not be swept under a blanket GROUNDED
+        # prose tag — neither the evidence table (fail closed) nor the cost caveats/derivation.
+        from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
+        comp = Component("a", K.APP_SERVER, "App", per_instance_rps=1000.0, monthly_cost_per_instance=5000,
+                         egress_gb_per_month=1000)                           # bills egress
+        m = SystemModel("t", {"a": comp}, [Flow("f", 1.0, [FlowStep("a")])], Workload(1000.0),
+                        pricing=PricingRates(egress_micro_usd_per_gb=300_000))   # custom $0.30/GB ≠ grounded
+        grounded = ground_pricing(m, _curated())
+        self.assertNotIn("egress", grounded.pricing.groundings)     # fail closed: custom egress not certified
+        self.assertIn("requests", grounded.pricing.groundings)      # default rates still grounded
+        md = render(grounded, make_council().design(grounded), simulate(grounded))
+        self.assertNotIn("GROUNDED (cited) rates", md)              # a billed custom rate → no blanket GROUNDED
+        self.assertIn("ASSUMPTION rates", md)
+        # control: the SAME model with the default (grounded) egress rate → all billed rates grounded → GROUNDED
+        comp2 = Component("b", K.APP_SERVER, "App", per_instance_rps=1000.0, monthly_cost_per_instance=5000,
+                          egress_gb_per_month=1000)
+        m2 = SystemModel("t2", {"b": comp2}, [Flow("f", 1.0, [FlowStep("b")])], Workload(1000.0))
+        md2 = render(ground_pricing(m2, _curated()), make_council().design(m2), simulate(ground_pricing(m2, _curated())))
+        self.assertIn("GROUNDED (cited) rates", md2)
+
+    def test_rate_tables_match_evidence_ids(self):
+        # The hand-maintained report tables must stay in lockstep with the evidence file's rate ids.
+        json_ids = {r["id"] for r in json.loads(_RATE_EVIDENCE.read_text())["rates"]}
+        self.assertEqual(json_ids, set(_RATE_ORDER))
+        self.assertEqual(json_ids, set(_RATE_LABEL))
+
+    def test_kb_provider_empty_or_whitespace_defaults_to_stub(self):
+        # A set-but-empty KB_PROVIDER (export KB_PROVIDER= / empty CI secret) must not crash the run.
+        for val in ("", "  "):
+            with mock.patch.dict(os.environ, {"KB_PROVIDER": val}):
+                self.assertIsInstance(make_knowledge_base(), EmptyKnowledgeBase)
+
+    def test_curated_report_byte_for_byte_matches_committed_golden(self):
+        # Locks the GROUNDED render (the stub golden can't catch drift inside the grounding sections).
+        _, _, _, md = run_url_shortener.build_and_render(CuratedKnowledgeBase.from_default_corpus())
+        golden = (Path(run_url_shortener.__file__).resolve().parent
+                  / "outputs" / "url_shortener_report.grounded.md").read_text(encoding="utf-8")
+        self.assertEqual(md, golden, "grounded report drifted — regenerate outputs/url_shortener_report.grounded.md")
 
 
 if __name__ == "__main__":

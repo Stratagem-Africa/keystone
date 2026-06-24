@@ -98,8 +98,11 @@ def _fmt_rate(rid: str, g) -> tuple[str, str]:
         return (f"${v / 1000:,.2f}/1M req", f"${lo / 1000:,.2f}–${hi / 1000:,.2f}")
     if rid in ("llm_input", "llm_output"):           # micro-USD per 1k tokens → $/1M tokens
         return (f"${v / 1000:,.2f}/1M tok", f"${lo / 1000:,.2f}–${hi / 1000:,.2f}")
-    # discount: basis points RETAINED → % off (band edges invert: low retained = high % off)
-    return (f"{(10_000 - v) / 100:,.0f}% off", f"{(10_000 - hi) / 100:,.0f}–{(10_000 - lo) / 100:,.0f}% off")
+    if rid in ("reserved_1yr", "reserved_3yr", "spot"):   # basis points RETAINED → % off (band inverts)
+        return (f"{(10_000 - v) / 100:,.0f}% off", f"{(10_000 - hi) / 100:,.0f}–{(10_000 - lo) / 100:,.0f}% off")
+    # Fail loud: a new rate id added to the evidence file without a formatter must not silently
+    # mis-render as a discount (test_rate_tables_match_evidence_ids locks the id sets together).
+    raise ValueError(f"_fmt_rate: no formatter for rate id {rid!r} — add it here + to _RATE_ORDER/_RATE_LABEL")
 
 
 def _rate_evidence_section(model: SystemModel) -> list[str]:

@@ -172,6 +172,7 @@ def _derivation(
     mean: float,
     cost_breakdown: dict[str, int],
     compute_list_cents: int,
+    rates_grounded: bool = False,
 ) -> list[str]:
     """The deterministic derivation of every headline number (a generated audit trail).
 
@@ -213,15 +214,17 @@ def _derivation(
         f"{k} ${cost_breakdown[k] / 100:,.2f}" for k in ("egress", "storage", "requests", "ai")
         if cost_breakdown.get(k)
     )
+    # Provenance label agrees with the rate evidence (stub → "ASSUMPTION", exact prior text).
+    prov = "GROUNDED (cited)" if rates_grounded else "ASSUMPTION"
     if pricing != "on_demand" and compute_list_cents != charged:
         off = 1 - (charged / compute_list_cents) if compute_list_cents else 0.0
         lines.append(
             f"Compute pricing '{pricing}': list ${compute_list_cents / 100:,.2f} -> "
-            f"charged ${charged / 100:,.2f} ({off:.0%} off, ASSUMPTION discount ratio)."
+            f"charged ${charged / 100:,.2f} ({off:.0%} off, {prov} discount ratio)."
         )
     # Name AI rates explicitly when an AI line is present — AI token prices are a placeholder model
     # class (real prices vary ~100×), a stronger caveat than the generic usage rates (honesty review).
-    rate_note = "usage/AI rates ASSUMPTION" if cost_breakdown.get("ai") else "usage rates ASSUMPTION"
+    rate_note = f"usage/AI rates {prov}" if cost_breakdown.get("ai") else f"usage rates {prov}"
     lines.append(
         f"Monthly cost = compute ${charged / 100:,.2f}"
         + (f" + usage ({usage_bits})" if usage_bits else "")
@@ -233,12 +236,19 @@ def _derivation(
 def _metrics(
     rho_max: float, bp_safe: float, bp_theo: float, mean: float,
     p50: float, p95: float, p99: float, monthly_cost: float, confidence: str,
+    rates_grounded: bool = False,
 ) -> dict[str, Metric]:
     """The headline outputs as self-describing `Metric`s (ADR-007). Each restates a value the
     engine already computed, tagged with the model that produced it + the engine-stability
     confidence qualifier. No numeric band at L0 (not fabricated). Built only here."""
     tail = ("over-states the tail; directional upper bound",)
     safe_pct = f"{SAFE_UTILIZATION:.0%}"
+    # Rate provenance label agrees with the report's rate tag (stub → "ASSUMPTION", exact prior text).
+    rate_model = ("compute (× pricing model) + usage (egress/storage/requests) + AI tokens at "
+                  + ("GROUNDED (cited) rates" if rates_grounded else "ASSUMPTION rates"))
+    rate_caveat = ("usage/AI/discount ratios GROUNDED to cited benchmarks; no third-party SaaS cost yet"
+                   if rates_grounded else
+                   "usage/AI/discount ratios are uncited seeds; no third-party SaaS cost yet")
     return {
         "bottleneck_utilization": Metric(rho_max, "ratio", "max rho = arrival / capacity", confidence),
         "breakpoint_rps_safe": Metric(bp_safe, "rps", f"system_rps * ({safe_pct} ceiling / rho_max)", confidence),
@@ -247,9 +257,8 @@ def _metrics(
         "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
-        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month",
-                               "compute (× pricing model) + usage (egress/storage/requests) + AI tokens at ASSUMPTION rates",
-                               confidence, caveats=("usage/AI/discount ratios are uncited seeds; no third-party SaaS cost yet",)),
+        "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", rate_model,
+                               confidence, caveats=(rate_caveat,)),
     }
 
 
@@ -305,6 +314,37 @@ def simulate(model: SystemModel) -> SimulationResult:
     monthly_cost = sum(cost_breakdown.values())   # compute + usage, integer cents (ADR-009 Tiers 1–2)
     compute_list_cents = sum(c.monthly_cost for c in model.components.values())  # on-demand list (pre-discount)
 
+    # Provenance LABEL only: have the engine's cost caveats/derivation/Metric strings agree with the
+    # report's rate tag when the rates carry cited evidence. Reads `pricing.groundings` PRESENCE — never a
+    # grounding value, never the math (the rate VALUES are the PricingRates fields, identical either way),
+    # so it does not violate "grounding never changes a computed number" (the cost is byte-identical;
+    # locked by test_rate_grounding_does_not_change_engine_cost). Stub → False → the exact ASSUMPTION text.
+    # BILLED-LINE-AWARE: claim GROUNDED only if EVERY rate this model actually bills is grounded — a custom
+    # rate (omitted by ground_pricing's fail-closed match) must NOT be swept under a blanket GROUNDED tag.
+    _grounded_rates = model.pricing.groundings
+    _billed_rates: set[str] = set()
+    if cost_breakdown.get("egress"):   _billed_rates.add("egress")
+    if cost_breakdown.get("storage"):  _billed_rates.add("storage")
+    if cost_breakdown.get("requests"): _billed_rates.add("requests")
+    if cost_breakdown.get("ai"):       _billed_rates.update(("llm_input", "llm_output"))
+    if model.pricing.compute_pricing != "on_demand":
+        _billed_rates.add(model.pricing.compute_pricing)
+    rates_grounded = bool(_grounded_rates) and all(r in _grounded_rates for r in _billed_rates)
+    cost_caveat = (
+        "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
+        "(egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). "
+        "Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. "
+        "AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates "
+        "are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares "
+        "them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope."
+    ) if rates_grounded else (
+        "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
+        "(egress/storage/requests) + AI/LLM tokens (input/output) at ASSUMPTION rates (ADR-009 Tiers 1–2). "
+        "Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. "
+        "AI token rates are a placeholder model class (real prices vary ~100× by model). All these rates "
+        "are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. "
+        "Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope."
+    )
     caveats = [
         "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
         "simulation. Async/streaming/multi-region topologies are out of v1 scope.",
@@ -312,12 +352,7 @@ def simulate(model: SystemModel) -> SimulationResult:
         "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).",
         "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
         "treat p95/p99 as upper-bound directional figures.",
-        "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
-        "(egress/storage/requests) + AI/LLM tokens (input/output) at ASSUMPTION rates (ADR-009 Tiers 1–2). "
-        "Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. "
-        "AI token rates are a placeholder model class (real prices vary ~100× by model). All these rates "
-        "are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. "
-        "Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope.",
+        cost_caveat,
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
@@ -338,8 +373,8 @@ def simulate(model: SystemModel) -> SimulationResult:
         confidence=conf,
         caveats=caveats,
         derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean,
-                               cost_breakdown, compute_list_cents),
-        metrics=_metrics(rho_max, bp_safe, bp_theo, mean, p50, p95, p99, monthly_cost, conf),
+                               cost_breakdown, compute_list_cents, rates_grounded),
+        metrics=_metrics(rho_max, bp_safe, bp_theo, mean, p50, p95, p99, monthly_cost, conf, rates_grounded),
         cost_breakdown=cost_breakdown,
         compute_list_cents=compute_list_cents,
         compute_pricing=model.pricing.compute_pricing,
