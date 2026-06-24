@@ -8,9 +8,13 @@ corpus produces the honest mixed report (in-band GROUNDED + out-of-band RECONCIL
 """
 from __future__ import annotations
 
+import inspect
 import unittest
+from pathlib import Path
 
+import run_url_shortener
 from keystone.benchmarks.benchmark_corpus import CuratedKnowledgeBase
+from keystone.grounding import enrich as _enrich_fn
 from keystone.blueprints import url_shortener
 from keystone.grounding import enrich
 from keystone.knowledge_base import EmptyKnowledgeBase
@@ -122,6 +126,21 @@ class TestGroundingSeam(unittest.TestCase):
         m = enrich(url_shortener.build(), _curated()).model
         scaled = m.scaled(50_000)
         self.assertIn("base_latency_ms", scaled.components["cache"].groundings)
+
+    def test_stub_report_byte_for_byte_matches_committed_golden(self):
+        # Locks the default-off no-op at the RENDER layer: the stub report must equal the committed
+        # outputs/url_shortener_report.md, so a future render tweak can't silently change stub output.
+        # Renders via the run script's own build_and_render() — same source main() writes.
+        _, _, _, md = run_url_shortener.build_and_render(EmptyKnowledgeBase())
+        golden = (Path(run_url_shortener.__file__).resolve().parent
+                  / "outputs" / "url_shortener_report.md").read_text(encoding="utf-8")
+        self.assertEqual(md, golden, "stub report drifted from the committed golden — regenerate "
+                         "outputs/url_shortener_report.md (python3 run_url_shortener.py) or fix the render change")
+
+    def test_override_defaults_off(self):
+        # Safe-default lock: enrich must NEVER move an input unless a caller explicitly opts in.
+        # The shipped report path (run_url_shortener.build_and_render) never passes override=True.
+        self.assertIs(inspect.signature(_enrich_fn).parameters["override"].default, False)
 
 
 if __name__ == "__main__":

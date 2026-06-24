@@ -17,14 +17,17 @@ from keystone.report import render
 OUT = os.path.join(os.path.dirname(__file__), "outputs", "url_shortener_report.md")
 
 
-def main() -> None:
+def build_and_render(kb=None):
+    """The full loop, as a single source so the golden-report test renders EXACTLY what main() writes.
+
+    `kb` defaults to the env-driven Knowledge Base (stub unless KB_PROVIDER=curated). Returns
+    (model, sim, whatifs, markdown). Grounding is evidence-only here (override not set) — a strict
+    no-op under the stub default, so the rendered report is byte-for-byte unchanged."""
     # 1. Canonical model (LLM-derived in product; hand-built here for validation).
     model = url_shortener.build(system_rps=10_000, cache_hit_rate=0.90)
 
-    # 1b. Attach cited KB evidence to the input numbers (ADR-006, the L0→L1 lever). Default-off:
-    #     KB_PROVIDER=stub grounds nothing, so this is a strict no-op and the report is byte-unchanged.
-    #     Evidence-only (override not set) — the engine still computes on the modeler's inputs.
-    model = enrich(model, make_knowledge_base()).model
+    # 1b. Attach cited KB evidence to the input numbers (ADR-006, the L0→L1 lever).
+    model = enrich(model, kb if kb is not None else make_knowledge_base()).model
 
     # 2. Council reasons. Defaults to the deterministic stub ($0, no key); set
     #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
@@ -42,7 +45,11 @@ def main() -> None:
     ]
 
     # 5. Report with the mandatory honesty section.
-    md = render(model, adrs, sim, whatifs)
+    return model, sim, whatifs, render(model, adrs, sim, whatifs)
+
+
+def main() -> None:
+    model, sim, whatifs, md = build_and_render()
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as f:
         f.write(md)
