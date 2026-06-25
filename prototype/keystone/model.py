@@ -102,7 +102,8 @@ class Component:
         return self.per_instance_rps * self.instances
 
     @property
-    def monthly_cost(self) -> float:
+    def monthly_cost(self) -> int:
+        # int × int → int: both factors are validated ints, so money stays integer cents (harm floor).
         return self.monthly_cost_per_instance * self.instances
 
     @property

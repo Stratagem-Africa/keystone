@@ -129,7 +129,7 @@ class SimulationResult:
     p50_ms: float
     p95_ms: float
     p99_ms: float
-    monthly_cost: float
+    monthly_cost: int               # integer minor units (USD cents) — harm floor (ADR-008), never float
     components: dict[str, ComponentResult]
     spofs: list[str]
     confidence: str
