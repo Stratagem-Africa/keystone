@@ -61,6 +61,15 @@ class TestGroundingHonestyContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             Citation(source="benchmark", reference="   ")
 
+    def test_citation_note_is_roomier_than_source_reference_but_still_bounded(self):
+        # The note carries reconciliation reasoning, so it gets more room (500 → 1500) and isn't
+        # clipped mid-sentence; source/reference stay tightly bounded, and the note stays bounded.
+        Citation(source="s", reference="https://x", note="n" * 800)        # ok: >500, <=1500
+        with self.assertRaises(ValueError):
+            Citation(source="s", reference="https://x", note="n" * 1501)   # note still bounded
+        with self.assertRaises(ValueError):
+            Citation(source="s" * 501, reference="https://x")              # source stays tight (500)
+
     def test_grounding_rejects_non_grounded_provenance(self):
         with self.assertRaises(ValueError):
             Grounding(value=1, unit="rps", confidence_low=0, confidence_high=2,
