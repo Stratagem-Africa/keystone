@@ -26,6 +26,25 @@ class TestMoney(unittest.TestCase):
         with self.assertRaises(ValueError):
             Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, monthly_cost_per_instance=-1)
 
+    def test_component_rejects_non_int_instances(self):
+        # `instances` multiplies cost, so a float/bool/<1 count would corrupt integer money (harm floor).
+        Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, instances=3,
+                  monthly_cost_per_instance=2500)   # ok: int >= 1
+        for bad_type in (2.5, True):
+            with self.assertRaises(TypeError):
+                Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0,
+                          instances=bad_type, monthly_cost_per_instance=2500)
+        for bad_val in (0, -1):
+            with self.assertRaises(ValueError):
+                Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0,
+                          instances=bad_val, monthly_cost_per_instance=2500)
+
+    def test_monthly_cost_stays_int_with_instances(self):
+        c = Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, instances=4,
+                      monthly_cost_per_instance=2500)
+        self.assertIsInstance(c.monthly_cost, int)   # cents × count stays int
+        self.assertEqual(c.monthly_cost, 10000)
+
     def test_corpus_costs_are_integer_cents(self):
         models = [fn() for _k, fn, _r in REFERENCE_MODELS] + [url_shortener.build(), ticket_booking.build()]
         for m in models:

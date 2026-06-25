@@ -30,6 +30,9 @@ _P50_K = math.log(2)      # ~0.69
 _P95_K = math.log(20)     # ~3.00
 _P99_K = math.log(100)    # ~4.61
 _MICRO_PER_CENT = 10_000  # 1 cent = 10_000 micro-USD (ADR-009 usage-rate fixed point)
+_MICRO_PER_CENT_HALF = _MICRO_PER_CENT // 2          # round-half-up offset for per-unit micro-rates
+_MICRO_PER_K_CENT = 1000 * _MICRO_PER_CENT           # divisor for per-1000-unit micro-rates → cents
+_MICRO_PER_K_CENT_HALF = _MICRO_PER_K_CENT // 2
 _BP_FULL = 10_000         # basis-point denominator (per-10_000) for the compute discount lever
 _BP_HALF = _BP_FULL // 2  # round-half-up offset, so the discount stays pure-integer money (no float)
 
@@ -62,10 +65,14 @@ def _cost_breakdown(model: SystemModel) -> dict[str, int]:
     list_compute = sum(c.monthly_cost for c in model.components.values())   # on-demand list, integer cents
     return {
         "compute": _discount_compute(list_compute, r.compute_retained_bp),   # Tier 2 discount applied
-        "egress": round(egress_micro / _MICRO_PER_CENT),
-        "storage": round(storage_micro / _MICRO_PER_CENT),
-        "requests": round(request_acc / (1000 * _MICRO_PER_CENT)),
-        "ai": round(token_acc / (1000 * _MICRO_PER_CENT)),   # LLM tokens (per-1K rate) → cents
+        # Pure-integer round-half-up (no float) — money never touches a float (harm floor, ADR-008).
+        # Matches _discount_compute; for realistic volumes this equals the prior round(); it differs only
+        # for sums beyond float's exact-integer range or an exact-half-cent (banker's→half-up), where the
+        # integer form is the correct, exact one.
+        "egress": (egress_micro + _MICRO_PER_CENT_HALF) // _MICRO_PER_CENT,
+        "storage": (storage_micro + _MICRO_PER_CENT_HALF) // _MICRO_PER_CENT,
+        "requests": (request_acc + _MICRO_PER_K_CENT_HALF) // _MICRO_PER_K_CENT,
+        "ai": (token_acc + _MICRO_PER_K_CENT_HALF) // _MICRO_PER_K_CENT,   # LLM tokens (per-1K rate) → cents
     }
 
 
@@ -122,7 +129,7 @@ class SimulationResult:
     p50_ms: float
     p95_ms: float
     p99_ms: float
-    monthly_cost: float
+    monthly_cost: int               # integer minor units (USD cents) — harm floor (ADR-008), never float
     components: dict[str, ComponentResult]
     spofs: list[str]
     confidence: str

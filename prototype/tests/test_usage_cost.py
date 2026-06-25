@@ -57,6 +57,25 @@ class TestUsageCost(unittest.TestCase):
         with self.assertRaises(ValueError):
             PricingRates(egress_micro_usd_per_gb=0.5)   # rates are integer micro-USD
 
+    def test_usage_lines_int_and_exact_at_large_volume(self):
+        # Pure-integer round-half-up (no float): the line stays an int and EXACT even at a volume
+        # far beyond float's exact-integer range (1e13 GB × $0.09 = $9e11), where round(float) drifts.
+        line = simulate(_model(egress_gb_per_month=10_000_000_000_000)).cost_breakdown["egress"]
+        self.assertIsInstance(line, int)
+        self.assertEqual(line, 10_000_000_000_000 * 9)   # 9 cents/GB, exact to the cent
+
+    def test_exact_half_cent_rounds_up_not_bankers(self):
+        # Exactly 0.5 cent rounds UP to 1 (half-up), in pure integer. The old float round() used
+        # banker's rounding (round-half-to-even) and would have returned 0 here.
+        c = Component("c", K.APP_SERVER, "C", per_instance_rps=1000.0, instances=1,
+                      monthly_cost_per_instance=0, requests_per_month=5_000_000)
+        m = SystemModel(name="u", components={"c": c}, flows=[Flow("f", 1.0, [FlowStep("c")])],
+                        workload=Workload(1000.0),
+                        pricing=PricingRates(request_micro_usd_per_thousand=1))   # → exactly 0.5 cent
+        line = simulate(m).cost_breakdown["requests"]
+        self.assertEqual(line, 1)
+        self.assertIsInstance(line, int)
+
 
 if __name__ == "__main__":
     unittest.main()
