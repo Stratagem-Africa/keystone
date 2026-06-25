@@ -41,19 +41,33 @@ Input numbers matched to **cited benchmark evidence**. The engine still computed
 
 | Component | Input | Your value | Grounded central | Cited band | Status | Source |
 |---|---|--:|--:|:--:|:--|:--|
+| Load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | AWS — Application Load Balancer access logs (official docs) |
 | Load balancer | per_instance_rps | 20,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
+| App server | per_instance_rps | 1,000 rps | 4,000 rps | 2,000–8,000 rps | RECONCILE ⚠ | Sharkbench (go-gin web benchmark) |
+| Primary database | base_latency_ms | 5.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
 | Primary database | monthly_cost_per_instance | $0.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | https://www.digitalocean.com/pricing/managed-databases |
 | Primary database | per_instance_rps | 2,000 rps | 8,133 rps | 4,800–29,000 rps | RECONCILE ⚠ | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
 
 **Reconcile — your value is outside the cited band (kept, not overwritten):**
 - **Load balancer** · `per_instance_rps`: you have **20,000 rps**, the cited evidence says **350,000 rps** (band 315,000–385,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
+- **App server** · `per_instance_rps`: you have **1,000 rps**, the cited evidence says **4,000 rps** (band 2,000–8,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
+- **Primary database** · `base_latency_ms`: you have **5.00 ms**, the cited evidence says **0.30 ms** (band 0.15–0.80 ms). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Primary database** · `monthly_cost_per_instance`: you have **$0.00/mo**, the cited evidence says **$122.10/mo** (band $109.89–$134.31). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Primary database** · `per_instance_rps`: you have **2,000 rps**, the cited evidence says **8,133 rps** (band 4,800–29,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 
 **Evidence (resolvable sources):**
+- AWS — Application Load Balancer access logs (official docs) — https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html
+- HAProxy Technologies — 'HAProxy Forwards Over 2 Million HTTP Requests per Second on a Single AWS Arm Instance' — https://www.haproxy.com/blog/haproxy-forwards-over-2-million-http-requests-per-second-on-a-single-aws-arm-instance
+- Istio — 'Best Practices: Benchmarking Service Mesh Performance' (Envoy sidecar overhead) — https://istio.io/latest/blog/2019/performance-best-practices/
 - NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) — https://ia801500.us.archive.org/31/items/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09_djvu.txt
 - Internet Archive item landing page (provenance for the OCR full-text above) — https://archive.org/details/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09
 - NGINX/F5 — NGINX Plus Sizing Guide: How We Tested (methodology, corroborates test conditions) — https://www.f5.com/company/blog/nginx/nginx-plus-sizing-guide-how-we-tested
+- Sharkbench (go-gin web benchmark) — https://sharkbench.dev/web/go-gin
+- nDmitry/web-benchmarks (GitHub) — https://github.com/nDmitry/web-benchmarks
+- DEV.to — Under Pressure: Benchmarking Node.js on a Single-Core EC2 — https://dev.to/ocodista/under-pressure-benchmarking-nodejs-on-a-single-core-ec2-5ghe
+- computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) — https://computingforgeeks.com/database-benchmark-postgresql-mysql-mariadb/
+- DoltHub Blog — Postgres vs MySQL Sysbench Latency — https://www.dolthub.com/blog/2024-07-16-mysql-postgres-sysbench-latency/
+- faucetDB (MCP database benchmark) — https://faucetdb.ai/blog/mcp-database-benchmark/
 - https://www.digitalocean.com/pricing/managed-databases — PostgreSQL plan table, 8 GiB row
 - https://docs.digitalocean.com/products/databases/postgresql/details/pricing/ — PostgreSQL pricing overview
 - ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services — https://clickhouse.com/blog/postgresbench
