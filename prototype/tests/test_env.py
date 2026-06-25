@@ -49,6 +49,14 @@ class TestLoadEnv(unittest.TestCase):
             _env.load_env(path)
             self.assertNotIn("OPENAI_API_KEY", os.environ)
 
+    def test_hash_without_leading_space_is_kept(self):
+        # dotenv semantics: a '#' NOT preceded by whitespace is part of the value, not a comment.
+        # So a mistyped 'KEY=sk-...#typo' is kept whole (fails loudly at auth), never silently cut.
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {}, clear=True):
+            path = _write(Path(d), "OPENROUTER_API_KEY=sk-or-v1-abc#oops\n")
+            _env.load_env(path)
+            self.assertEqual(os.environ["OPENROUTER_API_KEY"], "sk-or-v1-abc#oops")
+
     def test_quoted_value_keeps_hash(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {}, clear=True):
             path = _write(Path(d), 'TOKEN="a#b c"\n')
@@ -112,6 +120,15 @@ class TestReportPath(unittest.TestCase):
         with mock.patch.dict(os.environ, {"COUNCIL_PROVIDER": "claude"}, clear=True):
             path, _ = _env.report_path("/x/outputs/r.md")
             self.assertTrue(path.endswith(".local.md"))
+
+    def test_whitespace_provider_falls_back_to_stub(self):
+        # A whitespace-only COUNCIL_PROVIDER must NOT route to .local.md (it would mis-route a
+        # crashing run) — it falls back to 'stub' / the committed golden path (fail closed).
+        with mock.patch.dict(os.environ, {"COUNCIL_PROVIDER": "   "}, clear=True):
+            self.assertEqual(_env.council_provider(), "stub")
+            path, provider = _env.report_path("/x/outputs/r.md")
+            self.assertEqual(provider, "stub")
+            self.assertEqual(path, "/x/outputs/r.md")
 
 
 if __name__ == "__main__":

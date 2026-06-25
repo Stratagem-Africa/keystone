@@ -25,6 +25,9 @@ from pathlib import Path
 # Repo root = parent of prototype/ (this file lives in prototype/).
 _DEFAULT_ENV = Path(__file__).resolve().parent.parent / ".env"
 
+# Inline comment = a '#' PRECEDED BY whitespace (python-dotenv semantics). A '#' with no leading
+# space is kept as part of the value (e.g. 'a#b'), so values may legitimately contain '#'. API keys
+# never contain '#', so a 'KEY=sk-...#typo' is kept whole and fails loudly at auth — never silently.
 _INLINE_COMMENT = re.compile(r"\s+#.*$")
 
 
@@ -65,8 +68,10 @@ def load_env(path: str | os.PathLike | None = None) -> list[str]:
 
 
 def council_provider() -> str:
-    """The configured council provider ('stub' | 'claude' | 'consensus'), normalised."""
-    return (os.getenv("COUNCIL_PROVIDER") or "stub").strip().lower()
+    """The configured council provider ('stub' | 'claude' | 'consensus'), normalised. A blank OR
+    whitespace-only value falls back to 'stub' (fail closed) — the trailing `or "stub"` catches a
+    value that is non-empty before .strip() but empty after, matching knowledge_base.py."""
+    return (os.getenv("COUNCIL_PROVIDER") or "stub").strip().lower() or "stub"
 
 
 def report_path(committed_path: str) -> tuple[str, str]:
