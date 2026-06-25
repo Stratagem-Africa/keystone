@@ -23,7 +23,8 @@ GROUNDABLE_METRICS = frozenset({"per_instance_rps", "base_latency_ms", "monthly_
 # Allowed units, matched to the groundable metrics (cost in integer minor units — harm floor).
 GROUNDABLE_UNITS = frozenset({"rps", "ms", "usd_minor_per_month"})
 
-_MAX_TEXT = 500
+_MAX_TEXT = 500     # source / reference: tightly bounded (a URL or name over this is suspicious)
+_MAX_NOTE = 1500    # citation note: roomier — the rendered provenance reasoning shouldn't clip mid-sentence
 
 
 def require_groundable_metric(metric: str) -> None:
@@ -57,7 +58,7 @@ class Citation:
     def __post_init__(self) -> None:
         _single_line("Citation.source", self.source)
         _single_line("Citation.reference", self.reference)
-        _single_line("Citation.note", self.note)
+        _single_line("Citation.note", self.note, maxlen=_MAX_NOTE)
         if not self.source.strip():
             raise ValueError("Citation requires a non-empty source")
         if not self.reference.strip():
