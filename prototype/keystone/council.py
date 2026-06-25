@@ -33,7 +33,7 @@ class ADR:
     confidence: str = "med"           # low | med | high
     kill_criteria: list[str] = field(default_factory=list)
     source: str = "stub"              # stub | claude
-    # Cross-model consensus votes (ADR-005 multi-LLM): one rendered line per voter model
+    # Cross-model consensus votes (ADR-010 multi-LLM): one rendered line per voter model
     # (e.g. "openai gpt-5: AGREE — …"). Empty for the single-model / stub path (backward-compatible).
     # Each vote's free text is scrubbed by the prime-directive guard before it lands here.
     consensus: list[str] = field(default_factory=list)
@@ -162,7 +162,7 @@ def make_council(provider: str | None = None, model: str | None = None,
             client=client,
         )
     if provider == "consensus":
-        # Multi-model consensus (ADR-005): a PRIMARY council (CONSENSUS_PRIMARY, default claude) wrapped
+        # Multi-model consensus (ADR-010): a PRIMARY council (CONSENSUS_PRIMARY, default claude) wrapped
         # with independent voter models (CONSENSUS_VOTERS). Lazy import; stays $0 until env-configured.
         from keystone.consensus import make_consensus_council  # lazy
         prim_provider, _, prim_model = os.getenv("CONSENSUS_PRIMARY", "claude").partition(":")

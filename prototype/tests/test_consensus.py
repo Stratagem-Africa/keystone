@@ -1,4 +1,4 @@
-"""Multi-model consensus (ADR-005) — the cross-vendor consensus layer + the OpenAI-compatible transport.
+"""Multi-model consensus (ADR-010) — the cross-vendor consensus layer + the OpenAI-compatible transport.
 
 All offline / $0: the primary is the deterministic stub and the voters are injected fake LLMs, so no
 network/key is touched. Locks the trust-critical guarantees: every voter's free text is scrubbed by the
