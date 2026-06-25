@@ -74,6 +74,15 @@ class Component:
                 f"({c!r}) — float money is forbidden by the harm floor")
         if c < 0:
             raise ValueError(f"monthly_cost_per_instance must be non-negative, got {c}")
+        # `instances` multiplies cost (monthly_cost = monthly_cost_per_instance × instances), so a float
+        # instances would make money a float — harm floor (ADR-008). It is a count of running units:
+        # an int ≥ 1 (also blocks the 0-instance divide-by-zero in utilisation). `bool` excluded.
+        n = self.instances
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise TypeError(f"instances must be an int, not {type(n).__name__} ({n!r}) "
+                            "— a float instance count would corrupt integer money (harm floor)")
+        if n < 1:
+            raise ValueError(f"instances must be >= 1, got {n}")
         # Usage volumes drive money, so hold them to the same harm-floor discipline: non-negative ints.
         for name in ("egress_gb_per_month", "storage_gb", "requests_per_month",
                      "llm_input_tokens_per_month", "llm_output_tokens_per_month"):
