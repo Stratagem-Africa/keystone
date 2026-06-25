@@ -1,4 +1,4 @@
-"""Multi-model consensus layer (ADR-005; Doc 02 §4 "grounded consensus of AI architects").
+"""Multi-model consensus layer (ADR-010; Doc 02 §4 "grounded consensus of AI architects").
 
 Runs the council on a PRIMARY model (the full 3-stage / 7-persona design), then polls N INDEPENDENT
 models (different vendors — Claude, OpenAI/ChatGPT, OpenRouter, local Ollama) to VOTE on each synthesized

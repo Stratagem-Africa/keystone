@@ -1,7 +1,9 @@
-# ADR-005 — Multi-LLM cross-vendor consensus
+# ADR-010 — Multi-LLM cross-vendor consensus
 
-**Status:** Proposed (built behind the unchanged `Council` interface, stub-default, $0/offline). Touches the trust core (the prime directive + the council), so per CLAUDE.md it lands via branch → PR → adversarial review; a human ratifies before any `consensus` activation.
-**Date:** 2026-06-24 · **Owner:** Keystone A (Bifola)
+> **Renumbered 2026-06-25:** originally drafted as ADR-005, which collided with the older, already-ratified **ADR-005 — Canonical Model Store** (#45). Moved to the next free number (010); content unchanged.
+
+**Status:** **Accepted** — architecture ratified by Bifola 2026-06-25 (independent adversarial review came back clean; code landed stub-default behind the unchanged `Council` interface, #79). Ratifying the architecture does **not** activate it: `consensus` stays opt-in via env (`COUNCIL_PROVIDER`), default `stub`, and runtime activation remains a manual Bifola trigger that inherits ADR-001's council gates.
+**Date:** 2026-06-24 (drafted) · **Ratified:** 2026-06-25 · **Owner:** Keystone A (Bifola)
 **Relates to:** `docs/02` §4 ("grounded consensus of AI architects"), ADR-001 (the council + the prime-directive guard reused here), `docs/03` §2 (prime directive) & §6 (never hide dissent), CLAUDE.md (cost rule, harm floor).
 
 ---
