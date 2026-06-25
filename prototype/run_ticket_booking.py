@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from _env import load_env, report_path
 from keystone.blueprints import ticket_booking
 from keystone.council import make_council
 from keystone.grounding import ground_model
@@ -20,6 +21,7 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "ticket_booking_report.
 
 
 def main() -> None:
+    load_env()                              # activate local .env (council/grounding); existing env wins
     baseline = ground_model(ticket_booking.build())   # steady state: 5k rps, 5% book (grounding activated)
     sim = simulate(baseline)
     adrs = make_council().design(baseline)
@@ -32,13 +34,16 @@ def main() -> None:
     ]
 
     md = render(baseline, adrs, sim, whatifs)
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w") as f:
+    out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as f:
         f.write(md)
 
     print("=" * 74)
     print(f"KEYSTONE — Ticket Booking (case #2): flash-sale what-if")
     print("=" * 74)
+    print(f"Council    : {provider}"
+          + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
     print(f"Baseline ({baseline.workload.description}) @ {sim.system_rps:,.0f} rps")
     print(f"  bottleneck : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
     print(f"  max safe   : {sim.breakpoint_rps_safe:,.0f} rps · compute ${sim.monthly_cost / 100:,.0f}/mo")  # cost is cents (ADR-008)
@@ -49,7 +54,7 @@ def main() -> None:
         print(f"     -> bottleneck {w.bottleneck_name} ({w.bottleneck_utilization*100:.0f}% util), "
               f"safe {w.breakpoint_rps_safe:,.0f} rps")
     print("-" * 74)
-    print("Full report -> outputs/ticket_booking_report.md")
+    print(f"Full report -> outputs/{os.path.basename(out)}")
 
 
 if __name__ == "__main__":
