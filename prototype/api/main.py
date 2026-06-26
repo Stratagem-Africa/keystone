@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import math
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,7 @@ from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets
 from api.jobs import create_job
+from api.worker import run_pipeline
 
 app = FastAPI(title="Keystone API", version="0.1.0")
 
@@ -87,11 +88,16 @@ def design(req: DesignRequest) -> dict:
     })
 
 @app.post("/intent")
-def submit_intent(req: IntentRequest) -> dict:
+def submit_intent(req: IntentRequest, background_tasks: BackgroundTasks) -> dict:
     # Scan the raw text for secrets BEFORE storing anything (harm floor rule).
     clean_text, secrets_found = scan_and_redact_secrets(req.text)
+    
     # Create a job record and get back a job_id straight away.
     job = create_job(intent_text=clean_text, secrets_found=secrets_found)
+    
+    # Register the pipeline to run AFTER this response is sent - never blocks the caller.
+    background_tasks.add_task(run_pipeline, job.job_id, job.intent_text)
+    
     # Build the response. warnings tells the frontend if any secrets were redacted.
     response: dict = {"job_id": job.job_id, "status": job.status}
     if secrets_found:
