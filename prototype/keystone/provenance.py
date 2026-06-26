@@ -93,3 +93,14 @@ class Grounding:
             raise ValueError("grounded capacities/costs are physical quantities; they cannot be negative")
         if not (self.confidence_low <= self.value <= self.confidence_high):
             raise ValueError("confidence band must bracket the value: low <= value <= high")
+        # Harm floor (ADR-008): grounded MONEY is a WHOLE number of minor units (cents) — no fractional
+        # cents. This closes the float-cost seam structurally: should a cost grounding ever be APPLIED to
+        # an input (the opt-in override path), it cannot inject fractional money. Evidence values are
+        # float-typed (rps/ms are legitimately continuous and the corpus loader parses to float), so the
+        # achievable invariant for money is integral-VALUED, not int-typed. Only usd_minor_per_month.
+        if self.unit == "usd_minor_per_month":
+            for v in (self.value, self.confidence_low, self.confidence_high):
+                if isinstance(v, bool) or not float(v).is_integer():
+                    raise TypeError(
+                        f"usd_minor_per_month grounding values must be whole minor units (cents), got "
+                        f"{v!r} — fractional money is forbidden by the harm floor")

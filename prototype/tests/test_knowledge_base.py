@@ -84,6 +84,24 @@ class TestGroundingHonestyContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             Grounding(value=100, unit="rps", confidence_low=200, confidence_high=300, citations=[self._cite()])
 
+    def test_money_grounding_must_be_whole_cents(self):
+        # Harm floor (ADR-008): a usd_minor_per_month grounding carries WHOLE cents (no fractional money),
+        # so a cost grounding can't inject fractional money if ever applied. Integral value ok (int or
+        # float, since the corpus loader parses to float); a fractional cent is rejected.
+        Grounding(value=2500, unit="usd_minor_per_month", confidence_low=2000, confidence_high=3000,
+                  citations=[self._cite()])                                   # ok: int cents
+        Grounding(value=2500.0, unit="usd_minor_per_month", confidence_low=2000.0, confidence_high=3000.0,
+                  citations=[self._cite()])                                   # ok: integral-valued float
+        with self.assertRaises(TypeError):
+            Grounding(value=2500.5, unit="usd_minor_per_month", confidence_low=2000, confidence_high=3000,
+                      citations=[self._cite()])                               # fractional cent rejected
+        with self.assertRaises(TypeError):
+            Grounding(value=2500, unit="usd_minor_per_month", confidence_low=2000.5, confidence_high=3000,
+                      citations=[self._cite()])                               # fractional band rejected
+        # rps/ms stay float (legitimately continuous) — the guard is money-only.
+        Grounding(value=8000.5, unit="rps", confidence_low=6000.0, confidence_high=10000.0,
+                  citations=[self._cite()])
+
     def test_valid_grounding_constructs_and_carries_evidence(self):
         g = Grounding(value=8000, unit="rps", confidence_low=6000, confidence_high=10000,
                       citations=[self._cite()])
