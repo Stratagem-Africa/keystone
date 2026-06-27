@@ -175,6 +175,21 @@ class TestEngineAuditFixes(unittest.TestCase):
                           flows=[Flow("only", 1.0, [FlowStep("c")])])
         self.assertFalse(any("DOMINANT flow" in cav for cav in simulate(one).caveats))
 
+    def test_per_flow_latency_distinguishes_flows(self):
+        # Each flow gets its OWN latency — a minority flow on a worse path is no longer hidden.
+        fast = Component("fast", ComponentKind.APP_SERVER, "Fast", per_instance_rps=10_000.0, base_latency_ms=2.0)
+        slow = Component("slow", ComponentKind.EXTERNAL_API, "Slow", per_instance_rps=10_000.0, base_latency_ms=200.0)
+        m = SystemModel(name="m", components={"fast": fast, "slow": slow}, workload=Workload(100.0),
+                        flows=[Flow("cheap", 0.9, [FlowStep("fast")]),
+                               Flow("pricey", 0.1, [FlowStep("fast"), FlowStep("slow")])])
+        sim = simulate(m)
+        fl = {f.name: f for f in sim.flow_latencies}
+        self.assertEqual(set(fl), {"cheap", "pricey"})
+        self.assertGreater(fl["pricey"].mean_ms, fl["cheap"].mean_ms * 10)   # minority flow far slower
+        self.assertAlmostEqual(sim.mean_latency_ms, fl["cheap"].mean_ms, places=6)  # headline = dominant flow
+        self.assertLessEqual(fl["pricey"].p50_ms, fl["pricey"].p95_ms)        # percentile ordering holds
+        self.assertLessEqual(fl["pricey"].p95_ms, fl["pricey"].p99_ms)
+
 
 if __name__ == "__main__":
     unittest.main()

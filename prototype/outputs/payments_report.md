@@ -29,6 +29,15 @@
 | p99_ms | 1,820 ms | exponential-tail: mean * ln(100) | medium |
 | monthly_cost | $428.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
 
+## Per-flow latency
+
+_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
+
+| Flow | Share | Mean | p50 | p95 | p99 |
+|---|--:|--:|--:|--:|--:|
+| checkout | 80% | 395 ms | 274 ms | 1,184 ms | 1,820 ms |
+| status | 20% | 7 ms | 5 ms | 20 ms | 30 ms |
+
 ## Component load
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |
@@ -203,7 +212,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope. NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — the per-component COMPUTE prices that drive most of this figure carry their own provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding & reconciliation section; some may be RECONCILE (your value kept despite the cited band).
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
-- Latency (mean/p50/p95/p99) is for the DOMINANT flow only — 'checkout' (80% of traffic). Lower-share flows on different paths can have very different (often worse) latency that this figure does NOT show; use the per-component load table to check other paths.
+- Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — 'checkout' (80% of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a different (often worse) path can differ sharply.
 - Confidence bands omitted for this run: the cited range of the grounded inputs spans values that push the system PAST the model's stable range (saturation), where the M/M/1 estimates are unreliable — so a numeric range would be false precision. Tighten the inputs (e.g. confirm your exact external rate limit) for a meaningful range.
 - Some inputs above are GROUNDED to cited benchmarks matched by component **kind** (not your exact instance type / region / workload), so treat them as directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and kept **your** value — a human should check them. These component-input citations are AI-matched and pass the curation gate; independent citation review remains the standing bar before treating them as calibrated (the per-unit cost **rates** were separately ratified — see *Cost rate evidence*).
 
