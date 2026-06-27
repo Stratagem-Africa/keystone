@@ -16,16 +16,18 @@
 
 ## Headline metrics (model · confidence)
 
-| Metric | Value | Model | Confidence |
-|---|--:|---|:--|
-| bottleneck_utilization | 69% | max rho = arrival / capacity | medium |
-| breakpoint_rps_safe | 12,240 req/s | system_rps * (85% ceiling / rho_max) | medium |
-| breakpoint_rps_theoretical | 14,400 req/s | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 29 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 20 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 86 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 133 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $1,045.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+| Metric | Value | Range (cited inputs) | Model | Confidence |
+|---|--:|--:|---|:--|
+| bottleneck_utilization | 69% | — | max rho = arrival / capacity | medium |
+| breakpoint_rps_safe | 12,240 req/s | — | system_rps * (85% ceiling / rho_max) | medium |
+| breakpoint_rps_theoretical | 14,400 req/s | — | system_rps * (1.0 / rho_max) | medium |
+| mean_latency_ms | 29 ms | 28 ms – 33 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 20 ms | 19 ms – 23 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 86 ms | 83 ms – 99 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 133 ms | 128 ms – 152 ms | exponential-tail: mean * ln(100) | medium |
+| monthly_cost | $1,045.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+
+_Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. Accuracy stays **L0 (Directional)** until field-calibrated._
 
 ## Component load
 

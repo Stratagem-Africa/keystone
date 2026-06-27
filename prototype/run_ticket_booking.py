@@ -15,6 +15,7 @@ from keystone.blueprints import ticket_booking
 from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.report import render
+from keystone.confidence_bands import simulate_with_confidence
 from keystone.simulation import simulate
 
 OUT = os.path.join(os.path.dirname(__file__), "outputs", "ticket_booking_report.md")
@@ -23,7 +24,7 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "ticket_booking_report.
 def main() -> None:
     load_env()                              # activate local .env (council/grounding); existing env wins
     baseline = ground_model(ticket_booking.build())   # steady state: 5k rps, 5% book (grounding activated)
-    sim = simulate(baseline)
+    sim = simulate_with_confidence(baseline)           # output ranges from cited input uncertainty (values unchanged)
     adrs = make_council().design(baseline)
 
     whatifs = [

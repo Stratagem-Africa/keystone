@@ -18,7 +18,7 @@ Accuracy level: L0 (Directional) per the Accuracy Charter. Honest by constructio
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from keystone.model import Flow, SystemModel
 
@@ -267,6 +267,28 @@ def _metrics(
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", rate_model,
                                confidence, caveats=(rate_caveat,)),
     }
+
+
+def attach_confidence_bands(result: SimulationResult,
+                            bands: dict[str, tuple[float, float]] | None) -> SimulationResult:
+    """Return a copy of `result` whose headline Metrics carry a [low, high] band.
+
+    Prime-directive invariant: a Metric is only ever constructed in THIS module. So the confidence-band
+    layer (keystone/confidence_bands.py) computes the band VALUES by re-running the UNTOUCHED engine on
+    cited-endpoint scenario models, then hands them here to be attached. Metric VALUES are unchanged —
+    the engine output is byte-identical with or without bands; only low/high are added. The Metric guard
+    enforces low <= value <= high, so the band must bracket the point value (it does: the band layer
+    takes min/max over {point, pessimistic, optimistic}). An honest band = "given the cited INPUT ranges,
+    the output ranges thus" — NOT a validated-accuracy claim; maturity stays L0 (Directional)."""
+    if not bands:
+        return result
+    new_metrics = {
+        key: (Metric(m.value, m.unit, m.model, m.confidence,
+                     low=bands[key][0], high=bands[key][1], caveats=m.caveats)
+              if key in bands else m)
+        for key, m in result.metrics.items()
+    }
+    return replace(result, metrics=new_metrics)
 
 
 def _confidence(rho_max: float) -> str:

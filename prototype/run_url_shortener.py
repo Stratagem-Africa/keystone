@@ -11,6 +11,7 @@ from _env import load_env, report_path
 from keystone.blueprints import url_shortener
 from keystone.council import make_council
 from keystone.grounding import ground_model
+from keystone.confidence_bands import simulate_with_confidence
 from keystone.simulation import simulate
 from keystone.report import render
 
@@ -33,8 +34,9 @@ def build_and_render(kb=None):
     #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
     adrs = make_council().design(model)
 
-    # 3. Deterministic simulation — the engine produces the numbers.
-    sim = simulate(model)
+    # 3. Deterministic simulation — the engine produces the numbers; confidence bands propagate the
+    #    cited input uncertainty into output ranges (evidence-only; values identical to simulate()).
+    sim = simulate_with_confidence(model)
 
     # 4. What-if interrogation (re-simulate variants of the same model).
     whatifs = [

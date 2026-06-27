@@ -16,16 +16,18 @@
 
 ## Headline metrics (model · confidence)
 
-| Metric | Value | Model | Confidence |
-|---|--:|---|:--|
-| bottleneck_utilization | 10% | max rho = arrival / capacity | medium-high |
-| breakpoint_rps_safe | 850 req/s | system_rps * (85% ceiling / rho_max) | medium-high |
-| breakpoint_rps_theoretical | 1,000 req/s | system_rps * (1.0 / rho_max) | medium-high |
-| mean_latency_ms | 17 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium-high |
-| p50_ms | 12 ms | exponential-tail: mean * ln(2) | medium-high |
-| p95_ms | 52 ms | exponential-tail: mean * ln(20) | medium-high |
-| p99_ms | 80 ms | exponential-tail: mean * ln(100) | medium-high |
-| monthly_cost | $0.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium-high |
+| Metric | Value | Range (cited inputs) | Model | Confidence |
+|---|--:|--:|---|:--|
+| bottleneck_utilization | 10% | — | max rho = arrival / capacity | medium-high |
+| breakpoint_rps_safe | 850 req/s | — | system_rps * (85% ceiling / rho_max) | medium-high |
+| breakpoint_rps_theoretical | 1,000 req/s | — | system_rps * (1.0 / rho_max) | medium-high |
+| mean_latency_ms | 17 ms | 17 ms – 19 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium-high |
+| p50_ms | 12 ms | 12 ms – 13 ms | exponential-tail: mean * ln(2) | medium-high |
+| p95_ms | 52 ms | 50 ms – 58 ms | exponential-tail: mean * ln(20) | medium-high |
+| p99_ms | 80 ms | 77 ms – 89 ms | exponential-tail: mean * ln(100) | medium-high |
+| monthly_cost | $0.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium-high |
+
+_Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. Accuracy stays **L0 (Directional)** until field-calibrated._
 
 ## Component load
 

@@ -16,16 +16,18 @@
 
 ## Headline metrics (model · confidence)
 
-| Metric | Value | Model | Confidence |
-|---|--:|---|:--|
-| bottleneck_utilization | 62% | max rho = arrival / capacity | medium |
-| breakpoint_rps_safe | 6,800 req/s | system_rps * (85% ceiling / rho_max) | medium |
-| breakpoint_rps_theoretical | 8,000 req/s | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 31 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 21 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 93 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 142 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $895.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+| Metric | Value | Range (cited inputs) | Model | Confidence |
+|---|--:|--:|---|:--|
+| bottleneck_utilization | 62% | 16% – 62% | max rho = arrival / capacity | medium |
+| breakpoint_rps_safe | 6,800 req/s | 6,800 req/s – 27,200 req/s | system_rps * (85% ceiling / rho_max) | medium |
+| breakpoint_rps_theoretical | 8,000 req/s | 8,000 req/s – 32,000 req/s | system_rps * (1.0 / rho_max) | medium |
+| mean_latency_ms | 31 ms | 15 ms – 34 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 21 ms | 11 ms – 24 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 93 ms | 46 ms – 103 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 142 ms | 70 ms – 158 ms | exponential-tail: mean * ln(100) | medium |
+| monthly_cost | $895.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+
+_Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. Accuracy stays **L0 (Directional)** until field-calibrated._
 
 ## Component load
 

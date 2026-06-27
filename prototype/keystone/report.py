@@ -203,22 +203,36 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     # produced it + the engine-stability confidence — no bare numbers (Doc 03 pillar 2). The
     # engine is the sole author of these values; this only renders them.
     if sim.metrics:
+        def _fmt_val(unit: str, x: float) -> str:
+            if unit == "rps":
+                return f"{_fmt_rps(x)} req/s"
+            if unit == "ratio":
+                return f"{x * 100:.0f}%"
+            if unit == "usd_minor_per_month":
+                return f"${x / 100:,.2f}/mo"  # integer cents → 2dp dollars (ADR-008)
+            return f"{x:,.0f} ms"
+        has_bands = any(m.low is not None for m in sim.metrics.values())
         L.append("## Headline metrics (model · confidence)")
         L.append("")
-        L.append("| Metric | Value | Model | Confidence |")
-        L.append("|---|--:|---|:--|")
+        L.append("| Metric | Value | Range (cited inputs) | Model | Confidence |" if has_bands
+                 else "| Metric | Value | Model | Confidence |")
+        L.append("|---|--:|--:|---|:--|" if has_bands else "|---|--:|---|:--|")
         for name, m in sim.metrics.items():
-            if m.unit == "rps":
-                val = f"{_fmt_rps(m.value)} req/s"
-            elif m.unit == "ratio":
-                val = f"{m.value * 100:.0f}%"
-            elif m.unit == "usd_minor_per_month":
-                val = f"${m.value / 100:,.2f}/mo"  # integer cents → 2dp dollars (ADR-008)
-            else:
-                val = f"{m.value:,.0f} ms"
+            val = _fmt_val(m.unit, m.value)
             short_conf = m.confidence.split("(")[0].strip()
-            L.append(f"| {name} | {val} | {m.model} | {short_conf} |")
+            if has_bands:
+                rng = f"{_fmt_val(m.unit, m.low)} – {_fmt_val(m.unit, m.high)}" if m.low is not None else "—"
+                L.append(f"| {name} | {val} | {rng} | {m.model} | {short_conf} |")
+            else:
+                L.append(f"| {name} | {val} | {m.model} | {short_conf} |")
         L.append("")
+        if has_bands:
+            L.append("_Range = the output span when each GROUNDED input is swept across its **cited** "
+                     "confidence band (assumed / reconciled inputs held fixed). It expresses "
+                     "input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the "
+                     "true value can fall outside it. Accuracy stays **L0 (Directional)** until "
+                     "field-calibrated._")
+            L.append("")
 
     # Per-component table
     L.append("## Component load")
