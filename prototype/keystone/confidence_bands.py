@@ -83,6 +83,17 @@ def simulate_with_confidence(model: SystemModel) -> SimulationResult:
         return point
     worst = simulate(_variant(model, worst=True))
     best = simulate(_variant(model, worst=False))
+    # If sweeping the cited input ranges crosses the model's STABLE limit (any scenario saturated,
+    # rho >= 1), a numeric band would be a clamp artifact / false precision — M/M/1 latency blows up
+    # past saturation. Omit the bands and say WHY (the cited range is too wide to honestly bound the
+    # output) rather than print an absurd "250-second" range. This is itself a useful signal: the input
+    # uncertainty spans values that would saturate you (e.g. a payment gateway's rate-limit evidence).
+    if any(r.bottleneck_utilization >= 1.0 for r in (point, worst, best)):
+        note = ("Confidence bands omitted for this run: the cited range of the grounded inputs spans "
+                "values that push the system PAST the model's stable range (saturation), where the M/M/1 "
+                "estimates are unreliable — so a numeric range would be false precision. Tighten the inputs "
+                "(e.g. confirm your exact external rate limit) for a meaningful range.")
+        return dataclasses.replace(point, caveats=list(point.caveats) + [note])
     bands: dict[str, tuple[float, float]] = {}
     for key, m in point.metrics.items():
         vals = (m.value, worst.metrics[key].value, best.metrics[key].value)

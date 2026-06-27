@@ -87,6 +87,19 @@ class TestConfidenceBands(unittest.TestCase):
         r = simulate_with_confidence(m)
         self.assertTrue(all(mm.low is None for mm in r.metrics.values()))
 
+    def test_saturating_input_range_omits_bands_with_caveat(self):
+        # When a grounded input's CITED band is wide enough to push a scenario past saturation, numeric
+        # bands are omitted (no false precision like a "250-second" range) and a caveat explains why.
+        c = Component("api", K.EXTERNAL_API, "Rate-limited API", per_instance_rps=100.0, instances=1,
+                      base_latency_ms=140.0, monthly_cost_per_instance=0,
+                      groundings={"per_instance_rps": Grounding(
+                          value=100, unit="rps", confidence_low=7, confidence_high=140, citations=[_cite()])})
+        m = SystemModel(name="sat", components={"api": c},
+                        flows=[Flow("f", 1.0, [FlowStep("api")])], workload=Workload(64.0))
+        r = simulate_with_confidence(m)
+        self.assertTrue(all(mm.low is None for mm in r.metrics.values()))   # no numeric bands
+        self.assertTrue(any("Confidence bands omitted" in cav for cav in r.caveats))
+
     def test_grounded_cost_variant_stays_integer(self):
         # Harm floor: a grounded monthly_cost variant keeps integer cents (cited band is whole cents).
         c = Component("app", K.APP_SERVER, "App", per_instance_rps=8000.0, instances=1,
