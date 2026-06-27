@@ -29,6 +29,15 @@
 
 _Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
 
+## Per-flow latency
+
+_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
+
+| Flow | Share | Mean | p50 | p95 | p99 |
+|---|--:|--:|--:|--:|--:|
+| browse | 95% | 31 ms | 21 ms | 93 ms | 142 ms |
+| book | 5% | 163 ms | 113 ms | 487 ms | 749 ms |
+
 ## Component load
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |
@@ -211,7 +220,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope. NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — the per-component COMPUTE prices that drive most of this figure carry their own provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding & reconciliation section; some may be RECONCILE (your value kept despite the cited band).
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
-- Latency (mean/p50/p95/p99) is for the DOMINANT flow only — 'browse' (95% of traffic). Lower-share flows on different paths can have very different (often worse) latency that this figure does NOT show; use the per-component load table to check other paths.
+- Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — 'browse' (95% of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a different (often worse) path can differ sharply.
 - Some inputs above are GROUNDED to cited benchmarks matched by component **kind** (not your exact instance type / region / workload), so treat them as directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and kept **your** value — a human should check them. These component-input citations are AI-matched and pass the curation gate; independent citation review remains the standing bar before treating them as calibrated (the per-unit cost **rates** were separately ratified — see *Cost rate evidence*).
 
 ## Assumptions (each editable)

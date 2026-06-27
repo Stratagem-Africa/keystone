@@ -240,6 +240,22 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
                      "**L0 (Directional)** until field-calibrated._")
             L.append("")
 
+    # Per-flow latency: each flow's own path, so a minority flow isn't hidden behind the dominant one.
+    # Engine-computed (sim.flow_latencies) — the report only renders. Shown only when there's >1 flow.
+    if len(sim.flow_latencies) > 1:
+        L.append("## Per-flow latency")
+        L.append("")
+        L.append("_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). "
+                 "The headline latency above is the **dominant** flow; a minority flow on a different "
+                 "path can differ sharply — confirm the path that matters to your users._")
+        L.append("")
+        L.append("| Flow | Share | Mean | p50 | p95 | p99 |")
+        L.append("|---|--:|--:|--:|--:|--:|")
+        for fl in sim.flow_latencies:
+            L.append(f"| {fl.name} | {fl.share:.0%} | {fl.mean_ms:,.0f} ms | {fl.p50_ms:,.0f} ms | "
+                     f"{fl.p95_ms:,.0f} ms | {fl.p99_ms:,.0f} ms |")
+        L.append("")
+
     # Per-component table
     L.append("## Component load")
     L.append("")

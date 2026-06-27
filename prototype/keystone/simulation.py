@@ -118,6 +118,19 @@ class ComponentResult:
 
 
 @dataclass
+class FlowLatency:
+    """One flow's own latency (ms): the same M/M/1-sojourn + exponential-tail model as the headline,
+    applied to THIS flow's path — so a minority flow on a different (often worse) path is not hidden
+    behind the dominant flow's figure (engine-audit fix). Built only by `simulate()`."""
+    name: str
+    share: float
+    mean_ms: float
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
+
+
+@dataclass
 class SimulationResult:
     system_rps: float
     bottleneck_id: str
@@ -133,6 +146,8 @@ class SimulationResult:
     components: dict[str, ComponentResult]
     spofs: list[str]
     confidence: str
+    # Per-flow latency (each flow's own path); the headline mean/p50/p95/p99 above is the dominant flow.
+    flow_latencies: list[FlowLatency] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
     # Generated "show your work" trace: the deterministic steps that produced the numbers
     # above (arrivals -> rho -> bottleneck -> breakpoint -> latency -> percentiles). Derived
@@ -157,6 +172,13 @@ def _arrivals(model: SystemModel) -> dict[str, float]:
         for step in flow.path:
             arr[step.component_id] += flow_rps * step.visit_prob
     return arr
+
+
+def _flow_latency_ms(flow: Flow, comp_results: dict[str, "ComponentResult"]) -> tuple[float, float, float, float]:
+    """Mean + exponential-tail percentiles (ms) along ONE flow's path — the sole latency math, shared by
+    the headline (dominant flow) and the per-flow breakdown so they can never diverge."""
+    mean = sum(comp_results[s.component_id].mean_latency_ms * s.visit_prob for s in flow.path)
+    return mean, mean * _P50_K, mean * _P95_K, mean * _P99_K
 
 
 def _mm1_sojourn_ms(service_ms: float, rho: float) -> float:
@@ -330,14 +352,11 @@ def simulate(model: SystemModel) -> SimulationResult:
     else:
         bp_safe = bp_theo = float("inf")
 
-    # Latency along the dominant (largest-share) flow.
+    # Latency: the headline tracks the dominant (largest-share) flow; the per-flow breakdown gives EACH
+    # flow its own figure so a minority flow on a worse path isn't hidden (engine-audit fix).
     dom = max(model.flows, key=lambda f: f.share)
-    mean = sum(comp_results[s.component_id].mean_latency_ms * s.visit_prob for s in dom.path)
-
-    # Exponential-tail percentile approximation (conservative on the tail).
-    p50 = mean * _P50_K
-    p95 = mean * _P95_K
-    p99 = mean * _P99_K
+    mean, p50, p95, p99 = _flow_latency_ms(dom, comp_results)
+    flow_latencies = [FlowLatency(f.name, f.share, *_flow_latency_ms(f, comp_results)) for f in model.flows]
 
     cost_breakdown = _cost_breakdown(model)
     monthly_cost = sum(cost_breakdown.values())   # compute + usage, integer cents (ADR-009 Tiers 1–2)
@@ -408,9 +427,9 @@ def simulate(model: SystemModel) -> SimulationResult:
         # Honesty (engine audit): latency is computed for the DOMINANT (largest-share) flow only, so a
         # lower-share flow on a different (often more congested) path is NOT reflected in these figures.
         caveats.append(
-            f"Latency (mean/p50/p95/p99) is for the DOMINANT flow only — '{dom.name}' ({dom.share:.0%} of "
-            f"traffic). Lower-share flows on different paths can have very different (often worse) latency "
-            f"that this figure does NOT show; use the per-component load table to check other paths."
+            f"Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — '{dom.name}' ({dom.share:.0%} "
+            f"of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a "
+            f"different (often worse) path can differ sharply."
         )
 
     conf = _confidence(rho_max)  # engine-stability qualifier, shared by the run + every Metric
@@ -427,6 +446,7 @@ def simulate(model: SystemModel) -> SimulationResult:
         components=comp_results,
         spofs=spofs,
         confidence=conf,
+        flow_latencies=flow_latencies,
         caveats=caveats,
         derivation=_derivation(model, comp_results, dom, rho_max, bottleneck, bp_safe, bp_theo, mean,
                                cost_breakdown, compute_list_cents, rates_grounded),
