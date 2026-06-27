@@ -9,7 +9,8 @@ from __future__ import annotations
 import dataclasses
 import math
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -17,7 +18,7 @@ from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets
-from api.jobs import create_job
+from api.jobs import create_job, get_job
 from api.worker import run_pipeline
 
 app = FastAPI(title="Keystone API", version="0.1.0")
@@ -105,6 +106,47 @@ def submit_intent(req: IntentRequest, background_tasks: BackgroundTasks) -> dict
 
     return response
 
+@app.get("/jobs/{job_id}")
+def get_job_status(job_id: str) -> dict:
+    # {job_id} in the decorator becomes the job_id argument — FastAPI extracts it from the URL
+    job = get_job(job_id)
+
+    if job is None:
+        # 404 = "Not Found" - correct code when the resource simply doesn't exist
+        raise HTTPException(status_code=404, detail="job not found")
+    
+    # Always include id and status; only add error field when something went wrong
+    response: dict = {"job_id": job.job_id, "status": job.status}
+    if job.status == "error":
+        response["error"] = job.error
+
+    return response  # FastAPI auto-converts this dict to JSON
+
+@app.get("/jobs/{job_id}/report", response_model=None)
+def get_job_report(job_id: str, request: Request, format: str = "json"):
+    # `format` is a query param — client passes ?format=markdown in the URL
+    # `request` gives access to HTTP headers the client sent
+    job = get_job(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    if job.status != "done":
+        # Report doesn't exist yet — tell the client what state the job is in
+        raise HTTPException(status_code=404, detail=f"report not ready — job is '{job.status}'")
+
+    # Two ways a client can ask for markdown:
+    # 1. ?format=markdown in the URL
+    # 2. Accept: text/markdown in the request headers (the standard HTTP way)
+    accept_header = request.headers.get("accept", "")  # empty string if header not sent
+    want_markdown = format == "markdown" or "text/markdown" in accept_header
+
+    if want_markdown:
+        # Response() lets us return plain text instead of JSON
+        return Response(content=job.result, media_type="text/markdown")
+
+    # Default: return JSON — FastAPI serialises the dict automatically
+    return {"job_id": job.job_id, "status": job.status, "report": job.result}
 
 if __name__ == "__main__":
     import uvicorn
