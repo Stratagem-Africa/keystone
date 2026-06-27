@@ -44,22 +44,22 @@ _Range = the output span when each GROUNDED input is swept across its **cited** 
 
 ## Grounding & reconciliation (input evidence)
 
-Input numbers matched to **cited benchmark evidence**. The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten).
+Input numbers matched to **cited benchmark evidence**, by component **kind**. The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — check it matches your setup before trusting the band.
 
-| Component | Input | Your value | Grounded central | Cited band | Status | Source |
-|---|---|--:|--:|:--:|:--|:--|
-| Load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | AWS — Application Load Balancer access logs (official docs) |
-| Load balancer | per_instance_rps | 40,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
-| Booking app tier | per_instance_rps | 2,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | Sharkbench (go-gin web benchmark) |
-| Seat-availability cache | base_latency_ms | 0.50 ms | 1.00 ms | 0.40–1.50 ms | GROUNDED ✓ | Redis official documentation — How fast is Redis? (redis-benchmark) |
-| Seat-availability cache | per_instance_rps | 100,000 rps | 110,000 rps | 70,000–180,000 rps | GROUNDED ✓ | Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) |
-| Booking request queue | per_instance_rps | 20,000 rps | 10,000 rps | 1,000–50,000 rps | GROUNDED ✓ | Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) |
-| Inventory DB (seats) | base_latency_ms | 6.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
-| Inventory DB (seats) | monthly_cost_per_instance | $300.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | https://www.digitalocean.com/pricing/managed-databases |
-| Inventory DB (seats) | per_instance_rps | 3,000 rps | 8,133 rps | 4,800–29,000 rps | RECONCILE ⚠ | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
-| Read replica | per_instance_rps | 8,000 rps | 10,000 rps | 5,000–50,000 rps | GROUNDED ✓ | Google Cloud (AlloyDB official OLTP benchmark docs) |
-| Payment gateway | base_latency_ms | 120.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Probecast — Adyen API status / latency monitoring (independent third-party) |
-| Payment gateway | per_instance_rps | 5,000 rps | 100 rps | 7–140 rps | RECONCILE ⚠ | Stripe Documentation — Rate limits |
+| Component | Input | Your value | Grounded central | Cited band | Status | Measured on | Source |
+|---|---|--:|--:|:--:|:--|:--|:--|
+| Load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | Managed/software L7 load balancer (AWS ALB / HAProx… | AWS — Application Load Balancer access logs (official docs) |
+| Load balancer | per_instance_rps | 40,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | 8 CPU cores, 4 GB RAM, Intel Xeon E5-2699 v4 @ 2.2 … | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
+| Booking app tier | per_instance_rps | 2,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | One app-server instance, ~2-4 vCPU (e.g. AWS c5.xla… | Sharkbench (go-gin web benchmark) |
+| Seat-availability cache | base_latency_ms | 0.50 ms | 1.00 ms | 0.40–1.50 ms | GROUNDED ✓ | HPE ProLiant DL380 Gen10, one Intel Xeon Gold 6230 … | Redis official documentation — How fast is Redis? (redis-benchmark) |
+| Seat-availability cache | per_instance_rps | 100,000 rps | 110,000 rps | 70,000–180,000 rps | GROUNDED ✓ | Redis single node, GET/SET, NON-pipelined (pipeline… | Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) |
+| Booking request queue | per_instance_rps | 20,000 rps | 10,000 rps | 1,000–50,000 rps | GROUNDED ✓ | Per single ordered queue unit (one RabbitMQ classic… | Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) |
+| Inventory DB (seats) | base_latency_ms | 6.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | PostgreSQL/MySQL/MariaDB, sysbench warm-cache singl… | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
+| Inventory DB (seats) | monthly_cost_per_instance | $300.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | Managed PostgreSQL — 8 GiB RAM / 4 vCPUs / 140 GiB … | https://www.digitalocean.com/pricing/managed-databases |
+| Inventory DB (seats) | per_instance_rps | 3,000 rps | 8,133 rps | 4,800–29,000 rps | RECONCILE ⚠ | AWS RDS db.m8gd.4xlarge (16 vCPU / 64 GB, NVMe-back… | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
+| Read replica | per_instance_rps | 8,000 rps | 10,000 rps | 5,000–50,000 rps | GROUNDED ✓ | Single Postgres read replica, ~8-16 vCPU mid-size S… | Google Cloud (AlloyDB official OLTP benchmark docs) |
+| Payment gateway | base_latency_ms | 120.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Stripe/Adyen-class payment-gateway external HTTPS A… | Probecast — Adyen API status / latency monitoring (independent third-party) |
+| Payment gateway | per_instance_rps | 5,000 rps | 100 rps | 7–140 rps | RECONCILE ⚠ | Payment-gateway-class third-party API, published pe… | Stripe Documentation — Rate limits |
 
 **Reconcile — your value is outside the cited band (kept, not overwritten):**
 - **Load balancer** · `per_instance_rps`: you have **40,000 rps**, the cited evidence says **350,000 rps** (band 315,000–385,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
