@@ -295,11 +295,14 @@ class TestADR002ReviewFixes(unittest.TestCase):
         self.assertEqual(a.model, b.model)
 
     def test_validate_rejects_non_positive_or_non_finite_capacity(self):
+        # Non-positive capacity is now rejected up front at Component construction (engine-audit fix).
+        with self.assertRaises((ValueError, TypeError)):
+            Component("a", ComponentKind.APP_SERVER, "A", per_instance_rps=0.0)
+        # validate_model is the ingestion-layer defense-in-depth for capacities that go invalid AFTER
+        # construction — a direct field mutation, or a finite-per-instance × instances overflow to inf.
         m = SystemModel(
-            name="x", components={"a": Component("a", ComponentKind.APP_SERVER, "A", per_instance_rps=0.0)},
+            name="x", components={"a": Component("a", ComponentKind.APP_SERVER, "A", per_instance_rps=1000.0)},
             flows=[Flow("f", 1.0, [FlowStep("a")])], workload=Workload(100.0))
-        with self.assertRaises(IngestError):
-            validate_model(m)
         m.components["a"].per_instance_rps = float("inf")
         with self.assertRaises(IngestError):
             validate_model(m)

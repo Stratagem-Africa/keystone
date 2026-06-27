@@ -146,5 +146,35 @@ class TestSimulation(unittest.TestCase):
                 raise
 
 
+class TestEngineAuditFixes(unittest.TestCase):
+    """Fixes from the engine correctness audit: reject physically-impossible inputs; disclose the
+    dominant-flow latency simplification."""
+
+    def test_rejects_non_positive_capacity(self):
+        for bad in (0, -100.0):
+            with self.assertRaises(ValueError):
+                Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=bad)
+        with self.assertRaises(ValueError):
+            Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=float("inf"))
+        with self.assertRaises(TypeError):
+            Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=True)
+
+    def test_rejects_negative_latency(self):
+        with self.assertRaises(ValueError):
+            Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, base_latency_ms=-1.0)
+        with self.assertRaises(ValueError):
+            Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, base_latency_ms=float("nan"))
+        Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0, base_latency_ms=0.0)  # 0 is OK
+
+    def test_multi_flow_report_caveats_dominant_flow_latency(self):
+        c = Component("c", ComponentKind.APP_SERVER, "C", per_instance_rps=1000.0)
+        two = SystemModel(name="m", components={"c": c}, workload=Workload(100.0),
+                          flows=[Flow("big", 0.9, [FlowStep("c")]), Flow("small", 0.1, [FlowStep("c")])])
+        self.assertTrue(any("DOMINANT flow" in cav for cav in simulate(two).caveats))
+        one = SystemModel(name="m", components={"c": c}, workload=Workload(100.0),
+                          flows=[Flow("only", 1.0, [FlowStep("c")])])
+        self.assertFalse(any("DOMINANT flow" in cav for cav in simulate(one).caveats))
+
+
 if __name__ == "__main__":
     unittest.main()
