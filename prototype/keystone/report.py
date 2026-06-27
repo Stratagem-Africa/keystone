@@ -46,18 +46,23 @@ def _grounding_section(model: SystemModel) -> list[str]:
     if not rows:
         return []
     L = ["## Grounding & reconciliation (input evidence)", "",
-         "Input numbers matched to **cited benchmark evidence**. The engine still computed every result "
-         "above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; "
-         "**RECONCILE** = it falls outside, and your value was **kept** (not overwritten).", "",
-         "| Component | Input | Your value | Grounded central | Cited band | Status | Source |",
-         "|---|---|--:|--:|:--:|:--|:--|"]
+         "Input numbers matched to **cited benchmark evidence**, by component **kind**. The engine still "
+         "computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits "
+         "inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not "
+         "overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — "
+         "check it matches your setup before trusting the band.", "",
+         "| Component | Input | Your value | Grounded central | Cited band | Status | Measured on | Source |",
+         "|---|---|--:|--:|:--:|:--|:--|:--|"]
     reconcile: list[tuple] = []
     for comp, metric, g in rows:
         v = getattr(comp, metric)
         in_band = g.confidence_low <= v <= g.confidence_high
         yv, gv, band = _fmt_grounded(metric, v, g)
         status = "GROUNDED ✓" if in_band else "RECONCILE ⚠"
-        L.append(f"| {comp.name} | {metric} | {yv} | {gv} | {band} | {status} | {g.citations[0].source} |")
+        mc = g.measured_context or "—"
+        if len(mc) > 52:
+            mc = mc[:51] + "…"
+        L.append(f"| {comp.name} | {metric} | {yv} | {gv} | {band} | {status} | {mc} | {g.citations[0].source} |")
         if not in_band:
             reconcile.append((comp.name, metric, yv, gv, band))
     L.append("")

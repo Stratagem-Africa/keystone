@@ -77,6 +77,25 @@ class TestGroundingSeam(unittest.TestCase):
         self.assertIn("Component capacities are SEED benchmarks tagged ASSUMPTION", md)
         self.assertNotIn("MIXED provenance", md)
 
+    def test_grounding_section_surfaces_measured_context(self):
+        # SURFACE-CONTEXT: the grounding table shows the evidence's measured setup so a reader can judge
+        # applicability. It is display-only — never changes a computed value (evidence-only invariant holds).
+        _, _, _, md = run_url_shortener.build_and_render(_curated())
+        self.assertIn("Measured on", md)
+
+    def test_to_grounding_carries_measured_context(self):
+        from keystone.benchmarks.benchmark_corpus import BenchmarkDatapoint
+        from keystone.provenance import Citation
+        dp = BenchmarkDatapoint(
+            component_kind="cache", metric="base_latency_ms", value=0.5, unit="ms",
+            confidence_low=0.3, confidence_high=0.8,
+            citations=(Citation(source="s", reference="https://x"),),
+            methodology="load_test_synthetic", measured_date="2026-06-01", source_tier="T2",
+            instance_type="r7g.large", workload_shape="sustained")
+        g = dp.to_grounding()
+        self.assertIn("r7g.large", g.measured_context)
+        self.assertIn("sustained", g.measured_context)
+
     def test_enrich_only_probes_groundable_metrics(self):
         # A spy KB records every metric asked; the seam must never request a derived metric.
         asked: list[str] = []

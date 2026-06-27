@@ -69,8 +69,13 @@ class BenchmarkDatapoint:
         self.to_grounding()   # validates value/band (finite, non-negative, brackets) via the contract
 
     def to_grounding(self) -> Grounding:
+        # Surface the MEASURED context (hardware / workload / region / concurrency) so a reader can judge
+        # whether this evidence fits their setup. Display-only — does not affect the value/band/matching.
+        ctx = " · ".join(p.strip() for p in (self.instance_type, self.workload_shape, self.region,
+                                             self.concurrency_model) if p and p.strip())
         return Grounding(value=self.value, unit=self.unit, confidence_low=self.confidence_low,
-                         confidence_high=self.confidence_high, citations=self.citations)
+                         confidence_high=self.confidence_high, citations=self.citations,
+                         measured_context=ctx[:200])
 
     def context_matches(self, context: dict | None) -> bool:
         if not context:

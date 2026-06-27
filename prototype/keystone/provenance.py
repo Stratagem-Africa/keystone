@@ -76,6 +76,10 @@ class Grounding:
     confidence_high: float
     citations: tuple[Citation, ...] = ()
     provenance: str = "GROUNDED"
+    # The evidence's MEASURED context (hardware / workload / region), surfaced so a reader can judge
+    # whether it applies to THEIR setup. Display-only metadata — it never affects matching, the value,
+    # the band, or any computed number (the engine never reads it). Empty when the source has no context.
+    measured_context: str = ""
 
     def __post_init__(self) -> None:
         # Store citations immutably: a frozen dataclass still allows mutating a list
@@ -86,6 +90,7 @@ class Grounding:
                              "use None (→ caller keeps ASSUMPTION) when there is no evidence")
         if not self.citations:
             raise ValueError("GROUNDED requires >=1 resolvable Citation (no evidence → return None)")
+        _single_line("Grounding.measured_context", self.measured_context, maxlen=_MAX_NOTE)  # rendered in reports
         for v in (self.value, self.confidence_low, self.confidence_high):
             if not math.isfinite(v):
                 raise ValueError("Grounding values must be finite (no NaN/inf)")
