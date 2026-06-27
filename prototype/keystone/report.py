@@ -230,8 +230,9 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
             L.append("_Range = the output span when each GROUNDED input is swept across its **cited** "
                      "confidence band (assumed / reconciled inputs held fixed). It expresses "
                      "input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the "
-                     "true value can fall outside it. Accuracy stays **L0 (Directional)** until "
-                     "field-calibrated._")
+                     "true value can fall outside it. A **—** means no grounded input moves that number "
+                     "(no cited spread to show) — it is not zero uncertainty. Accuracy stays "
+                     "**L0 (Directional)** until field-calibrated._")
             L.append("")
 
     # Per-component table
@@ -315,8 +316,10 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
         L.append("- Some inputs above are GROUNDED to cited benchmarks matched by component **kind** "
                  "(not your exact instance type / region / workload), so treat them as directional "
                  "evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and "
-                 "kept **your** value — a human should check them. The citations are AI-proposed, "
-                 "pending ratification.")
+                 "kept **your** value — a human should check them. These component-input citations are "
+                 "AI-matched and pass the curation gate; independent citation review remains the standing "
+                 "bar before treating them as calibrated (the per-unit cost **rates** were separately "
+                 "ratified — see *Cost rate evidence*).")
     L.append("")
 
     # Assumptions ledger

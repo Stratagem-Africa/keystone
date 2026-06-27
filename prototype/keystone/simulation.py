@@ -359,6 +359,9 @@ def simulate(model: SystemModel) -> SimulationResult:
     if model.pricing.compute_pricing != "on_demand":
         _billed_rates.add(model.pricing.compute_pricing)
     rates_grounded = bool(_grounded_rates) and all(r in _grounded_rates for r in _billed_rates)
+    # PRESENCE only (never a grounding value): do any component inputs carry grounding? Used to keep the
+    # caveats provenance-ACCURATE without touching the math (same posture as rates_grounded).
+    any_comp_grounded = any(c.groundings for c in model.components.values())
     cost_caveat = (
         "Cost = per-instance compute × the chosen pricing-model discount + declared usage "
         "(egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). "
@@ -374,11 +377,27 @@ def simulate(model: SystemModel) -> SimulationResult:
         "are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. "
         "Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope."
     )
+    if any_comp_grounded:
+        # Honesty: the "rates" provenance above is for per-UNIT rates only; the per-component COMPUTE
+        # prices that usually dominate the cost carry their OWN provenance (incl. RECONCILE) — so the
+        # "GROUNDED rates" label must NOT be read as "this cost is grounded".
+        cost_caveat += (" NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — "
+                        "the per-component COMPUTE prices that drive most of this figure carry their own "
+                        "provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding "
+                        "& reconciliation section; some may be RECONCILE (your value kept despite the cited band).")
+    cap_caveat = (
+        "Component capacities & prices have MIXED provenance — each is GROUNDED (matches a cited benchmark "
+        "band), RECONCILE (your value kept despite falling outside the cited band), or ASSUMPTION (uncited), "
+        "as marked in the Grounding & reconciliation section. None are calibrated to your stack. Accuracy is "
+        "L0 (Directional) until field-calibrated (Doc 03)."
+    ) if any_comp_grounded else (
+        "Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to "
+        "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03)."
+    )
     caveats = [
         "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
         "simulation. Async/streaming/multi-region topologies are out of v1 scope.",
-        "Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to "
-        "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).",
+        cap_caveat,
         "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
         "treat p95/p99 as upper-bound directional figures.",
         cost_caveat,

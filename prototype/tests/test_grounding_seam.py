@@ -62,6 +62,21 @@ class TestGroundingSeam(unittest.TestCase):
         md = render(m, make_council().design(m), simulate(m))
         self.assertNotIn("## Grounding", md)
 
+    def test_caveats_provenance_accurate_when_grounded(self):
+        # Honesty audit fix: a grounded report must NOT claim ALL capacities are ASSUMPTION (the grounding
+        # table shows some GROUNDED/RECONCILE), and the cost caveat must flag that the per-component COMPUTE
+        # prices carry their own provenance — the "GROUNDED rates" label is only for per-unit rates.
+        _, _, _, md = run_url_shortener.build_and_render(_curated())
+        self.assertIn("MIXED provenance", md)
+        self.assertIn("per-component COMPUTE prices", md)
+        self.assertNotIn("Component capacities are SEED benchmarks tagged ASSUMPTION", md)
+
+    def test_caveats_unchanged_when_no_grounding(self):
+        # Stub off-state: keep the original ASSUMPTION wording — no false "mixed provenance" with nothing grounded.
+        _, _, _, md = run_url_shortener.build_and_render(EmptyKnowledgeBase())
+        self.assertIn("Component capacities are SEED benchmarks tagged ASSUMPTION", md)
+        self.assertNotIn("MIXED provenance", md)
+
     def test_enrich_only_probes_groundable_metrics(self):
         # A spy KB records every metric asked; the seam must never request a derived metric.
         asked: list[str] = []
