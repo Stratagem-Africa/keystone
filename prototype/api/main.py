@@ -123,8 +123,8 @@ def get_job_status(job_id: str) -> dict:
     return response  # FastAPI auto-converts this dict to JSON
 
 @app.get("/jobs/{job_id}/report", response_model=None)
-def get_job_report(job_id: str, request: Request, format: str = "json"):
-    # `format` is a query param — client passes ?format=markdown in the URL
+def get_job_report(job_id: str, request: Request, fmt: str = "json"):
+    # `fmt` is a query param — client passes ?fmt=markdown in the URL
     # `request` gives access to HTTP headers the client sent
     job = get_job(job_id)
 
@@ -135,11 +135,15 @@ def get_job_report(job_id: str, request: Request, format: str = "json"):
         # Report doesn't exist yet — tell the client what state the job is in
         raise HTTPException(status_code=404, detail=f"report not ready — job is '{job.status}'")
 
+    if job.result is None:
+        # Should never happen — done jobs always have a result — but guard defensively
+        raise HTTPException(status_code=500, detail="report missing — this is a server bug")
+
     # Two ways a client can ask for markdown:
-    # 1. ?format=markdown in the URL
+    # 1. ?fmt=markdown in the URL
     # 2. Accept: text/markdown in the request headers (the standard HTTP way)
     accept_header = request.headers.get("accept", "")  # empty string if header not sent
-    want_markdown = format == "markdown" or "text/markdown" in accept_header
+    want_markdown = fmt == "markdown" or "text/markdown" in accept_header
 
     if want_markdown:
         # Response() lets us return plain text instead of JSON

@@ -87,11 +87,11 @@ class TestJobReportEndpoint(unittest.TestCase):
         self.assertIsNotNone(data["report"])   # and it must have a value
 
     def test_format_query_param_returns_markdown(self):
-        # ?format=markdown in the URL should return plain text, not JSON
+        # ?fmt=markdown in the URL should return plain text, not JSON
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
         update_job(job.job_id, status="done", result="# My Report\nsome content here")
 
-        response = client.get(f"/jobs/{job.job_id}/report?format=markdown")
+        response = client.get(f"/jobs/{job.job_id}/report?fmt=markdown")
 
         self.assertEqual(response.status_code, 200)
         # content-type header tells us what kind of data the server returned
