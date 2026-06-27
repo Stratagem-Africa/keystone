@@ -100,6 +100,7 @@
 - Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates are a placeholder model class (real prices vary ~100× by model). All these rates are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
+- Latency (mean/p50/p95/p99) is for the DOMINANT flow only — 'redirect' (99% of traffic). Lower-share flows on different paths can have very different (often worse) latency that this figure does NOT show; use the per-component load table to check other paths.
 
 ## Assumptions (each editable)
 

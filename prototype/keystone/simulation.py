@@ -404,6 +404,14 @@ def simulate(model: SystemModel) -> SimulationResult:
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
+    if len(model.flows) > 1:
+        # Honesty (engine audit): latency is computed for the DOMINANT (largest-share) flow only, so a
+        # lower-share flow on a different (often more congested) path is NOT reflected in these figures.
+        caveats.append(
+            f"Latency (mean/p50/p95/p99) is for the DOMINANT flow only — '{dom.name}' ({dom.share:.0%} of "
+            f"traffic). Lower-share flows on different paths can have very different (often worse) latency "
+            f"that this figure does NOT show; use the per-component load table to check other paths."
+        )
 
     conf = _confidence(rho_max)  # engine-stability qualifier, shared by the run + every Metric
     return SimulationResult(

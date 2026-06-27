@@ -5,6 +5,7 @@ into this; every output (simulation/report/export) derives from it. Pure stdlib.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -65,6 +66,19 @@ class Component:
     groundings: dict[str, Grounding] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # Capacity & service time drive every queueing result, so reject physically-impossible inputs:
+        # a non-positive capacity makes utilisation negative/infinite; a negative latency makes latency
+        # negative (the engine audit confirmed both produced nonsensical numbers downstream).
+        rps = self.per_instance_rps
+        if isinstance(rps, bool) or not isinstance(rps, (int, float)):
+            raise TypeError(f"per_instance_rps must be a number, not {type(rps).__name__} ({rps!r})")
+        if not math.isfinite(rps) or rps <= 0:
+            raise ValueError(f"per_instance_rps must be a finite positive capacity, got {rps!r}")
+        lat = self.base_latency_ms
+        if isinstance(lat, bool) or not isinstance(lat, (int, float)):
+            raise TypeError(f"base_latency_ms must be a number, not {type(lat).__name__} ({lat!r})")
+        if not math.isfinite(lat) or lat < 0:
+            raise ValueError(f"base_latency_ms must be finite and non-negative, got {lat!r}")
         # Harm floor (ADR-008): money is integer minor units (cents) — never a float (rounding
         # corrupts money). `bool` is an int subclass, so exclude it explicitly.
         c = self.monthly_cost_per_instance
