@@ -18,9 +18,13 @@ def _get_db():
     key = os.getenv("SUPABASE_ANON_KEY")
     if not url or not key:
         return None
-    from supabase import create_client
-    _db_client = create_client(url, key)
-    return _db_client
+    try:
+        from supabase import create_client
+        _db_client = create_client(url, key)
+        return _db_client
+    except Exception as exc:
+        log.warning("Supabase client init failed, using memory only: %s", exc)
+        return None
 
 
 @dataclass
@@ -44,6 +48,7 @@ def create_job(intent_text: str, secrets_found: list[str]) -> Job:
     db = _get_db()
     if db:
         try:
+            # TODO(tenant-isolation, #21): add tenant_id + row-level security when auth lands
             db.table("jobs").insert({
                 "job_id": job_id,
                 "status": "queued",
@@ -51,7 +56,7 @@ def create_job(intent_text: str, secrets_found: list[str]) -> Job:
                 "secrets_found": secrets_found,
             }).execute()
         except Exception as exc:
-            log.warning("Postgres insert failed, using memort only: %s", exc)
+            log.warning("Postgres insert failed, using memory only: %s", exc)
     
     return job
 
@@ -83,8 +88,10 @@ def update_job(job_id: str, *, status: str, result: str | None = None, error: st
     job = _store.get(job_id)
     if job:
         job.status = status
-        job.result = result
-        job.error = error
+        if result is not None:   # only overwrite when caller passes a value
+            job.result = result
+        if error is not None:    # same — a status-only update won't wipe the stored result
+            job.error = error
 
     db = _get_db()
     if db:
@@ -97,3 +104,4 @@ def update_job(job_id: str, *, status: str, result: str | None = None, error: st
             db.table("jobs").update(data).eq("job_id", job_id).execute()
         except Exception as exc:
             log.warning("Postgres update failed, memory still updated: %s", exc)
+
