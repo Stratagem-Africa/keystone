@@ -52,6 +52,23 @@ class TestWorker(unittest.TestCase):
         self.assertEqual(failed.status, "error")
         self.assertIsNotNone(failed.error)   # error message was stored
 
+    def test_pipeline_error_is_scrubbed(self):
+        # error messages from the real ingestor can contain raw LLM output with secrets
+        # — the worker must redact them before storing or logging
+        job = create_job("I am building a URL shortener that handles 50k req/s", [])
+
+        # fake exception whose message contains a secret pattern
+        fake_error = RuntimeError("failed: sk-ant-api03-AAABBBCCCDDDEEEFFFGGGHHH leaked in output")
+
+        with patch("api.worker.make_ingestor", side_effect=fake_error):
+            run_pipeline(job.job_id, job.intent_text)
+
+        failed = get_job(job.job_id)
+        self.assertEqual(failed.status, "error")
+        self.assertIsNotNone(failed.error)
+        self.assertNotIn("sk-ant-api03", failed.error)  # secret was redacted before storage
+
+
     def test_intent_endpoint_triggers_pipeline(self):
         # TestClient runs background tasks synchronously — so by the time we check,
         # the pipeline has already completed

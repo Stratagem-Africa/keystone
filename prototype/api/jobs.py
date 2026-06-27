@@ -103,5 +103,5 @@ def update_job(job_id: str, *, status: str, result: str | None = None, error: st
                 data["error"] = error
             db.table("jobs").update(data).eq("job_id", job_id).execute()
         except Exception as exc:
-            log.warning("Postgres update failed, memory still updated: %s", exc)
+            log.warning("Postgres update failed, in-memory store updated if job was local: %s", exc)
 
