@@ -15,7 +15,7 @@ from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.ingestion import Source, make_ingestor
 from keystone.report import render
-from keystone.simulation import simulate
+from keystone.confidence_bands import simulate_with_confidence
 
 NOTE = """
 We're building a URL shortener. Users paste a long URL and get a short code; hitting the
@@ -34,7 +34,7 @@ def main() -> None:
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
     adrs = make_council().design(model)
-    sim = simulate(model)
+    sim = simulate_with_confidence(model)   # output ranges from cited input uncertainty (values unchanged)
     # 4. Report with the mandatory honesty section.
     md = render(model, adrs, sim)
     out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
