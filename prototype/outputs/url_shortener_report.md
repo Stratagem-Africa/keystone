@@ -10,9 +10,10 @@
 
 - **Bottleneck:** App tier (t4g.medium x12) (utilisation 69%)
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
-- **Latency (dominant path):** p50 ~20 ms · p95 ~86 ms · p99 ~133 ms (mean 29 ms)
+- **Latency (dominant path):** p50 ~20 ms [19–23] · p95 ~86 ms [83–99] · p99 ~133 ms [128–152] (mean 29 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
 - **Estimated monthly cost:** ~$1,045.00/month
+- _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
 
 ## Headline metrics (model · confidence)
 

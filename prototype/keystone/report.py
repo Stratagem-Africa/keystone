@@ -168,21 +168,33 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
                  "production use.** Keystone does **not** certify safety or production-readiness.")
         L.append("")
 
-    # Headline
+    # Headline. A ' [low–high]' suffix surfaces a metric's confidence band (from cited input evidence)
+    # right where the reader looks first; metrics with no band render unchanged.
+    def _band(key, fmt):
+        m = sim.metrics.get(key)
+        return f" [{fmt(m.low)}–{fmt(m.high)}]" if (m and m.low is not None) else ""
+    _ms = lambda x: f"{x:.0f}"
     L.append("## Verdict")
     L.append("")
     L.append(f"- **Bottleneck:** {sim.bottleneck_name} "
              f"(utilisation {sim.bottleneck_utilization*100:.0f}%)")
-    L.append(f"- **Max sustainable load:** ~{_fmt_rps(sim.breakpoint_rps_safe)} req/s at the "
-             f"85% safe ceiling · ~{_fmt_rps(sim.breakpoint_rps_theoretical)} req/s theoretical")
-    L.append(f"- **Latency (dominant path):** p50 ~{sim.p50_ms:.0f} ms · "
-             f"p95 ~{sim.p95_ms:.0f} ms · p99 ~{sim.p99_ms:.0f} ms (mean {sim.mean_latency_ms:.0f} ms)")
+    L.append(f"- **Max sustainable load:** ~{_fmt_rps(sim.breakpoint_rps_safe)} req/s"
+             f"{_band('breakpoint_rps_safe', _fmt_rps)} at the 85% safe ceiling · "
+             f"~{_fmt_rps(sim.breakpoint_rps_theoretical)} req/s theoretical")
+    L.append(f"- **Latency (dominant path):** p50 ~{sim.p50_ms:.0f} ms{_band('p50_ms', _ms)} · "
+             f"p95 ~{sim.p95_ms:.0f} ms{_band('p95_ms', _ms)} · "
+             f"p99 ~{sim.p99_ms:.0f} ms{_band('p99_ms', _ms)} (mean {sim.mean_latency_ms:.0f} ms)")
     L.append(f"- **Single points of failure:** {', '.join(sim.spofs) if sim.spofs else 'none detected'}")
     # Money is rendered at 2 decimals so sub-dollar / fractional-cost lines survive and the breakdown
     # reconciles to the total (the integer-cent math is exact; only the display formats it).
     discounted = sim.compute_pricing != "on_demand" and sim.compute_list_cents != sim.cost_breakdown.get("compute")
     pricing_tag = f" · _{sim.compute_pricing} pricing_" if discounted else ""
-    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.2f}/month{pricing_tag}")  # cents (ADR-008)
+    L.append(f"- **Estimated monthly cost:** ~${sim.monthly_cost / 100:,.2f}/month"
+             f"{_band('monthly_cost', lambda x: f'${x / 100:,.0f}')}{pricing_tag}")  # cents (ADR-008)
+    if any((sim.metrics.get(k) and sim.metrics[k].low is not None)
+           for k in ("breakpoint_rps_safe", "p50_ms", "p95_ms", "p99_ms", "monthly_cost")):
+        L.append("- _`[low–high]` = confidence range from cited input evidence (details + 'measured on' "
+                 "below) — input-uncertainty only, **not** a validated-accuracy guarantee._")
     # Cost breakdown (ADR-009 Tiers 1–2) — shown when usage is declared OR a non-list pricing model is
     # chosen, so plain compute-only/on-demand models are unchanged.
     bd = sim.cost_breakdown
