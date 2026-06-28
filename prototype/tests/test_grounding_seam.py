@@ -96,6 +96,19 @@ class TestGroundingSeam(unittest.TestCase):
         self.assertIn("r7g.large", g.measured_context)
         self.assertIn("sustained", g.measured_context)
 
+    def test_verdict_summary_surfaces_confidence_range(self):
+        # The top-line Verdict shows the confidence range (e.g. on latency) where the reader looks first.
+        _, _, _, md = run_url_shortener.build_and_render(_curated())
+        verdict = md.split("## Verdict")[1].split("## ")[0]
+        self.assertIn(" ms [", verdict)   # a latency line carries a [low–high] range
+        self.assertIn("confidence range from cited input evidence", md)
+
+    def test_verdict_summary_has_no_range_when_no_grounding(self):
+        _, _, _, md = run_url_shortener.build_and_render(EmptyKnowledgeBase())
+        verdict = md.split("## Verdict")[1].split("## ")[0]
+        self.assertNotIn(" ms [", verdict)
+        self.assertNotIn("confidence range from cited input evidence", md)
+
     def test_enrich_only_probes_groundable_metrics(self):
         # A spy KB records every metric asked; the seam must never request a derived metric.
         asked: list[str] = []

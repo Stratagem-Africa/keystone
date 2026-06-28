@@ -9,10 +9,11 @@
 ## Verdict
 
 - **Bottleneck:** Booking app tier (utilisation 62%)
-- **Max sustainable load:** ~6,800 req/s at the 85% safe ceiling · ~8,000 req/s theoretical
-- **Latency (dominant path):** p50 ~21 ms · p95 ~93 ms · p99 ~142 ms (mean 31 ms)
+- **Max sustainable load:** ~6,800 req/s [6,800–27,200] at the 85% safe ceiling · ~8,000 req/s theoretical
+- **Latency (dominant path):** p50 ~21 ms [11–24] · p95 ~93 ms [46–103] · p99 ~142 ms [70–158] (mean 31 ms)
 - **Single points of failure:** Load balancer, Seat-availability cache, Booking request queue, Inventory DB (seats)
 - **Estimated monthly cost:** ~$895.00/month
+- _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
 
 ## Headline metrics (model · confidence)
 

@@ -10,9 +10,10 @@
 
 - **Bottleneck:** App server (utilisation 10%)
 - **Max sustainable load:** ~850 req/s at the 85% safe ceiling · ~1,000 req/s theoretical
-- **Latency (dominant path):** p50 ~12 ms · p95 ~52 ms · p99 ~80 ms (mean 17 ms)
+- **Latency (dominant path):** p50 ~12 ms [12–13] · p95 ~52 ms [50–58] · p99 ~80 ms [77–89] (mean 17 ms)
 - **Single points of failure:** Load balancer, Primary database
 - **Estimated monthly cost:** ~$0.00/month
+- _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
 
 ## Headline metrics (model · confidence)
 
