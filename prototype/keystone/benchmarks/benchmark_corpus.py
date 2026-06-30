@@ -147,13 +147,25 @@ class CuratedKnowledgeBase:
                  if d.component_kind == kind.value and d.metric == metric and d.context_matches(context)]
         if not cands:
             return None
-        if len(cands) > 1:
-            # Multiple matches survived (e.g. only a PARTIAL context was given). It is only safe to
-            # ground if they AGREE — i.e. all bands overlap (corroborating measurements). If any pair's
-            # bands are disjoint, the query failed to disambiguate genuinely different contexts → refuse
-            # to guess and stay ASSUMPTION. (Same-context contradictions are caught earlier, at curation,
-            # by validate_corpus.) Among consistent candidates, the tightest (most precise) band wins.
-            if max(c.confidence_low for c in cands) > min(c.confidence_high for c in cands):
+        # CONTEXT-SPECIFICITY tiering (v2): prefer the candidate whose context is CLOSEST to the query —
+        # the fewest SET context dims the query did NOT name. So a NO-context query picks the GENERIC
+        # (context-free) datapoint, NOT a tighter vendor/instance-specific one; a query naming a context
+        # (e.g. instance_type="stripe") picks the matching specific datapoint. Backward-compatible: with one
+        # datapoint per kind+metric (today's corpus) the best tier is trivially that single datapoint.
+        # Count a dim as "named" only if it carries a NON-EMPTY value — matching context_matches(),
+        # which ignores a falsy `want`. Otherwise a no-op key like {"region": ""} (how an UNSET dim
+        # serialises off a Component) would discount that dim and wrongly collapse the tier, pulling in
+        # a tighter specific band a context-free query never asked for.
+        named = {dim for dim, want in (context or {}).items() if want}
+        def _extra(d):
+            return sum(1 for dim in CONTEXT_DIMS if getattr(d, dim) and dim not in named)
+        best_specificity = min(_extra(d) for d in cands)
+        tier = [d for d in cands if _extra(d) == best_specificity]
+        if len(tier) > 1:
+            # Multiple candidates at the SAME (best) specificity. Safe to ground only if they AGREE — all
+            # bands overlap (corroborating). If any pair is disjoint, the query failed to disambiguate
+            # genuinely different contexts at this tier → refuse to guess and stay ASSUMPTION (same-context
+            # contradictions are caught earlier, by validate_corpus). The tightest (most precise) band wins.
+            if max(c.confidence_low for c in tier) > min(c.confidence_high for c in tier):
                 return None
-        best = min(cands, key=lambda d: d.confidence_high - d.confidence_low)
-        return best.to_grounding()
+        return min(tier, key=lambda d: d.confidence_high - d.confidence_low).to_grounding()
