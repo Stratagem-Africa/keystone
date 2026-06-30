@@ -45,8 +45,13 @@ def _grounding_section(model: SystemModel) -> list[str]:
             for m in sorted(GROUNDABLE_METRICS) if m in c.groundings]
     if not rows:
         return []
+    # Match basis adapts to whether any component is context-tagged (e.g. a vendor) — kept in lockstep
+    # with the honesty caveat in the calling section so the header never understates the per-row basis.
+    basis = ("by component **kind**, or your **declared setup** where a component is tagged (see *Measured on*)"
+             if any(c.match_context and c.groundings for c in model.components.values())
+             else "by component **kind**")
     L = ["## Grounding & reconciliation (input evidence)", "",
-         "Input numbers matched to **cited benchmark evidence**, by component **kind**. The engine still "
+         f"Input numbers matched to **cited benchmark evidence**, {basis}. The engine still "
          "computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits "
          "inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not "
          "overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — "

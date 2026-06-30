@@ -53,7 +53,7 @@ _Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percent
 
 ## Grounding & reconciliation (input evidence)
 
-Input numbers matched to **cited benchmark evidence**, by component **kind**. The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — check it matches your setup before trusting the band.
+Input numbers matched to **cited benchmark evidence**, by component **kind**, or your **declared setup** where a component is tagged (see *Measured on*). The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — check it matches your setup before trusting the band.
 
 | Component | Input | Your value | Grounded central | Cited band | Status | Measured on | Source |
 |---|---|--:|--:|:--:|:--|:--|:--|
@@ -84,7 +84,7 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - Probecast — Adyen API status / latency monitoring (independent third-party) — https://probecast.io/status/adyen-api
 - The Stripe Latency Post-Mortem Every Engineer Should Read (Medium, secondary account of Stripe's March 2022 incident) — https://medium.com/@warstories/the-stripe-latency-post-mortem-every-engineer-should-read-before-launching-their-api-6514411772f8
 - Stripe Documentation — Rate limits (official vendor doc) — https://docs.stripe.com/rate-limits
-- Stripe Support — "rate_limit" error when creating bulk API requests (official Stripe support, independent corroboration) — https://support.stripe.com/questions/rate-limit-error-when-creating-bulk-api-requests
+- Stripe Support — "rate_limit" error when creating bulk API requests (official Stripe support page, same-vendor corroboration) — https://support.stripe.com/questions/rate-limit-error-when-creating-bulk-api-requests
 - computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) — https://computingforgeeks.com/database-benchmark-postgresql-mysql-mariadb/
 - DoltHub Blog — Postgres vs MySQL Sysbench Latency — https://www.dolthub.com/blog/2024-07-16-mysql-postgres-sysbench-latency/
 - faucetDB (MCP database benchmark) — https://faucetdb.ai/blog/mcp-database-benchmark/
