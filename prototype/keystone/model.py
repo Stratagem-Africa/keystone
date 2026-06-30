@@ -64,6 +64,13 @@ class Component:
     # changes the input number, never the math). `scaled()` shares components, which is correct: a
     # what-if keeps the same capacities, so the same groundings apply.
     groundings: dict[str, Grounding] = field(default_factory=dict)
+    # Optional MATCH CONTEXT for grounding (ADR-006 context-matching v2): the measured-setup dims
+    # (instance_type / workload_shape / region / concurrency_model → str) that select a context-SPECIFIC
+    # benchmark. A payment gateway tagged {"instance_type": "stripe"} grounds against the Stripe datapoint
+    # when one exists, else FALLS BACK to the generic (kind-only) band — it never loses its evidence.
+    # Empty (the default) = match by component kind alone (today's behaviour). The engine NEVER reads it
+    # (prime directive — grounding is evidence-only). Dim-NAME validity is enforced at the grounding seam.
+    match_context: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Capacity & service time drive every queueing result, so reject physically-impossible inputs:
@@ -105,6 +112,13 @@ class Component:
                 raise TypeError(f"{name} must be a non-negative int, not {type(v).__name__} ({v!r})")
             if v < 0:
                 raise ValueError(f"{name} must be non-negative, got {v}")
+        # Match-context is hand-tagged grounding metadata: a dict of str dim -> str value. Reject any
+        # other shape so a typo fails closed HERE rather than silently mis-querying the KB. Dim-NAME
+        # validity (a known CONTEXT_DIM) is checked at the grounding seam — model.py stays decoupled.
+        if not isinstance(self.match_context, dict) or any(
+                not isinstance(k, str) or not isinstance(val, str)
+                for k, val in self.match_context.items()):
+            raise TypeError("match_context must be a dict of str dim -> str value")
 
     def provenance_of(self, metric: str) -> str:
         """GROUNDED if this metric carries grounding evidence, else the component default."""
