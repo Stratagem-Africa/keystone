@@ -44,9 +44,13 @@ def build(system_rps: float = BASELINE_RPS, checkout_share: float = BASELINE_CHE
                          monthly_cost_per_instance=7000, provenance="ASSUMPTION"),
         # The constraint: a third-party payment gateway. ~100 req/s is a server-enforced RATE
         # LIMIT (HARD 429 ceiling), and ~140 ms is the external round-trip — both grounded.
-        "gateway": Component("gateway", ComponentKind.EXTERNAL_API, "Payment gateway (Stripe/Adyen-class)",
+        # match_context tags this as a STRIPE gateway (context-matching v2): the rps grounds to the
+        # Stripe-specific cited band [85,200] instead of the generic payment-gateway blend [7,140];
+        # base_latency_ms has no Stripe-specific datapoint so it falls back to the generic band.
+        "gateway": Component("gateway", ComponentKind.EXTERNAL_API, "Payment gateway (Stripe)",
                              per_instance_rps=100, instances=1, base_latency_ms=140.0,
-                             monthly_cost_per_instance=0, provenance="ASSUMPTION"),
+                             monthly_cost_per_instance=0, provenance="ASSUMPTION",
+                             match_context={"instance_type": "stripe"}),
         "db": Component("db", ComponentKind.SQL_DB, "Payments ledger (ACID, idempotent writes)",
                         per_instance_rps=12_000, instances=1, base_latency_ms=0.3,
                         monthly_cost_per_instance=12000, provenance="ASSUMPTION"),

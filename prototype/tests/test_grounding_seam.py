@@ -353,5 +353,32 @@ class TestEnrichContextMatching(unittest.TestCase):
             Component("x", K.EXTERNAL_API, "X", per_instance_rps=10.0, match_context={"region": 5})
 
 
+class TestStripeVendorGrounding(unittest.TestCase):
+    """PR C: the Stripe-tagged payments gateway grounds to the Stripe-specific cited band, while an
+    UNTAGGED external_api still grounds the generic payment-gateway blend (the matcher landmine stays defused)."""
+
+    def test_payments_gateway_grounds_stripe_specific_rps(self):
+        from keystone.blueprints import payments
+        res = enrich(payments.build(), _curated())
+        gw = {g.metric: g for g in res.groundings if g.component_id == "gateway"}
+        # per_instance_rps -> Stripe-specific band (context-matched on instance_type=stripe)
+        self.assertEqual((gw["per_instance_rps"].grounding.confidence_low,
+                          gw["per_instance_rps"].grounding.confidence_high), (85.0, 200.0))
+        self.assertEqual(gw["per_instance_rps"].query_context, {"instance_type": "stripe"})
+        # base_latency_ms has no Stripe-specific datapoint -> falls back to the generic band
+        self.assertEqual((gw["base_latency_ms"].grounding.confidence_low,
+                          gw["base_latency_ms"].grounding.confidence_high), (80.0, 250.0))
+        self.assertEqual(gw["base_latency_ms"].query_context, {})
+
+    def test_untagged_external_api_still_grounds_generic_blend(self):
+        from keystone.model import ComponentKind
+        kb = CuratedKnowledgeBase.from_default_corpus()
+        g = kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps")                              # no context
+        self.assertEqual((g.confidence_low, g.confidence_high), (7.0, 140.0))                      # generic blend
+        g_stripe = kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps",
+                             context={"instance_type": "stripe"})                                  # tagged
+        self.assertEqual((g_stripe.confidence_low, g_stripe.confidence_high), (85.0, 200.0))       # Stripe-specific
+
+
 if __name__ == "__main__":
     unittest.main()

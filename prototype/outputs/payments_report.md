@@ -10,24 +10,27 @@
 
 ## Verdict
 
-- **Bottleneck:** Payment gateway (Stripe/Adyen-class) (utilisation 64%)
-- **Max sustainable load:** ~106 req/s at the 85% safe ceiling · ~125 req/s theoretical
-- **Latency (dominant path):** p50 ~274 ms · p95 ~1184 ms · p99 ~1820 ms (mean 395 ms)
+- **Bottleneck:** Payment gateway (Stripe) (utilisation 64%)
+- **Max sustainable load:** ~106 req/s [90–212] at the 85% safe ceiling · ~125 req/s theoretical
+- **Latency (dominant path):** p50 ~274 ms [85–708] · p95 ~1184 ms [369–3058] · p99 ~1820 ms [567–4701] (mean 395 ms)
 - **Single points of failure:** API gateway / load balancer, Payments ledger (ACID, idempotent writes), Idempotency / order cache
-- **Estimated monthly cost:** ~$428.00/month
+- **Estimated monthly cost:** ~$428.00/month [$418–$442]
+- _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
 
 ## Headline metrics (model · confidence)
 
-| Metric | Value | Model | Confidence |
-|---|--:|---|:--|
-| bottleneck_utilization | 64% | max rho = arrival / capacity | medium |
-| breakpoint_rps_safe | 106 req/s | system_rps * (85% ceiling / rho_max) | medium |
-| breakpoint_rps_theoretical | 125 req/s | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 395 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 274 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 1,184 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 1,820 ms | exponential-tail: mean * ln(100) | medium |
-| monthly_cost | $428.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+| Metric | Value | Range (cited inputs) | Model | Confidence |
+|---|--:|--:|---|:--|
+| bottleneck_utilization | 64% | 32% – 75% | max rho = arrival / capacity | medium |
+| breakpoint_rps_safe | 106 req/s | 90 req/s – 212 req/s | system_rps * (85% ceiling / rho_max) | medium |
+| breakpoint_rps_theoretical | 125 req/s | 106 req/s – 250 req/s | system_rps * (1.0 / rho_max) | medium |
+| mean_latency_ms | 395 ms | 123 ms – 1,021 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 274 ms | 85 ms – 708 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 1,184 ms | 369 ms – 3,058 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 1,820 ms | 567 ms – 4,701 ms | exponential-tail: mean * ln(100) | medium |
+| monthly_cost | $428.00/mo | $417.89/mo – $442.31/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
+
+_Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
 
 ## Per-flow latency
 
@@ -42,7 +45,7 @@ _Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percent
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |
 |---|--:|--:|--:|--:|:--|
-| Payment gateway (Stripe/Adyen-class) | 64 | 100 | 64% | 388.9 | ok |
+| Payment gateway (Stripe) | 64 | 100 | 64% | 388.9 | ok |
 | Checkout service | 80 | 8,000 | 1% | 5.1 | ok |
 | Payments ledger (ACID, idempotent writes) | 67 | 12,000 | 1% | 0.3 | ok |
 | API gateway / load balancer | 80 | 50,000 | 0% | 1.0 | ok |
@@ -50,15 +53,15 @@ _Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percent
 
 ## Grounding & reconciliation (input evidence)
 
-Input numbers matched to **cited benchmark evidence**, by component **kind**. The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — check it matches your setup before trusting the band.
+Input numbers matched to **cited benchmark evidence**, by component **kind**, or your **declared setup** where a component is tagged (see *Measured on*). The engine still computed every result above; this annotates the *inputs* only. **GROUNDED** = your value sits inside the cited band; **RECONCILE** = it falls outside, and your value was **kept** (not overwritten). **Measured on** shows the hardware / workload the benchmark actually ran on — check it matches your setup before trusting the band.
 
 | Component | Input | Your value | Grounded central | Cited band | Status | Measured on | Source |
 |---|---|--:|--:|:--:|:--|:--|:--|
 | API gateway / load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | Managed/software L7 load balancer (AWS ALB / HAProx… | AWS — Application Load Balancer access logs (official docs) |
 | API gateway / load balancer | per_instance_rps | 50,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | 8 CPU cores, 4 GB RAM, Intel Xeon E5-2699 v4 @ 2.2 … | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
 | Checkout service | per_instance_rps | 4,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | One app-server instance, ~2-4 vCPU (e.g. AWS c5.xla… | Sharkbench (go-gin web benchmark) |
-| Payment gateway (Stripe/Adyen-class) | base_latency_ms | 140.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Stripe/Adyen-class payment-gateway external HTTPS A… | Probecast — Adyen API status / latency monitoring (independent third-party) |
-| Payment gateway (Stripe/Adyen-class) | per_instance_rps | 100 rps | 100 rps | 7–140 rps | GROUNDED ✓ | Payment-gateway-class third-party API, published pe… | Stripe Documentation — Rate limits |
+| Payment gateway (Stripe) | base_latency_ms | 140.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Stripe/Adyen-class payment-gateway external HTTPS A… | Probecast — Adyen API status / latency monitoring (independent third-party) |
+| Payment gateway (Stripe) | per_instance_rps | 100 rps | 100 rps | 85–200 rps | GROUNDED ✓ | stripe · live_mode · per_account | Stripe Documentation — Rate limits (official vendor doc) |
 | Payments ledger (ACID, idempotent writes) | base_latency_ms | 0.30 ms | 0.30 ms | 0.15–0.80 ms | GROUNDED ✓ | PostgreSQL/MySQL/MariaDB, sysbench warm-cache singl… | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
 | Payments ledger (ACID, idempotent writes) | monthly_cost_per_instance | $120.00/mo | $122.10/mo | $109.89–$134.31 | GROUNDED ✓ | Managed PostgreSQL — 8 GiB RAM / 4 vCPUs / 140 GiB … | https://www.digitalocean.com/pricing/managed-databases |
 | Payments ledger (ACID, idempotent writes) | per_instance_rps | 12,000 rps | 8,133 rps | 4,800–29,000 rps | GROUNDED ✓ | AWS RDS db.m8gd.4xlarge (16 vCPU / 64 GB, NVMe-back… | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
@@ -80,9 +83,8 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - DEV.to — Under Pressure: Benchmarking Node.js on a Single-Core EC2 — https://dev.to/ocodista/under-pressure-benchmarking-nodejs-on-a-single-core-ec2-5ghe
 - Probecast — Adyen API status / latency monitoring (independent third-party) — https://probecast.io/status/adyen-api
 - The Stripe Latency Post-Mortem Every Engineer Should Read (Medium, secondary account of Stripe's March 2022 incident) — https://medium.com/@warstories/the-stripe-latency-post-mortem-every-engineer-should-read-before-launching-their-api-6514411772f8
-- Stripe Documentation — Rate limits — https://docs.stripe.com/rate-limits
-- Adyen Docs / API Explorer — Legal Entity Management v3 Overview (rate limits) — https://docs.adyen.com/api-explorer/legalentity/3/overview
-- PayPal Developer — Payouts: Test and go live (rate limiting) — https://developer.paypal.com/docs/payouts/standard/integrate-api/test-and-go-live/
+- Stripe Documentation — Rate limits (official vendor doc) — https://docs.stripe.com/rate-limits
+- Stripe Support — "rate_limit" error when creating bulk API requests (official Stripe support page, same-vendor corroboration) — https://support.stripe.com/questions/rate-limit-error-when-creating-bulk-api-requests
 - computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) — https://computingforgeeks.com/database-benchmark-postgresql-mysql-mariadb/
 - DoltHub Blog — Postgres vs MySQL Sysbench Latency — https://www.dolthub.com/blog/2024-07-16-mysql-postgres-sysbench-latency/
 - faucetDB (MCP database benchmark) — https://faucetdb.ai/blog/mcp-database-benchmark/
@@ -191,15 +193,15 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 
 | Scenario | Bottleneck | Util | Max safe load (rps) |
 |---|---|--:|--:|
-| Sale: 2× traffic (160 rps), 85% checkout | Payment gateway (Stripe/Adyen-class) | 136% | 100 |
-| Black-Friday: 4× traffic (320 rps), 90% checkout | Payment gateway (Stripe/Adyen-class) | 288% | 94 |
+| Sale: 2× traffic (160 rps), 85% checkout | Payment gateway (Stripe) | 136% | 100 |
+| Black-Friday: 4× traffic (320 rps), 90% checkout | Payment gateway (Stripe) | 288% | 94 |
 
 ## How these numbers were computed
 
 - Offered load: 80 req/s split across 2 flow(s) by share (checkout 80%, status 20%).
 - Arrival per component = sum over flows of system_rps * flow.share * visit_prob along its path (open Jackson network).
 - Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
-- Bottleneck = highest rho -> Payment gateway (Stripe/Adyen-class) at rho=0.64 (64 / 100 rps).
+- Bottleneck = highest rho -> Payment gateway (Stripe) at rho=0.64 (64 / 100 rps).
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 106 req/s, theoretical@100% ~ 125 req/s.
 - Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('checkout', 80% share) -> mean 395 ms.
 - Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
@@ -213,8 +215,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope. NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — the per-component COMPUTE prices that drive most of this figure carry their own provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding & reconciliation section; some may be RECONCILE (your value kept despite the cited band).
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 - Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — 'checkout' (80% of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a different (often worse) path can differ sharply.
-- Confidence bands omitted for this run: the cited range of the grounded inputs spans values that push the system PAST the model's stable range (saturation), where the M/M/1 estimates are unreliable — so a numeric range would be false precision. Tighten the inputs (e.g. confirm your exact external rate limit) for a meaningful range.
-- Some inputs above are GROUNDED to cited benchmarks matched by component **kind** (not your exact instance type / region / workload), so treat them as directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and kept **your** value — a human should check them. These component-input citations are AI-matched and pass the curation gate; independent citation review remains the standing bar before treating them as calibrated (the per-unit cost **rates** were separately ratified — see *Cost rate evidence*).
+- Some inputs above are GROUNDED to cited benchmarks matched by component **kind**, or to your **declared setup** where a component is tagged (e.g. a specific payment vendor — see the *Measured on* column), so treat them as directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and kept **your** value — a human should check them. These component-input citations are AI-matched and pass the curation gate; independent citation review remains the standing bar before treating them as calibrated (the per-unit cost **rates** were separately ratified — see *Cost rate evidence*).
 
 ## Assumptions (each editable)
 

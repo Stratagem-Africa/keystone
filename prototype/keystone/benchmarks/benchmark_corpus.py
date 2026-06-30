@@ -152,6 +152,13 @@ class CuratedKnowledgeBase:
         # (context-free) datapoint, NOT a tighter vendor/instance-specific one; a query naming a context
         # (e.g. instance_type="stripe") picks the matching specific datapoint. Backward-compatible: with one
         # datapoint per kind+metric (today's corpus) the best tier is trivially that single datapoint.
+        # CURATION INVARIANT (read before adding vendor #2): "generic" here means "fewest SET context dims",
+        # not a separate flag. A no-context query prefers the candidate with the lowest _extra, so a
+        # context-SPECIFIC (e.g. vendor) datapoint MUST carry strictly MORE set context dims than the
+        # generic blend for that kind+metric — else a no-context query could tie on specificity and route to
+        # the vendor's narrower band (or refuse on disjoint bands). E.g. the external_api generic carries 2
+        # dims and stripe carries 3. test_grounding_seam.test_untagged_external_api_still_grounds_generic_blend
+        # pins this; keep that green when curating a second vendor.
         # Count a dim as "named" only if it carries a NON-EMPTY value — matching context_matches(),
         # which ignores a falsy `want`. Otherwise a no-op key like {"region": ""} (how an UNSET dim
         # serialises off a Component) would discount that dim and wrongly collapse the tier, pulling in
