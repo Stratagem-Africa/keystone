@@ -19,7 +19,17 @@ COPY pyproject.toml .
 #   api group: fastapi, uvicorn, pydantic
 #   db group: supabase, python-dotenv
 # --no-cache-dir: don't save the pip download cache (keeps the image smaller)
-RUN pip install --no-cache-dir ".[api,db]"
+# Install runtime dependencies by name — NOT via ".[api,db]".
+# Why not ".[api,db]"? pyproject.toml has no package-discovery config pointing at
+# prototype/, so pip would install an empty shell of keystone alongside the real deps.
+# We run from source (WORKDIR /app/prototype below), so pip only needs the imports —
+# not the package itself. Listing deps explicitly makes that intent honest.
+RUN pip install --no-cache-dir \
+    "fastapi>=0.110" \
+    "uvicorn>=0.29" \
+    "pydantic>=2" \
+    "supabase>=2.31" \
+    "python-dotenv>=1.0"
 
 # Now copy the actual application code.
 # We do this AFTER pip install so code changes don't invalidate the pip cache layer.
@@ -36,6 +46,14 @@ EXPOSE 8000
 # api/ and keystone/ both live under prototype/, so we must be inside it.
 WORKDIR /app/prototype
 
+# Create and switch to a non-root user — Tier-1 hardening requirement.
+# Containers run as root by default. If this process were ever compromised,
+# root inside the container has far more power to cause damage.
+# A dedicated appuser limits what an attacker can do.
+# Must run as root (before USER) to create the user account.
+RUN useradd --create-home appuser
+USER appuser
+
 # The command that runs when the container starts.
 # uvicorn: the web server that runs our FastAPI app
 # api.main:app: "in the file api/main.py, find the variable called app"
@@ -45,3 +63,4 @@ WORKDIR /app/prototype
 # --port 8000: the port to listen on (matches EXPOSE above and fly.toml below)
 # --workers 1: run one worker process. Free tier has 256MB RAM; more workers = more memory.
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+
