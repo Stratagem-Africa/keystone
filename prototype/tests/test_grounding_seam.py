@@ -301,5 +301,57 @@ class TestGroundingSeam(unittest.TestCase):
         self.assertEqual(md, golden, "grounded report drifted — regenerate outputs/url_shortener_report.md")
 
 
+class TestEnrichContextMatching(unittest.TestCase):
+    """PR B: a component's `match_context` selects a context-SPECIFIC datapoint, falling back to the
+    generic (kind-only) band when no specific one exists. An untagged component grounds by kind, as before."""
+
+    def _kb(self, *, with_vendor: bool = True):
+        from keystone.benchmarks.benchmark_corpus import BenchmarkDatapoint
+        from keystone.provenance import Citation
+        cite = (Citation(source="src", reference="https://example.com", note="figure verbatim"),)
+        common = dict(component_kind="external_api", metric="per_instance_rps", unit="rps",
+                      citations=cite, methodology="vendor_datasheet", measured_date="2026-06-15",
+                      source_tier="T2")
+        dps = [BenchmarkDatapoint(value=70, confidence_low=7, confidence_high=140, **common)]  # generic
+        if with_vendor:
+            dps.append(BenchmarkDatapoint(value=100, confidence_low=98, confidence_high=102,
+                                          instance_type="stripe", **common))                   # tight Stripe
+        return CuratedKnowledgeBase(dps)
+
+    def _model(self, match_context: dict):
+        from keystone.model import Component, ComponentKind as K, Flow, FlowStep, SystemModel, Workload
+        comp = Component("gw", K.EXTERNAL_API, "Payment gateway", per_instance_rps=100.0,
+                         monthly_cost_per_instance=0, match_context=match_context)
+        return SystemModel("t", {"gw": comp}, [Flow("f", 1.0, [FlowStep("gw")])], Workload(1000.0))
+
+    def _rps(self, res):
+        return next(x for x in res.groundings if x.metric == "per_instance_rps")
+
+    def test_tagged_component_grounds_vendor_specific_band(self):
+        g = self._rps(enrich(self._model({"instance_type": "stripe"}), self._kb()))
+        self.assertEqual((g.grounding.confidence_low, g.grounding.confidence_high), (98, 102))  # Stripe
+        self.assertEqual(g.query_context, {"instance_type": "stripe"})
+
+    def test_tagged_component_falls_back_to_generic_when_no_vendor_data(self):
+        g = self._rps(enrich(self._model({"instance_type": "stripe"}), self._kb(with_vendor=False)))
+        self.assertEqual((g.grounding.confidence_low, g.grounding.confidence_high), (7, 140))   # generic
+        self.assertEqual(g.query_context, {})                                                  # fell back
+
+    def test_untagged_component_grounds_generic_by_kind(self):
+        g = self._rps(enrich(self._model({}), self._kb()))   # vendor datapoint present but NOT selected
+        self.assertEqual((g.grounding.confidence_low, g.grounding.confidence_high), (7, 140))   # generic
+        self.assertEqual(g.query_context, {})
+
+    def test_unknown_match_context_dim_fails_loud_at_seam(self):
+        # A typo'd context dim must fail CLOSED (loud) at the grounding seam, not silently mis-match.
+        with self.assertRaises(ValueError):
+            enrich(self._model({"datacenter": "iad"}), self._kb())
+
+    def test_match_context_rejects_non_string_value(self):
+        from keystone.model import Component, ComponentKind as K
+        with self.assertRaises(TypeError):
+            Component("x", K.EXTERNAL_API, "X", per_instance_rps=10.0, match_context={"region": 5})
+
+
 if __name__ == "__main__":
     unittest.main()

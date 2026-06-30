@@ -46,6 +46,10 @@ class GroundedInput:
     modeler_value: float
     grounding: Grounding
     in_band: bool
+    # The context that actually MATCHED: {} = generic (component-kind only); non-empty = a context-
+    # SPECIFIC datapoint (e.g. {"instance_type": "stripe"}). Lets a caller/test see whether a tagged
+    # component got vendor-specific evidence or fell back to the generic band.
+    query_context: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -67,10 +71,26 @@ def _override_value(metric: str, grounded: float):
     return grounded
 
 
+def _ground_for(kb: KnowledgeBase, kind, metric: str, context: dict | None):
+    """Ground one metric, preferring a component's full match-context (a context-SPECIFIC datapoint) but
+    FALLING BACK to the generic (kind-only) datapoint when no specific one matches — so a vendor-tagged
+    component still grounds against the generic band rather than losing its evidence. Returns
+    (grounding, matched_context) or (None, None). Two tiers by design (specific → generic): finer
+    partial-dim relaxation waits for a corpus that needs it (YAGNI)."""
+    if context:
+        g = kb.ground(kind, metric, context=context)
+        if g is not None:
+            return g, dict(context)
+    g = kb.ground(kind, metric)   # generic: match by component kind alone
+    return (g, {}) if g is not None else (None, None)
+
+
 def enrich(model: SystemModel, kb: KnowledgeBase, *, override: bool = False) -> EnrichResult:
     """Attach KB evidence to the model's input metrics. Returns the (possibly enriched) model plus the
     list of matched metrics. Default (`override=False`) moves no value — only attaches evidence — so the
-    engine output is unchanged. Context-free (component-kind only) matching in this first slice."""
+    engine output is unchanged. Matching uses a component's optional `match_context` (a context-SPECIFIC
+    datapoint when one exists), falling back to the generic kind-only band; an untagged component grounds
+    by kind exactly as before."""
     found: list[GroundedInput] = []
     new_components: dict[str, Component] = {}
     changed = False
@@ -79,13 +99,14 @@ def enrich(model: SystemModel, kb: KnowledgeBase, *, override: bool = False) -> 
         attach: dict[str, Grounding] = {}
         overrides: dict[str, object] = {}
         for metric in sorted(GROUNDABLE_METRICS):
-            g = kb.ground(comp.kind, metric)   # context=None: match by component kind alone (slice 1)
+            g, matched_ctx = _ground_for(kb, comp.kind, metric, comp.match_context or None)
             if g is None:
                 continue
             modeler_value = float(getattr(comp, metric))
             in_band = g.confidence_low <= modeler_value <= g.confidence_high
             attach[metric] = g
-            found.append(GroundedInput(cid, comp.name, metric, modeler_value, g, in_band))
+            found.append(GroundedInput(cid, comp.name, metric, modeler_value, g, in_band,
+                                       query_context=matched_ctx))
             if override:
                 overrides[metric] = _override_value(metric, g.value)
 
