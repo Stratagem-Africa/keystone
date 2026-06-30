@@ -110,6 +110,38 @@ class TestCuratedMatcher(unittest.TestCase):
         g = kb.ground(ComponentKind.CACHE, "per_instance_rps", context={"workload_shape": "write_heavy"})
         self.assertEqual(g.value, 40_000)
 
+    # --- context-specificity tiering (v2): generic-vs-vendor resolution ---
+    def _vendor_kb(self):
+        return CuratedKnowledgeBase([
+            _dp(component_kind="external_api", value=70, confidence_low=7, confidence_high=140,
+                instance_type="", workload_shape="", region=""),                       # generic cross-vendor blend
+            _dp(component_kind="external_api", value=100, confidence_low=98, confidence_high=102,
+                instance_type="stripe", workload_shape="", region=""),                 # tight Stripe
+            _dp(component_kind="external_api", value=140, confidence_low=130, confidence_high=150,
+                instance_type="adyen", workload_shape="", region=""),                  # tight Adyen
+        ])
+
+    def test_no_context_prefers_generic_not_tightest_vendor(self):
+        # A no-context query must return the GENERIC band — the old 'tightest band wins' would have
+        # mis-picked the tight Stripe datapoint for an unspecified component.
+        g = self._vendor_kb().ground(ComponentKind.EXTERNAL_API, "per_instance_rps")
+        self.assertEqual((g.confidence_low, g.confidence_high), (7, 140))
+
+    def test_context_picks_the_matching_vendor(self):
+        g = self._vendor_kb().ground(ComponentKind.EXTERNAL_API, "per_instance_rps",
+                                     context={"instance_type": "stripe"})
+        self.assertEqual((g.value, g.confidence_low, g.confidence_high), (100, 98, 102))
+
+    def test_vendor_only_disjoint_no_context_still_refuses(self):
+        # No generic datapoint, only disjoint vendor-specific ones, no disambiguating context → refuse.
+        kb = CuratedKnowledgeBase([
+            _dp(component_kind="external_api", value=100, confidence_low=98, confidence_high=102,
+                instance_type="stripe", workload_shape="", region=""),
+            _dp(component_kind="external_api", value=140, confidence_low=130, confidence_high=150,
+                instance_type="adyen", workload_shape="", region=""),
+        ])
+        self.assertIsNone(kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps"))
+
     def test_wrong_kind_and_empty_corpus_return_none(self):
         self.assertIsNone(CuratedKnowledgeBase([_dp()]).ground(ComponentKind.SQL_DB, "per_instance_rps"))
         self.assertIsNone(CuratedKnowledgeBase([]).ground(ComponentKind.CACHE, "per_instance_rps"))
