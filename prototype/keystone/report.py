@@ -343,14 +343,19 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append("")
     for cav in sim.caveats:
         L.append(f"- {cav}")
-    # When the KB grounded some inputs, say so honestly: grounded != calibrated, and the matches are
-    # by component-kind (not your exact stack), so any RECONCILE row needs a human's eye.
+    # When the KB grounded some inputs, say so honestly: grounded != calibrated. Most matches are by
+    # component-kind; a component tagged with its setup (e.g. a vendor) is matched to that CONTEXT, so
+    # the match-basis clause adapts to stay accurate either way. Any RECONCILE row still needs a human's eye.
     if any(c.groundings for c in model.components.values()):
-        L.append("- Some inputs above are GROUNDED to cited benchmarks matched by component **kind** "
-                 "(not your exact instance type / region / workload), so treat them as directional "
-                 "evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and "
-                 "kept **your** value — a human should check them. These component-input citations are "
-                 "AI-matched and pass the curation gate; independent citation review remains the standing "
+        tagged = any(c.match_context and c.groundings for c in model.components.values())
+        match_basis = ("matched by component **kind**, or to your **declared setup** where a component is "
+                       "tagged (e.g. a specific payment vendor — see the *Measured on* column)"
+                       if tagged else
+                       "matched by component **kind** (not your exact instance type / region / workload)")
+        L.append(f"- Some inputs above are GROUNDED to cited benchmarks {match_basis}, so treat them as "
+                 "directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited "
+                 "band and kept **your** value — a human should check them. These component-input citations "
+                 "are AI-matched and pass the curation gate; independent citation review remains the standing "
                  "bar before treating them as calibrated (the per-unit cost **rates** were separately "
                  "ratified — see *Cost rate evidence*).")
     L.append("")
