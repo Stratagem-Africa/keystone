@@ -142,6 +142,17 @@ class TestCuratedMatcher(unittest.TestCase):
         ])
         self.assertIsNone(kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps"))
 
+    def test_empty_valued_context_key_equals_no_context(self):
+        # A dim present with an EMPTY value (how an unset Component dim serialises) constrains nothing —
+        # context_matches() ignores a falsy `want`, so specificity tiering must too. {"region": ""} must
+        # resolve identically to no context (the generic band), NOT collapse the tier onto a vendor band.
+        kb = self._vendor_kb()
+        baseline = kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps")
+        g = kb.ground(ComponentKind.EXTERNAL_API, "per_instance_rps", context={"region": ""})
+        self.assertEqual((g.value, g.confidence_low, g.confidence_high),
+                         (baseline.value, baseline.confidence_low, baseline.confidence_high))
+        self.assertEqual((g.confidence_low, g.confidence_high), (7, 140))   # generic, not a vendor band
+
     def test_wrong_kind_and_empty_corpus_return_none(self):
         self.assertIsNone(CuratedKnowledgeBase([_dp()]).ground(ComponentKind.SQL_DB, "per_instance_rps"))
         self.assertIsNone(CuratedKnowledgeBase([]).ground(ComponentKind.CACHE, "per_instance_rps"))

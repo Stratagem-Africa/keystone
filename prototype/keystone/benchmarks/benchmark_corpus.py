@@ -152,7 +152,11 @@ class CuratedKnowledgeBase:
         # (context-free) datapoint, NOT a tighter vendor/instance-specific one; a query naming a context
         # (e.g. instance_type="stripe") picks the matching specific datapoint. Backward-compatible: with one
         # datapoint per kind+metric (today's corpus) the best tier is trivially that single datapoint.
-        named = set(context or {})
+        # Count a dim as "named" only if it carries a NON-EMPTY value — matching context_matches(),
+        # which ignores a falsy `want`. Otherwise a no-op key like {"region": ""} (how an UNSET dim
+        # serialises off a Component) would discount that dim and wrongly collapse the tier, pulling in
+        # a tighter specific band a context-free query never asked for.
+        named = {dim for dim, want in (context or {}).items() if want}
         def _extra(d):
             return sum(1 for dim in CONTEXT_DIMS if getattr(d, dim) and dim not in named)
         best_specificity = min(_extra(d) for d in cands)
