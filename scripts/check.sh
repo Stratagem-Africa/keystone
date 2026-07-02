@@ -10,6 +10,15 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root/prototype" || { echo "error: cannot find prototype/"; exit 2; }
 
+# Hermetic gate: the suite asserts the STUB/offline defaults, so a desktop shell that
+# exports live-provider config (e.g. COUNCIL_PROVIDER=consensus after LLM activation)
+# must not leak into the run — it once turned this gate red with 16 env-driven failures.
+# The gate's contract is "$0, no API key, deterministic"; sanitize to keep it true.
+unset COUNCIL_PROVIDER COUNCIL_MODEL CONSENSUS_PRIMARY CONSENSUS_VOTERS \
+      INGEST_PROVIDER KB_PROVIDER OLLAMA_BASE_URL \
+      ANTHROPIC_API_KEY OPENROUTER_API_KEY OPENAI_API_KEY \
+      SUPABASE_URL SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY
+
 status=0
 
 echo "==> Test suite  (python3 -m unittest discover -s tests)"
