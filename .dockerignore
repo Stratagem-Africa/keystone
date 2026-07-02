@@ -1,0 +1,8 @@
+**/__pycache__/
+prototype/outputs/*.local.md
+.env
+.env.*
+.git
+**/node_modules/
+frontend/
+

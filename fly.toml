@@ -1,0 +1,43 @@
+# The name of your app on Fly.io. This becomes part of the default URL:
+# https://keystone-api.fly.dev
+# Must be globally unique across all Fly apps — change it if the name is taken.
+app = "keystone-api"
+
+# The Fly region closest to your users where the app runs first.
+# "iad" = Ashburn / Washington DC — Fly's default and most available free-tier region.
+primary_region = "iad"
+
+# [build] tells Fly to use our Dockerfile (no extra config needed — Fly finds it automatically).
+[build]
+
+# [http_service] wires Fly's load balancer to our app.
+[http_service]
+  # The port our app listens on inside the container (must match CMD in Dockerfile).
+  internal_port = 8000
+
+  # Always redirect HTTP → HTTPS. Never serve plain HTTP in production.
+  force_https = true
+
+  # Free-tier power-saving: Fly spins the machine DOWN when no requests come in,
+  # and back UP on the next request (takes ~2s). Keeps us inside the free allowance.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+
+  # Minimum machines always running. 0 = fully sleep when idle (free tier default).
+  min_machines_running = 0
+
+  # Health check: Fly calls GET /health every 15 seconds.
+  # If it fails 3 times, Fly restarts the machine. /health returns {"status": "ok"}
+  # so a 200 response means the app is up and healthy.
+  [[http_service.checks]]
+    method    = "GET"
+    path      = "/health"
+    interval  = "15s"
+    timeout   = "5s"
+    grace_period = "10s"  # wait 10s after start before checking (app needs time to boot)
+
+# [[vm]] sets the machine size. shared-cpu-1x + 256mb is the free tier.
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "256mb"
