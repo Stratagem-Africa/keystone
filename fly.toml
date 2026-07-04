@@ -1,6 +1,13 @@
 # The name of your app on Fly.io. This becomes part of the default URL:
 # https://keystone-api.fly.dev
 # Must be globally unique across all Fly apps — change it if the name is taken.
+# OPERATIONAL RULE — do NOT run `fly secrets set` for any of the following until
+# auth + tenant isolation land (issue #21: canonical model store + row-level security):
+#   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+#   ANTHROPIC_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY
+# The /intent endpoint is unauthenticated — real keys on an open endpoint means
+# anyone on the internet runs jobs on your paid accounts (money harm + tenant violation).
+
 app = "keystone-api"
 
 # The Fly region closest to your users where the app runs first.
@@ -19,7 +26,9 @@ primary_region = "iad"
   force_https = true
 
   # Free-tier power-saving: Fly spins the machine DOWN when no requests come in,
-  # and back UP on the next request (takes ~2s). Keeps us inside the free allowance.
+  # and back UP on the next request (~2s cold start). Keeps us inside the free allowance.
+  # STATE LOSS WARNING: the in-memory job store (_store in api/jobs.py) is wiped on
+  # idle-stop — any queued/in-progress/done jobs are gone; polls return 404.
   auto_stop_machines = "stop"
   auto_start_machines = true
 
