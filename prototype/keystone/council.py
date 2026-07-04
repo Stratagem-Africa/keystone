@@ -183,8 +183,8 @@ def make_council(provider: str | None = None, model: str | None = None,
     from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
     if provider not in known_providers():
         raise ValueError(
-            f"Unknown COUNCIL_PROVIDER={provider!r}. Use one of: "
-            "stub | consensus | claude | openai | openrouter | gemini | groq | ollama."
+            f"Unknown COUNCIL_PROVIDER={provider!r}. Use one of: stub | consensus | claude | "
+            "openai | openrouter | gemini | groq | cerebras | xai | github | ollama."
         )
     council_model = model or os.getenv("COUNCIL_MODEL")
     if not council_model:
