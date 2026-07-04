@@ -98,16 +98,21 @@ class OpenAICompatibleLLM:
 
 
 # Provider registry for the OpenAI-compatible transport: name -> (base_url | None, api_key_env | None).
-# Ollama's base comes from OLLAMA_BASE_URL (local, no key); the rest are hosted + keyed. Every base
-# URL below is verified against the provider's own OpenAI-compatibility docs (the transport appends
-# `/chat/completions`): OpenAI, OpenRouter, Google Gemini (AI Studio — generous FREE tier, no card),
-# and Groq (FREE tier). All speak the same wire API, so a free-tier key on any of them drives the
-# real council at $0 (ADR-010 vendor-neutrality; the prime-directive guard runs on every vendor).
+# Ollama's base comes from OLLAMA_BASE_URL (local, no key); the rest are hosted + keyed. Every base URL
+# below is verified against the provider's own OpenAI-compatibility docs (the transport appends
+# `/chat/completions`). Providers with a genuine FREE tier — Gemini (AI Studio, no card), Groq,
+# Cerebras, GitHub Models (free with a GitHub PAT), xAI (Grok, console credits) — let a free key drive
+# the real council at $0 (ADR-010 vendor-neutrality; the prime-directive guard runs on every vendor).
+# Note: GitHub Models uses a GitHub PAT (scope `models:read`) as the bearer token; model ids are
+# `publisher/model` (e.g. openai/gpt-4.1). xAI models are grok-3 / grok-2 etc.
 _OPENAI_COMPATIBLE = {
     "openai":     ("https://api.openai.com/v1",   "OPENAI_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"),
     "groq":       ("https://api.groq.com/openai/v1", "GROQ_API_KEY"),
+    "cerebras":   ("https://api.cerebras.ai/v1",  "CEREBRAS_API_KEY"),
+    "xai":        ("https://api.x.ai/v1",         "XAI_API_KEY"),
+    "github":     ("https://models.github.ai/inference", "GITHUB_MODELS_TOKEN"),
     "ollama":     (None,                           None),
 }
 
@@ -120,8 +125,9 @@ def known_providers() -> frozenset:
 
 def make_llm(provider: str, model: str) -> LLM:
     """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
-    `claude`/`anthropic` → `AnthropicLLM` (SDK); `openai`/`openrouter`/`gemini`/`groq`/`ollama` →
-    `OpenAICompatibleLLM` (stdlib HTTP). Used by the council factory + the multi-model consensus layer."""
+    `claude`/`anthropic` → `AnthropicLLM` (SDK); every other registered provider (openai | openrouter |
+    gemini | groq | cerebras | xai | github | ollama) → `OpenAICompatibleLLM` (stdlib HTTP). Used by the
+    council factory + the multi-model consensus layer."""
     p = provider.strip().lower()
     if p in ("claude", "anthropic"):
         return AnthropicLLM(model)
@@ -133,5 +139,5 @@ def make_llm(provider: str, model: str) -> LLM:
     if p in _OPENAI_COMPATIBLE:
         base, key_env = _OPENAI_COMPATIBLE[p]
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env)
-    raise LLMError(f"unknown LLM provider {provider!r} "
-                   "(expected: claude | openai | openrouter | gemini | groq | ollama)")
+    raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | "
+                   "gemini | groq | cerebras | xai | github | ollama)")

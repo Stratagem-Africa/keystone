@@ -92,7 +92,7 @@ class TestFactory(unittest.TestCase):
         # ANY provider drives the REAL council when a client is injected (ADR-010 vendor-neutrality):
         # gemini/groq/openrouter/ollama all run the same 3-stage council, tagged non-stub, guard intact.
         model = url_shortener.build()
-        for prov in ("gemini", "groq", "openrouter", "ollama"):
+        for prov in ("gemini", "groq", "cerebras", "xai", "github", "openrouter", "ollama"):
             fake = FakeLLM()
             council = make_council(prov, model="some-model", client=fake)
             self.assertIsInstance(council, ClaudeCouncil)

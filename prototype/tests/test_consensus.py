@@ -141,14 +141,23 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
                 make_llm("openai", "gpt-5-mini")
 
     def test_make_llm_free_tier_providers_registered(self):
-        # Gemini + Groq (generous FREE tiers) are OpenAI-compatible transports (ADR-010): with a key
-        # they build; without one they fail closed. This is how a $0 free-tier key drives the council.
-        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "x", "GROQ_API_KEY": "x"}, clear=False):
-            self.assertIsInstance(make_llm("gemini", "gemini-2.0-flash"), OpenAICompatibleLLM)
-            self.assertIsInstance(make_llm("groq", "llama-3.3-70b-versatile"), OpenAICompatibleLLM)
+        # Free-tier providers are OpenAI-compatible transports (ADR-010): with a key they build; without
+        # one they fail closed. This is how a $0 free-tier key drives the real council on any vendor.
+        keyed = {
+            "gemini": ("GEMINI_API_KEY", "gemini-2.0-flash"),
+            "groq": ("GROQ_API_KEY", "llama-3.3-70b-versatile"),
+            "cerebras": ("CEREBRAS_API_KEY", "llama-3.3-70b"),
+            "xai": ("XAI_API_KEY", "grok-3"),
+            "github": ("GITHUB_MODELS_TOKEN", "openai/gpt-4.1"),
+        }
+        env = {key_env: "x" for key_env, _ in keyed.values()}
+        with mock.patch.dict("os.environ", env, clear=False):
+            for prov, (_, model) in keyed.items():
+                self.assertIsInstance(make_llm(prov, model), OpenAICompatibleLLM, f"{prov} should build")
         with mock.patch.dict("os.environ", {}, clear=True):                        # no key → fail closed
-            with self.assertRaises(LLMError):
-                make_llm("gemini", "gemini-2.0-flash")
+            for prov, (_, model) in keyed.items():
+                with self.assertRaises(LLMError, msg=f"{prov} must fail closed with no key"):
+                    make_llm(prov, model)
 
 
 if __name__ == "__main__":
