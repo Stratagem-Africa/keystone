@@ -135,7 +135,11 @@ def make_llm(provider: str, model: str) -> LLM:
         base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         if not base.endswith("/v1"):
             base += "/v1"
-        return OpenAICompatibleLLM(model, base_url=base, api_key_env=None)
+        # Local inference (CPU/Metal) is far slower than a hosted API — one big generation (e.g. the
+        # peer-review stage over 7 proposals) can exceed the 120s default and time out mid-council.
+        # Give Ollama a longer, env-tunable timeout so a full local run completes.
+        return OpenAICompatibleLLM(model, base_url=base, api_key_env=None,
+                                   timeout=int(os.getenv("OLLAMA_TIMEOUT", "600")))
     if p in _OPENAI_COMPATIBLE:
         base, key_env = _OPENAI_COMPATIBLE[p]
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env)

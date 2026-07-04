@@ -159,6 +159,14 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
                 with self.assertRaises(LLMError, msg=f"{prov} must fail closed with no key"):
                     make_llm(prov, model)
 
+    def test_ollama_uses_a_longer_env_tunable_timeout(self):
+        # Local inference (CPU/Metal) is slow — a big generation can exceed the 120s cloud default and
+        # time out mid-council. Ollama must default to a longer timeout, overridable via OLLAMA_TIMEOUT.
+        with mock.patch.dict("os.environ", {}, clear=True):                        # no OLLAMA_TIMEOUT
+            self.assertEqual(make_llm("ollama", "qwen2.5:7b")._timeout, 600)
+        with mock.patch.dict("os.environ", {"OLLAMA_TIMEOUT": "900"}, clear=False):
+            self.assertEqual(make_llm("ollama", "qwen2.5:7b")._timeout, 900)
+
 
 if __name__ == "__main__":
     unittest.main()
