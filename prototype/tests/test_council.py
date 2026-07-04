@@ -22,7 +22,7 @@ from keystone.council import (
 )
 from keystone.claude_council import (
     ClaudeCouncil, CouncilError, _REDACTION, _as_list, _extract_json,
-    _redact_engine_metrics,
+    _redact_engine_metrics, _clip, _bounded_block, _BLOCK_BUDGET, _FIELD_CLIP,
 )
 from keystone.report import render
 from keystone.simulation import simulate
@@ -510,6 +510,53 @@ class TestReportBannerHonesty(unittest.TestCase):
     def test_banner_makes_no_absolute_guarantee(self):
         md = render(self.model, DeterministicStubCouncil().design(self.model), self.sim)
         self.assertNotIn("produced by the deterministic engine, not the LLM", md)
+
+
+class _VerboseRecordingLLM:
+    """A FakeLLM whose personas ramble (long free-text fields), and which records each stage's user
+    prompt — so a test can assert the chairman/review prompts stay bounded regardless of verbosity."""
+
+    def __init__(self) -> None:
+        self.prompts: dict[str, str] = {}
+
+    def complete(self, *, label, system, user, max_tokens):
+        self.prompts[label] = user
+        if label.startswith("design:"):
+            return json.dumps([{"area": "Datastore", "position": "P" * 1000,
+                                "rationale": "R" * 1000, "risk": "K" * 1000}])
+        if label.startswith("review:"):
+            return json.dumps([{"target": "P1", "concern": "C" * 1000, "severity": "high"}])
+        if label == "chairman":
+            return _CLEAN_CHAIRMAN
+        raise AssertionError(f"unexpected label: {label}")
+
+
+class TestChairmanPromptBounding(unittest.TestCase):
+    """Option B: the aggregated synthesis prompts must fit a constrained provider's input cap
+    (e.g. GitHub Models ~8k → HTTP 413). Bound fields + blocks; note omissions, never silently drop."""
+
+    def test_clip_truncates_and_collapses_whitespace(self):
+        self.assertEqual(_clip("short"), "short")
+        self.assertEqual(_clip("a\n  b   c"), "a b c")             # whitespace collapsed
+        out = _clip("x" * 500)
+        self.assertEqual(len(out), _FIELD_CLIP)                    # capped
+        self.assertTrue(out.endswith("…"))
+
+    def test_bounded_block_caps_and_notes_omissions(self):
+        lines = [f"line-{i} " + "z" * 500 for i in range(50)]      # ~25k chars of lines
+        block = _bounded_block(lines)
+        self.assertLessEqual(len(block), _BLOCK_BUDGET + 200)      # within budget (+ the note line)
+        self.assertIn("more omitted to fit the model input budget", block)  # omission is DISCLOSED
+        self.assertIn("line-0", block)                            # earliest kept
+
+    def test_chairman_prompt_stays_bounded_with_verbose_personas(self):
+        # 7 personas each emitting ~3k chars of proposal + a ~1k review would make an UNBOUNDED
+        # chairman prompt ~28k chars (→ 413 on GitHub Models). Bounding must keep it well under that.
+        rec = _VerboseRecordingLLM()
+        make_council("claude", model="m", client=rec).design(url_shortener.build())
+        chair = rec.prompts["chairman"]
+        self.assertLess(len(chair), 16_000, "chairman prompt must stay bounded for constrained providers")
+        self.assertNotIn("P" * 400, chair)                        # the 1000-char field was clipped
 
 
 if __name__ == "__main__":
