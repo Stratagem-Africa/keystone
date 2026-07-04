@@ -24,7 +24,6 @@ from keystone.claude_council import (
     ClaudeCouncil, CouncilError, _REDACTION, _as_list, _extract_json,
     _redact_engine_metrics,
 )
-from keystone.llm import LLMError
 from keystone.report import render
 from keystone.simulation import simulate
 
@@ -70,9 +69,13 @@ class TestFactory(unittest.TestCase):
             self.assertIsInstance(make_council(), DeterministicStubCouncil)
 
     def test_unknown_provider_raises(self):
-        # A genuinely unknown provider fails loudly (LLMError from the transport factory).
-        with self.assertRaises(LLMError):
+        # An unknown/blank provider fails loudly with a clear ValueError — validated BEFORE the model
+        # check, so it's the same error with or without a model (preserves main's diagnostic).
+        with self.assertRaises(ValueError):
             make_council("bogus", model="m")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ValueError):
+                make_council("bogus")           # no model → still "unknown provider", not "needs a model"
 
     def test_non_claude_provider_needs_an_explicit_model(self):
         # openrouter/gemini/groq/ollama are valid primaries now, but require COUNCIL_MODEL

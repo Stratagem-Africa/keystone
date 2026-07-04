@@ -112,6 +112,12 @@ _OPENAI_COMPATIBLE = {
 }
 
 
+def known_providers() -> frozenset:
+    """Every provider name `make_llm` accepts — one source of truth so callers (e.g. the council
+    factory) can validate a provider up front and give a clear 'unknown provider' error."""
+    return frozenset({"claude", "anthropic"} | set(_OPENAI_COMPATIBLE))
+
+
 def make_llm(provider: str, model: str) -> LLM:
     """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
     `claude`/`anthropic` → `AnthropicLLM` (SDK); `openai`/`openrouter`/`gemini`/`groq`/`ollama` →

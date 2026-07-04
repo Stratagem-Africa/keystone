@@ -178,12 +178,19 @@ def make_council(provider: str | None = None, model: str | None = None,
     if provider in ("claude", "anthropic"):
         return ClaudeCouncil(model=model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL),
                              client=client)
+    # Validate the provider NAME before anything else, so a blank/typo'd provider gives one clear
+    # error (not a misleading "needs a model") — preserving main's diagnostic on the fail-closed path.
+    from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
+    if provider not in known_providers():
+        raise ValueError(
+            f"Unknown COUNCIL_PROVIDER={provider!r}. Use one of: "
+            "stub | consensus | claude | openai | openrouter | gemini | groq | ollama."
+        )
     council_model = model or os.getenv("COUNCIL_MODEL")
     if not council_model:
         raise ValueError(
             f"COUNCIL_PROVIDER={provider!r} needs an explicit model — set COUNCIL_MODEL "
             "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
         )
-    from keystone.llm import make_llm  # lazy: transport built only for a live provider
     return ClaudeCouncil(model=council_model,
                          client=client if client is not None else make_llm(provider, council_model))
