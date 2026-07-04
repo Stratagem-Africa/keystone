@@ -144,31 +144,46 @@ def make_council(provider: str | None = None, model: str | None = None,
     """Build the configured council.
 
     Defaults to the deterministic stub so the whole loop runs with no API key and
-    at $0 (CLAUDE.md cost rule). Reads COUNCIL_PROVIDER (stub | claude) and
-    COUNCIL_MODEL from the environment when not passed explicitly. The Claude
+    at $0 (CLAUDE.md cost rule). Reads COUNCIL_PROVIDER and COUNCIL_MODEL from the
+    environment when not passed explicitly. The real council is PROVIDER-AGNOSTIC
+    (ADR-010): COUNCIL_PROVIDER may be `stub`, `consensus`, or any single LLM
+    provider — `claude`/`anthropic` (SDK) or `openai | openrouter | gemini | groq |
+    ollama` (OpenAI-compatible transport). It reasons through the shared `LLM` seam
+    and the prime-directive guard scrubs its output regardless of vendor, so a
+    free-tier Gemini/Groq key or a local Ollama drives the real council at $0. Every
     provider is imported lazily, so the zero-dependency engine never pulls in the
-    Anthropic SDK just by importing this module.
+    Anthropic SDK (or any transport) just by importing this module.
 
-    `client` lets a caller (or a test) inject an LLM transport for the claude
-    provider — the path used for $0 offline testing.
+    `client` lets a caller (or a test) inject an LLM transport for ANY non-stub
+    provider — the path used for $0 offline testing (no network, no key).
     """
     provider = (provider or os.getenv("COUNCIL_PROVIDER", "stub")).strip().lower()
     if provider == "stub":
         return DeterministicStubCouncil()
-    if provider == "claude":
-        from keystone.claude_council import ClaudeCouncil  # lazy: optional dep
-        return ClaudeCouncil(
-            model=model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL),
-            client=client,
-        )
     if provider == "consensus":
         # Multi-model consensus (ADR-010): a PRIMARY council (CONSENSUS_PRIMARY, default claude) wrapped
-        # with independent voter models (CONSENSUS_VOTERS). Lazy import; stays $0 until env-configured.
+        # with independent voter models (CONSENSUS_VOTERS). The primary spec is `provider:model`, so the
+        # primary can now be ANY provider (e.g. gemini:gemini-2.0-flash). Lazy; stays $0 until configured.
         from keystone.consensus import make_consensus_council  # lazy
         prim_provider, _, prim_model = os.getenv("CONSENSUS_PRIMARY", "claude").partition(":")
         primary = make_council(prim_provider.strip() or "claude", prim_model.strip() or None, client=client)
         return make_consensus_council(primary=primary)
-    raise ValueError(
-        f"Unknown COUNCIL_PROVIDER={provider!r}. Use 'stub', 'claude', or 'consensus'. "
-        "(Voter/primary models can be openai | openrouter | ollama via the consensus env config.)"
-    )
+
+    # Any single LLM provider drives the REAL council — it is provider-agnostic (ADR-010): the council
+    # REASONS through the `LLM` seam and the prime-directive guard scrubs its output regardless of vendor.
+    # `claude`/`anthropic` keep the SDK default + the default model; every other provider is built via
+    # `make_llm` and REQUIRES an explicit COUNCIL_MODEL (no sensible cross-vendor default). A free-tier
+    # Gemini/Groq key or a local Ollama therefore runs the real council at $0.
+    from keystone.claude_council import ClaudeCouncil  # lazy: optional dep
+    if provider in ("claude", "anthropic"):
+        return ClaudeCouncil(model=model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL),
+                             client=client)
+    council_model = model or os.getenv("COUNCIL_MODEL")
+    if not council_model:
+        raise ValueError(
+            f"COUNCIL_PROVIDER={provider!r} needs an explicit model — set COUNCIL_MODEL "
+            "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
+        )
+    from keystone.llm import make_llm  # lazy: transport built only for a live provider
+    return ClaudeCouncil(model=council_model,
+                         client=client if client is not None else make_llm(provider, council_model))
