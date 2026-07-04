@@ -140,6 +140,16 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
             with self.assertRaises(LLMError):                                       # hosted provider needs a key
                 make_llm("openai", "gpt-5-mini")
 
+    def test_make_llm_free_tier_providers_registered(self):
+        # Gemini + Groq (generous FREE tiers) are OpenAI-compatible transports (ADR-010): with a key
+        # they build; without one they fail closed. This is how a $0 free-tier key drives the council.
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "x", "GROQ_API_KEY": "x"}, clear=False):
+            self.assertIsInstance(make_llm("gemini", "gemini-2.0-flash"), OpenAICompatibleLLM)
+            self.assertIsInstance(make_llm("groq", "llama-3.3-70b-versatile"), OpenAICompatibleLLM)
+        with mock.patch.dict("os.environ", {}, clear=True):                        # no key → fail closed
+            with self.assertRaises(LLMError):
+                make_llm("gemini", "gemini-2.0-flash")
+
 
 if __name__ == "__main__":
     unittest.main()

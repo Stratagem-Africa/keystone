@@ -98,18 +98,30 @@ class OpenAICompatibleLLM:
 
 
 # Provider registry for the OpenAI-compatible transport: name -> (base_url | None, api_key_env | None).
-# Ollama's base comes from OLLAMA_BASE_URL (local, no key); the rest are hosted + keyed.
+# Ollama's base comes from OLLAMA_BASE_URL (local, no key); the rest are hosted + keyed. Every base
+# URL below is verified against the provider's own OpenAI-compatibility docs (the transport appends
+# `/chat/completions`): OpenAI, OpenRouter, Google Gemini (AI Studio — generous FREE tier, no card),
+# and Groq (FREE tier). All speak the same wire API, so a free-tier key on any of them drives the
+# real council at $0 (ADR-010 vendor-neutrality; the prime-directive guard runs on every vendor).
 _OPENAI_COMPATIBLE = {
     "openai":     ("https://api.openai.com/v1",   "OPENAI_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"),
+    "groq":       ("https://api.groq.com/openai/v1", "GROQ_API_KEY"),
     "ollama":     (None,                           None),
 }
 
 
+def known_providers() -> frozenset:
+    """Every provider name `make_llm` accepts — one source of truth so callers (e.g. the council
+    factory) can validate a provider up front and give a clear 'unknown provider' error."""
+    return frozenset({"claude", "anthropic"} | set(_OPENAI_COMPATIBLE))
+
+
 def make_llm(provider: str, model: str) -> LLM:
     """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
-    `claude`/`anthropic` → `AnthropicLLM` (SDK); `openai`/`openrouter`/`ollama` → `OpenAICompatibleLLM`
-    (stdlib HTTP). Used by the council factory + the multi-model consensus layer."""
+    `claude`/`anthropic` → `AnthropicLLM` (SDK); `openai`/`openrouter`/`gemini`/`groq`/`ollama` →
+    `OpenAICompatibleLLM` (stdlib HTTP). Used by the council factory + the multi-model consensus layer."""
     p = provider.strip().lower()
     if p in ("claude", "anthropic"):
         return AnthropicLLM(model)
@@ -121,4 +133,5 @@ def make_llm(provider: str, model: str) -> LLM:
     if p in _OPENAI_COMPATIBLE:
         base, key_env = _OPENAI_COMPATIBLE[p]
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env)
-    raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | ollama)")
+    raise LLMError(f"unknown LLM provider {provider!r} "
+                   "(expected: claude | openai | openrouter | gemini | groq | ollama)")

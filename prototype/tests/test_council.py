@@ -69,12 +69,36 @@ class TestFactory(unittest.TestCase):
             self.assertIsInstance(make_council(), DeterministicStubCouncil)
 
     def test_unknown_provider_raises(self):
+        # An unknown/blank provider fails loudly with a clear ValueError — validated BEFORE the model
+        # check, so it's the same error with or without a model (preserves main's diagnostic).
         with self.assertRaises(ValueError):
-            make_council("openrouter")
+            make_council("bogus", model="m")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ValueError):
+                make_council("bogus")           # no model → still "unknown provider", not "needs a model"
+
+    def test_non_claude_provider_needs_an_explicit_model(self):
+        # openrouter/gemini/groq/ollama are valid primaries now, but require COUNCIL_MODEL
+        # (no sensible cross-vendor default). Cleared env → no COUNCIL_MODEL → ValueError.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ValueError):
+                make_council("gemini")
 
     def test_claude_provider_with_injected_client(self):
         council = make_council("claude", model="test-model", client=FakeLLM())
         self.assertIsInstance(council, ClaudeCouncil)
+
+    def test_provider_agnostic_primary_with_injected_client(self):
+        # ANY provider drives the REAL council when a client is injected (ADR-010 vendor-neutrality):
+        # gemini/groq/openrouter/ollama all run the same 3-stage council, tagged non-stub, guard intact.
+        model = url_shortener.build()
+        for prov in ("gemini", "groq", "openrouter", "ollama"):
+            fake = FakeLLM()
+            council = make_council(prov, model="some-model", client=fake)
+            self.assertIsInstance(council, ClaudeCouncil)
+            adrs = council.design(model)
+            self.assertTrue(adrs, f"{prov}: no ADRs")
+            self.assertTrue(all(a.source != "stub" for a in adrs), f"{prov}: real council must not tag stub")
 
 
 class TestClaudeCouncilOrchestration(unittest.TestCase):
