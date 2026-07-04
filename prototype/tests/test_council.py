@@ -22,7 +22,7 @@ from keystone.council import (
 )
 from keystone.claude_council import (
     ClaudeCouncil, CouncilError, _REDACTION, _as_list, _extract_json,
-    _redact_engine_metrics,
+    _redact_engine_metrics, _clip, _bounded_block, _interleave_by, _BLOCK_BUDGET, _FIELD_CLIP,
 )
 from keystone.report import render
 from keystone.simulation import simulate
@@ -510,6 +510,75 @@ class TestReportBannerHonesty(unittest.TestCase):
     def test_banner_makes_no_absolute_guarantee(self):
         md = render(self.model, DeterministicStubCouncil().design(self.model), self.sim)
         self.assertNotIn("produced by the deterministic engine, not the LLM", md)
+
+
+class _VerboseRecordingLLM:
+    """A FakeLLM whose personas ramble (long free-text fields), and which records each stage's user
+    prompt — so a test can assert the chairman/review prompts stay bounded regardless of verbosity."""
+
+    def __init__(self) -> None:
+        self.prompts: dict[str, str] = {}
+
+    def complete(self, *, label, system, user, max_tokens):
+        self.prompts[label] = user
+        if label.startswith("design:"):
+            # TWO verbose proposals per persona → 14 total → the chairman block overflows its budget,
+            # so the trim is actually exercised (and fairness across personas can be asserted).
+            return json.dumps([
+                {"area": "Datastore", "position": "P" * 700, "rationale": "R" * 700, "risk": "K" * 700},
+                {"area": "Caching", "position": "Q" * 700, "rationale": "S" * 700, "risk": "T" * 700},
+            ])
+        if label.startswith("review:"):
+            return json.dumps([{"target": "P1", "concern": "C" * 700, "severity": "high"}])
+        if label == "chairman":
+            return _CLEAN_CHAIRMAN
+        raise AssertionError(f"unexpected label: {label}")
+
+
+class TestChairmanPromptBounding(unittest.TestCase):
+    """Option B: the aggregated synthesis prompts must fit a constrained provider's input cap
+    (e.g. GitHub Models ~8k → HTTP 413). Bound fields + blocks; note omissions, never silently drop."""
+
+    def test_clip_truncates_and_collapses_whitespace(self):
+        self.assertEqual(_clip("short"), "short")
+        self.assertEqual(_clip("a\n  b   c"), "a b c")             # whitespace collapsed
+        out = _clip("x" * 500)
+        self.assertEqual(len(out), _FIELD_CLIP)                    # capped
+        self.assertTrue(out.endswith("…"))
+
+    def test_bounded_block_caps_and_notes_omissions(self):
+        lines = [f"line-{i} " + "z" * 500 for i in range(50)]      # ~25k chars of lines
+        block = _bounded_block(lines)
+        self.assertLessEqual(len(block), _BLOCK_BUDGET + 200)      # within budget (+ the note line)
+        self.assertIn("more omitted to fit the model input budget", block)  # omission is DISCLOSED
+        self.assertIn("line-0", block)                            # earliest kept
+
+    def test_bounded_block_no_false_omission_note_when_it_fits(self):
+        # Accounting must be exact: content that fits gets NO omission note (off-by-one guard).
+        lines = ["a" * 100 for _ in range(10)]                    # 10*100 + 9 newlines = 1009 << budget
+        block = _bounded_block(lines)
+        self.assertNotIn("omitted", block)
+        self.assertEqual(block.count("\n") + 1, 10)               # all 10 lines present
+
+    def test_interleave_by_round_robins_sources_so_firsts_come_first(self):
+        items = [("a", 1), ("a", 2), ("a", 3), ("b", 1), ("c", 1), ("c", 2)]
+        out = _interleave_by(items, lambda t: t[0])
+        # round 0 = one per source (a,b,c) before any source's second item
+        self.assertEqual(out[:3], [("a", 1), ("b", 1), ("c", 1)])
+        self.assertEqual(set(out), set(items))                    # nothing lost, only reordered
+
+    def test_chairman_prompt_bounded_AND_every_persona_survives_the_trim(self):
+        # 14 verbose proposals overflow the block budget, so the trim runs. Interleaving must keep one
+        # proposal per persona — so even the LAST personas (the minority YAGNI/AI voices) survive, and
+        # dissent is never silently erased by position-biased dropping (the review should-fix).
+        rec = _VerboseRecordingLLM()
+        make_council("claude", model="m", client=rec).design(url_shortener.build())
+        chair = rec.prompts["chairman"]
+        self.assertLess(len(chair), 16_000, "chairman prompt must stay bounded for constrained providers")
+        self.assertIn("omitted to fit", chair, "the trim must actually be exercised by this fixture")
+        self.assertNotIn("P" * 400, chair)                        # the 700-char field was clipped
+        for persona in ("YAGNI skeptic", "AI-infusion specialist", "Backend / application architect"):
+            self.assertIn(persona, chair, f"{persona} must survive the budget trim (fair representation)")
 
 
 if __name__ == "__main__":

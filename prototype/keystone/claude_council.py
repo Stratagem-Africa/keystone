@@ -304,6 +304,57 @@ def _extract_json(text: str, *, expect: str) -> object:
     raise CouncilError(f"expected a JSON {expect} in council reply; got:\n{text[:400]}")
 
 
+# The peer-review and chairman prompts AGGREGATE every persona's output, so their size grows with
+# persona count and verbosity — a verbose model (or many proposals) can exceed a provider's input-token
+# cap (e.g. GitHub Models' free tier ~8k → HTTP 413 Payload Too Large). Bound each free-text field and
+# cap each aggregated block to a char budget so the synthesis prompt fits any reasonable provider. This
+# is qualitative context only (no numbers), so clipping never touches the prime directive or the
+# engine's metrics; omissions are NOTED, never silent (Doc 03 honesty).
+_FIELD_CLIP = 200          # max chars per free-text field (position/rationale/risk/concern)
+_BLOCK_BUDGET = 6000       # max chars per aggregated block (proposals / reviews)
+
+
+def _clip(text: object, limit: int = _FIELD_CLIP) -> str:
+    """Collapse whitespace and truncate a free-text field to `limit` chars ('…' if cut)."""
+    s = " ".join(str(text).split())
+    return s if len(s) <= limit else s[:limit - 1].rstrip() + "…"
+
+
+def _interleave_by(items: list, key) -> list:
+    """Round-robin `items` grouped by `key(item)`, so the FIRST item of every group precedes any
+    group's second. Feeding this to `_bounded_block` guarantees every source (persona) is represented
+    before any source contributes a second item — so a budget cut drops EXTRA items, never a whole
+    viewpoint. This protects the honesty rule ('preserve minority views as named dissent') when the
+    aggregated prompt must be trimmed to fit a provider: the YAGNI/AI-infusion minority voices (last in
+    PERSONAS order) survive a trim instead of being the first dropped."""
+    groups: dict = {}
+    for it in items:
+        groups.setdefault(key(it), []).append(it)
+    out, rnd = [], 0
+    while True:
+        row = [g[rnd] for g in groups.values() if rnd < len(g)]
+        if not row:
+            return out
+        out.extend(row)
+        rnd += 1
+
+
+def _bounded_block(lines: list[str], budget: int = _BLOCK_BUDGET) -> str:
+    """Join lines under a char budget; on overflow keep the earliest and NOTE how many were dropped
+    (never silently — honesty). Pair with `_interleave_by` so 'earliest' means 'one per source first',
+    not 'the first few sources'. Returns '' for no lines so the caller can supply a fallback."""
+    out, used = [], 0
+    for i, ln in enumerate(lines):
+        ln = _clip(ln, budget)                       # defensive: no single line can blow the budget
+        add = len(ln) + (1 if out else 0)            # the '\n' join-separator only applies between lines
+        if out and used + add > budget:
+            out.append(f"…({len(lines) - i} more omitted to fit the model input budget)")
+            break
+        out.append(ln)
+        used += add
+    return "\n".join(out)
+
+
 # --------------------------------------------------------------------------- #
 # The council
 # --------------------------------------------------------------------------- #
@@ -361,13 +412,16 @@ class ClaudeCouncil:
 
     def _stage_blind_peer_review(self, proposals: list[dict]) -> list[dict]:
         # Anonymise: identities stripped, proposals labelled P1..Pn to cut herding.
+        # Interleave by author so a budget trim keeps one proposal per persona before any second — the
+        # anonymised P-labels follow this fair order, so no persona's proposal is systematically unseen.
+        fair = _interleave_by(proposals, lambda pr: pr.get('_persona', '?'))
         digest_lines = []
-        for idx, pr in enumerate(proposals, start=1):
+        for idx, pr in enumerate(fair, start=1):
             digest_lines.append(
-                f"P{idx} [{pr.get('area', '?')}]: {pr.get('position', '')} "
-                f"(rationale: {pr.get('rationale', '')}; risk: {pr.get('risk', '')})"
+                f"P{idx} [{_clip(pr.get('area', '?'), 60)}]: {_clip(pr.get('position', ''))} "
+                f"(rationale: {_clip(pr.get('rationale', ''))}; risk: {_clip(pr.get('risk', ''))})"
             )
-        digest = "\n".join(digest_lines)
+        digest = _bounded_block(digest_lines)
 
         reviews: list[dict] = []
         for p in self._personas:
@@ -395,16 +449,19 @@ class ClaudeCouncil:
 
     def _stage_chairman_synthesis(self, brief: str, proposals: list[dict],
                                   reviews: list[dict]) -> list[ADR]:
-        prop_block = "\n".join(
-            f"- [{pr.get('_persona', '?')}] {pr.get('area', '?')}: {pr.get('position', '')} "
-            f"— rationale: {pr.get('rationale', '')}; risk: {pr.get('risk', '')}"
-            for pr in proposals
-        )
-        review_block = "\n".join(
-            f"- [{rv.get('_reviewer', '?')}] on {rv.get('target', '?')} "
-            f"({rv.get('severity', '?')}): {rv.get('concern', '')}"
-            for rv in reviews
-        ) or "(no critiques returned)"
+        # Interleave by author (proposals) / reviewer so a budget trim drops each source's EXTRA items
+        # before it drops any source's first — the minority YAGNI/AI voices survive the trim (honesty).
+        prop_block = _bounded_block([
+            f"- [{_clip(pr.get('_persona', '?'), 40)}] {_clip(pr.get('area', '?'), 60)}: "
+            f"{_clip(pr.get('position', ''))} — rationale: {_clip(pr.get('rationale', ''))}; "
+            f"risk: {_clip(pr.get('risk', ''))}"
+            for pr in _interleave_by(proposals, lambda pr: pr.get('_persona', '?'))
+        ])
+        review_block = _bounded_block([
+            f"- [{_clip(rv.get('_reviewer', '?'), 40)}] on {_clip(rv.get('target', '?'), 20)} "
+            f"({_clip(rv.get('severity', '?'), 12)}): {_clip(rv.get('concern', ''))}"
+            for rv in _interleave_by(reviews, lambda rv: rv.get('_reviewer', '?'))
+        ]) or "(no critiques returned)"
 
         user = (
             f"{brief}\n\n"
