@@ -300,7 +300,9 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     else:
         # Honest provenance (Doc 03): name the model that actually reasoned, so no report is
         # mislabelled — and reaffirm the prime directive (the LLM reasoned; the engine owns numbers).
-        L.append(f"> _Council: live multi-persona reasoning by **{src}** (non-deterministic). "
+        # `src` in a code span (not bold): a model id reads as code AND markdown metachars in a model
+        # string (e.g. a stray '*' or '|') can't distort the line or a table cell (review nit).
+        L.append(f"> _Council: live multi-persona reasoning by_ `{src}` _(non-deterministic). "
                  "The deterministic engine — not the LLM — produced every number in this report._")
     for a in adrs:
         L.append("")

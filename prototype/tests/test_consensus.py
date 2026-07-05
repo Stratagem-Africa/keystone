@@ -56,6 +56,25 @@ class TestConsensusCouncil(unittest.TestCase):
         self.assertNotIn("8000 rps", joined)
         self.assertIn("[engine-owned metric removed]", joined)
 
+    def test_consensus_preserves_real_primary_provenance(self):
+        # Honesty (#108): wrapping a REAL primary in the voter overlay must NOT drop the primary's
+        # "<provider>:<model>" source — dataclasses.replace keeps it, so a consensus report still names
+        # the model that reasoned and never mislabels it "stub". Locks this in on the live consensus path.
+        class _CouncilFake:
+            def complete(self, *, label, system, user, max_tokens):
+                if label.startswith("design:"):
+                    return '[{"area":"Datastore","position":"Postgres","rationale":"reliable","risk":"writes"}]'
+                if label.startswith("review:"):
+                    return '[{"target":"P1","concern":"stampede","severity":"high"}]'
+                return ('[{"area":"Datastore","decision":"Single relational primary.",'
+                        '"rationale":"boring reliable","dissent":[],"confidence":"high",'
+                        '"kill_criteria":["write-heavy workload"]}]')
+        primary = make_council("claude", model="haiku-x", client=_CouncilFake())
+        v = Voter("gpt", _FakeLLM('[{"index":1,"verdict":"AGREE","reason":"ok"}]'))
+        adrs = ConsensusCouncil(primary, [v]).design(self.model)
+        self.assertTrue(adrs)
+        self.assertTrue(all(a.source == "claude:haiku-x" for a in adrs), "consensus dropped primary provenance")
+
     def test_full_agreement_summary_has_no_dissent_tail(self):
         v1 = Voter("a", _FakeLLM('[{"index":1,"verdict":"AGREE","reason":"yes"}]'))
         v2 = Voter("b", _FakeLLM('[{"index":1,"verdict":"AGREE","reason":"agreed"}]'))
