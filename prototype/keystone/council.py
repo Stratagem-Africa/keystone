@@ -32,7 +32,7 @@ class ADR:
     dissent: list[str] = field(default_factory=list)
     confidence: str = "med"           # low | med | high
     kill_criteria: list[str] = field(default_factory=list)
-    source: str = "stub"              # stub | claude
+    source: str = "stub"              # "stub" | "<provider>:<model>" (honest council provenance)
     # Cross-model consensus votes (ADR-010 multi-LLM): one rendered line per voter model
     # (e.g. "openai gpt-5: AGREE — …"). Empty for the single-model / stub path (backward-compatible).
     # Each vote's free text is scrubbed by the prime-directive guard before it lands here.
@@ -176,8 +176,8 @@ def make_council(provider: str | None = None, model: str | None = None,
     # Gemini/Groq key or a local Ollama therefore runs the real council at $0.
     from keystone.claude_council import ClaudeCouncil  # lazy: optional dep
     if provider in ("claude", "anthropic"):
-        return ClaudeCouncil(model=model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL),
-                             client=client)
+        claude_model = model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL)
+        return ClaudeCouncil(model=claude_model, client=client, source=f"claude:{claude_model}")
     # Validate the provider NAME before anything else, so a blank/typo'd provider gives one clear
     # error (not a misleading "needs a model") — preserving main's diagnostic on the fail-closed path.
     from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
@@ -192,5 +192,5 @@ def make_council(provider: str | None = None, model: str | None = None,
             f"COUNCIL_PROVIDER={provider!r} needs an explicit model — set COUNCIL_MODEL "
             "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
         )
-    return ClaudeCouncil(model=council_model,
+    return ClaudeCouncil(model=council_model, source=f"{provider}:{council_model}",
                          client=client if client is not None else make_llm(provider, council_model))

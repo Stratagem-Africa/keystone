@@ -216,8 +216,9 @@ def _redact_engine_metrics(text: str) -> tuple[str, int]:
     return out, count
 
 
-def _scrub_adr(adr: ADR) -> ADR:
-    """Apply the guard across every free-text field of an ADR; flag if it fired.
+def _scrub_adr(adr: ADR, source: str = "claude") -> ADR:
+    """Apply the guard across every free-text field of an ADR; flag if it fired. `source` is the
+    honest provenance label (<provider>:<model>) stamped on the returned ADR.
 
     `area` is included: report.py renders it verbatim as a section header, so an
     LLM-embedded figure there ('Caching (8k rps tier)') would bypass the guard at
@@ -241,7 +242,7 @@ def _scrub_adr(adr: ADR) -> ADR:
         )
     return ADR(
         area=area, decision=decision, rationale=rationale, dissent=dissent,
-        confidence=adr.confidence, kill_criteria=kill, source="claude",
+        confidence=adr.confidence, kill_criteria=kill, source=source,
     )
 
 
@@ -363,10 +364,15 @@ class ClaudeCouncil:
     """Real consensus council. Satisfies the `Council` protocol from council.py."""
 
     def __init__(self, model: str, *, client: LLM | None = None,
-                 personas: tuple[Persona, ...] = PERSONAS) -> None:
+                 personas: tuple[Persona, ...] = PERSONAS, source: str = "claude") -> None:
         self._model = model
         self._llm: LLM = client if client is not None else AnthropicLLM(model)
         self._personas = personas
+        # Honest provenance stamped on every ADR (Doc 03): "<provider>:<model>", e.g.
+        # "github:openai/gpt-4o-mini". The report shows this so a reader knows WHICH model reasoned —
+        # never mislabelled "claude" when another vendor ran it. Defaults to "claude" only for direct
+        # construction; make_council passes the real provider:model.
+        self._source = source
 
     # -- public interface ---------------------------------------------------- #
 
@@ -376,11 +382,11 @@ class ClaudeCouncil:
         reviews = self._stage_blind_peer_review(proposals)
         adrs = self._stage_chairman_synthesis(brief, proposals, reviews)
         # Defence in depth: guard every ADR even though the prompts forbid numbers.
-        adrs = [_scrub_adr(a) for a in adrs]
+        adrs = [_scrub_adr(a, self._source) for a in adrs]
         # MANDATORY high-stakes gate (Doc 03 §6 — a MUST). Deterministic and shared
         # with the stub; de-dups on the gate's identity, NOT a "review" substring, so
         # a benign "Code review" ADR can never silently drop it (ADR-001 C1).
-        return ensure_high_stakes_gate(adrs, model.domain_flags, source="claude")
+        return ensure_high_stakes_gate(adrs, model.domain_flags, source=self._source)
 
     # -- stage 1: independent design ---------------------------------------- #
 
@@ -492,7 +498,7 @@ class ClaudeCouncil:
                 dissent=[str(d) for d in _as_list(it.get("dissent")) if str(d).strip()],
                 confidence=conf,
                 kill_criteria=[str(k) for k in _as_list(it.get("kill_criteria")) if str(k).strip()],
-                source="claude",
+                source=self._source,
             ))
         if not adrs:
             raise CouncilError("chairman synthesis produced no ADRs")

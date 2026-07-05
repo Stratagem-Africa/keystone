@@ -292,10 +292,16 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     # ADRs
     L.append("## Design decisions (council)")
     src = adrs[0].source if adrs else "stub"
+    L.append("")
     if src == "stub":
-        L.append("")
         L.append("> _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live "
-                 "reasoning. Provide a Claude API key to activate the real consensus engine._")
+                 "reasoning. Activate the real council with any provider — a free-tier Gemini/Groq "
+                 "key, a Claude key, or a local Ollama (no key, $0)._")
+    else:
+        # Honest provenance (Doc 03): name the model that actually reasoned, so no report is
+        # mislabelled — and reaffirm the prime directive (the LLM reasoned; the engine owns numbers).
+        L.append(f"> _Council: live multi-persona reasoning by **{src}** (non-deterministic). "
+                 "The deterministic engine — not the LLM — produced every number in this report._")
     for a in adrs:
         L.append("")
         L.append(f"### {a.area} — confidence: {a.confidence}")
