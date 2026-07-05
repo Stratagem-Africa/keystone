@@ -313,6 +313,7 @@ def _extract_json(text: str, *, expect: str) -> object:
 # engine's metrics; omissions are NOTED, never silent (Doc 03 honesty).
 _FIELD_CLIP = 200          # max chars per free-text field (position/rationale/risk/concern)
 _BLOCK_BUDGET = 6000       # max chars per aggregated block (proposals / reviews)
+_TRIM_MARKER = "omitted to fit the model input budget"   # in the block AND how the council detects a trim (#113)
 
 
 def _clip(text: object, limit: int = _FIELD_CLIP) -> str:
@@ -349,7 +350,7 @@ def _bounded_block(lines: list[str], budget: int = _BLOCK_BUDGET) -> str:
         ln = _clip(ln, budget)                       # defensive: no single line can blow the budget
         add = len(ln) + (1 if out else 0)            # the '\n' join-separator only applies between lines
         if out and used + add > budget:
-            out.append(f"…({len(lines) - i} more omitted to fit the model input budget)")
+            out.append(f"…({len(lines) - i} more {_TRIM_MARKER})")
             break
         out.append(ln)
         used += add
@@ -373,10 +374,14 @@ class ClaudeCouncil:
         # never mislabelled "claude" when another vendor ran it. Defaults to "claude" only for direct
         # construction; make_council passes the real provider:model.
         self._source = source
+        # #113: set True if a synthesis block had to be trimmed to fit the model input limit, so the
+        # report can DISCLOSE it (honesty). Read by the run scripts after design() and passed to render().
+        self.context_trimmed = False
 
     # -- public interface ---------------------------------------------------- #
 
     def design(self, model: SystemModel) -> list[ADR]:
+        self.context_trimmed = False   # per-call reset — a stale flag can't leak if an instance is reused
         brief = _model_brief(model)
         proposals = self._stage_independent_design(brief)
         reviews = self._stage_blind_peer_review(proposals)
@@ -449,6 +454,7 @@ class ClaudeCouncil:
                 f"(rationale: {_clip(pr.get('rationale', ''))}; risk: {_clip(pr.get('risk', ''))})"
             )
         digest = _bounded_block(digest_lines)
+        self.context_trimmed = self.context_trimmed or (_TRIM_MARKER in digest)   # #113: disclose a trim
 
         reviews: list[dict] = []
         for p in self._personas:
@@ -488,6 +494,8 @@ class ClaudeCouncil:
             f"({_clip(rv.get('severity', '?'), 12)}): {_clip(rv.get('concern', ''))}"
             for rv in _interleave_by(reviews, lambda rv: rv.get('_reviewer', '?'))
         ]) or "(no critiques returned)"
+        self.context_trimmed = self.context_trimmed or (_TRIM_MARKER in prop_block) \
+            or (_TRIM_MARKER in review_block)   # #113: disclose a trim to the reader
 
         user = (
             f"{brief}\n\n"
