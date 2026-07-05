@@ -381,6 +381,7 @@ class ClaudeCouncil:
     # -- public interface ---------------------------------------------------- #
 
     def design(self, model: SystemModel) -> list[ADR]:
+        self.context_trimmed = False   # per-call reset — a stale flag can't leak if an instance is reused
         brief = _model_brief(model)
         proposals = self._stage_independent_design(brief)
         reviews = self._stage_blind_peer_review(proposals)
