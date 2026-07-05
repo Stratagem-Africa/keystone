@@ -115,14 +115,24 @@ class TestClaudeCouncilOrchestration(unittest.TestCase):
         self.assertEqual(fake.calls.count("chairman"), 1)
         self.assertTrue(adrs)
 
-    def test_adrs_are_tagged_claude(self):
+    def test_adrs_are_tagged_with_provider_provenance(self):
+        # source is honest "<provider>:<model>" (not a bare "claude"), so the report can name the
+        # model that actually reasoned — and it is never "stub" for a live council.
         adrs = make_council("claude", model="m", client=FakeLLM()).design(self.model)
-        self.assertTrue(all(a.source == "claude" for a in adrs))
+        self.assertTrue(all(a.source == "claude:m" for a in adrs))
 
     def test_report_banner_keys_off_source(self):
         # report.py shows the STUB banner only when adrs[0].source == "stub".
         adrs = make_council("claude", model="m", client=FakeLLM()).design(self.model)
         self.assertNotEqual(adrs[0].source, "stub")
+
+    def test_source_names_the_actual_provider_not_claude(self):
+        # A non-Claude council must NOT be mislabelled "claude" — the ADRs carry the real provenance
+        # "<provider>:<model>", so the report can name the model that reasoned (honesty, issue #108).
+        for prov, model in (("github", "openai/gpt-4o-mini"), ("ollama", "qwen2.5:7b"), ("groq", "llama-3.3-70b")):
+            adrs = make_council(prov, model=model, client=FakeLLM()).design(self.model)
+            self.assertTrue(all(a.source == f"{prov}:{model}" for a in adrs), f"{prov} mis-tagged")
+            self.assertNotIn("claude", adrs[0].source)
 
     def test_empty_chairman_reply_raises(self):
         fake = FakeLLM(chairman_json="[]")
@@ -195,7 +205,7 @@ class TestPrimeDirectiveGuard(unittest.TestCase):
         # The $/month figure is scrubbed whole — no "k/mo" residue.
         self.assertNotIn("k/mo", adr.kill_criteria[1])
         self.assertNotIn("2.5", adr.kill_criteria[1])
-        self.assertEqual(adr.source, "claude")
+        self.assertEqual(adr.source, "claude:m")
 
     def test_real_council_enforces_high_stakes_gate(self):
         # Doc 03 §6 MUST: the mandatory expert-review block must appear even when
@@ -205,7 +215,7 @@ class TestPrimeDirectiveGuard(unittest.TestCase):
         adrs = make_council("claude", model="m", client=FakeLLM()).design(model)
         gates = [a for a in adrs if "review" in a.area.lower()]
         self.assertTrue(gates, "real council dropped the mandatory high-stakes review gate")
-        self.assertEqual(gates[0].source, "claude")
+        self.assertEqual(gates[0].source, "claude:m")
 
 
 class TestTolerantJsonParsing(unittest.TestCase):
@@ -413,7 +423,7 @@ class TestHighStakesGateADR001(unittest.TestCase):
             gate = [a for a in adrs if a.decision.strip() == HIGH_STAKES_DECISION]
             self.assertTrue(gate, f"mandatory gate dropped when an ADR area was {area!r}")
             self.assertEqual(gate[0].area, HIGH_STAKES_AREA)
-            self.assertEqual(gate[0].source, "claude")
+            self.assertEqual(gate[0].source, "claude:m")
 
     def test_flag_variants_fail_closed(self):
         # ADR-001 M3: case/space/hyphen variants must still trip the gate.
@@ -506,6 +516,20 @@ class TestReportBannerHonesty(unittest.TestCase):
         claude = make_council("claude", model="m", client=FakeLLM()).design(self.model)
         self.assertIn("DETERMINISTIC STUB", render(self.model, stub, self.sim))
         self.assertNotIn("DETERMINISTIC STUB", render(self.model, claude, self.sim))
+
+    def test_stub_banner_is_provider_neutral(self):
+        # The stub activation hint must not name only Claude now that any provider drives the council.
+        md = render(self.model, DeterministicStubCouncil().design(self.model), self.sim)
+        self.assertNotIn("Provide a Claude API key", md)
+        self.assertIn("Ollama", md)                       # names the $0/no-key path too
+
+    def test_live_report_shows_provider_provenance_not_claude(self):
+        # A github-run report must name the model that reasoned, and never imply Claude ran it.
+        adrs = make_council("github", model="openai/gpt-4o-mini", client=FakeLLM()).design(self.model)
+        md = render(self.model, adrs, self.sim)
+        self.assertIn("github:openai/gpt-4o-mini", md)     # honest provenance shown
+        self.assertNotIn("Provide a Claude API key", md)
+        self.assertIn("not the LLM", md)                   # reaffirms the prime directive
 
     def test_banner_makes_no_absolute_guarantee(self):
         md = render(self.model, DeterministicStubCouncil().design(self.model), self.sim)

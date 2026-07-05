@@ -138,7 +138,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 
 ## Design decisions (council)
 
-> _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Provide a Claude API key to activate the real consensus engine._
+> _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Activate the real council with any provider — a free-tier Gemini/Groq key, a Claude key, or a local Ollama (no key, $0)._
 
 ### Datastore — confidence: high
 **Decision:** Single relational primary (PostgreSQL) for the mapping table.

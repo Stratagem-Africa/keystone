@@ -67,6 +67,7 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 | Inventory DB (seats) | base_latency_ms | 6.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | PostgreSQL/MySQL/MariaDB, sysbench warm-cache singl… | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
 | Inventory DB (seats) | monthly_cost_per_instance | $300.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | Managed PostgreSQL — 8 GiB RAM / 4 vCPUs / 140 GiB … | https://www.digitalocean.com/pricing/managed-databases |
 | Inventory DB (seats) | per_instance_rps | 3,000 rps | 8,133 rps | 4,800–29,000 rps | RECONCILE ⚠ | AWS RDS db.m8gd.4xlarge (16 vCPU / 64 GB, NVMe-back… | ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services |
+| Read replica | base_latency_ms | 4.00 ms | 0.30 ms | 0.15–0.70 ms | RECONCILE ⚠ | PostgreSQL/MySQL/MariaDB READ REPLICA, sysbench olt… | DoltHub Blog — Postgres vs MySQL Sysbench Latency (independent org) |
 | Read replica | per_instance_rps | 8,000 rps | 10,000 rps | 5,000–50,000 rps | GROUNDED ✓ | Single Postgres read replica, ~8-16 vCPU mid-size S… | Google Cloud (AlloyDB official OLTP benchmark docs) |
 | Payment gateway | base_latency_ms | 120.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Stripe/Adyen-class payment-gateway external HTTPS A… | Probecast — Adyen API status / latency monitoring (independent third-party) |
 | Payment gateway | per_instance_rps | 5,000 rps | 100 rps | 7–140 rps | RECONCILE ⚠ | Payment-gateway-class third-party API, published pe… | Stripe Documentation — Rate limits |
@@ -76,6 +77,7 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - **Inventory DB (seats)** · `base_latency_ms`: you have **6.00 ms**, the cited evidence says **0.30 ms** (band 0.15–0.80 ms). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Inventory DB (seats)** · `monthly_cost_per_instance`: you have **$300.00/mo**, the cited evidence says **$122.10/mo** (band $109.89–$134.31). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Inventory DB (seats)** · `per_instance_rps`: you have **3,000 rps**, the cited evidence says **8,133 rps** (band 4,800–29,000 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
+- **Read replica** · `base_latency_ms`: you have **4.00 ms**, the cited evidence says **0.30 ms** (band 0.15–0.70 ms). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 - **Payment gateway** · `per_instance_rps`: you have **5,000 rps**, the cited evidence says **100 rps** (band 7–140 rps). Check the context (hardware / region / workload) — the engine used **your** value, not the benchmark.
 
 **Evidence (resolvable sources):**
@@ -102,6 +104,9 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - https://docs.digitalocean.com/products/databases/postgresql/details/pricing/ — PostgreSQL pricing overview
 - ClickHouse Blog — PostgresBench: A Reproducible Benchmark for Postgres Services — https://clickhouse.com/blog/postgresbench
 - Severalnines — Benchmarking Managed PostgreSQL Cloud Solutions: Part Two - Amazon RDS — https://severalnines.com/blog/benchmarking-managed-postgresql-cloud-solutions-part-two-amazon-rds/
+- DoltHub Blog — Postgres vs MySQL Sysbench Latency (independent org) — https://www.dolthub.com/blog/2024-07-16-mysql-postgres-sysbench-latency/
+- computingforgeeks — PostgreSQL vs MySQL vs MariaDB benchmark (independent org) — https://computingforgeeks.com/database-benchmark-postgresql-mysql-mariadb/
+- PingCAP/br GitHub issue #1214 — sysbench oltp_point_select latency (independent org, TiDB) — https://github.com/pingcap/br/issues/1214
 - Google Cloud (AlloyDB official OLTP benchmark docs) — https://docs.cloud.google.com/alloydb/docs/benchmark-oltp-performance-alloydb
 - Crunchy Data (PostgreSQL 13 benchmark blog) — quote CORRECTED to figures verifiers confirmed on the page — https://www.crunchydata.com/blog/postgresql-13-benchmark-memory-speed-vs.-tps
 - Severalnines (How to Benchmark PostgreSQL Performance) — https://severalnines.com/blog/benchmarking-postgresql-performance/
@@ -159,7 +164,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 
 ## Design decisions (council)
 
-> _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Provide a Claude API key to activate the real consensus engine._
+> _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Activate the real council with any provider — a free-tier Gemini/Groq key, a Claude key, or a local Ollama (no key, $0)._
 
 ### Datastore — confidence: high
 **Decision:** Single relational primary (PostgreSQL) for the mapping table.
