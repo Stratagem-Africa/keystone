@@ -388,6 +388,28 @@ class ClaudeCouncil:
         # a benign "Code review" ADR can never silently drop it (ADR-001 C1).
         return ensure_high_stakes_gate(adrs, model.domain_flags, source=self._source)
 
+    # -- shared LLM call with a one-shot repair retry ----------------------- #
+
+    def _complete_json(self, *, label: str, system: str, user: str, max_tokens: int,
+                       expect: str = "array") -> object:
+        """Call the model and extract JSON; on a parse failure retry ONCE with a firmer, more compact
+        instruction. Small/free models often wrap JSON in prose, add markdown fences, or TRUNCATE a long
+        reply — a hard failure the council would otherwise raise on. `_extract_json` already tolerates
+        fences/prose, so the remaining failure is a malformed/incomplete reply; a second attempt asking
+        for a short, complete JSON usually parses. Costs an extra call only on failure; if the retry also
+        fails, the original CouncilError still propagates (fail-loud unchanged). No numbers involved — the
+        prime-directive guard still runs on the parsed ADRs downstream."""
+        try:
+            return _extract_json(self._llm.complete(label=label, system=system, user=user,
+                                                    max_tokens=max_tokens), expect=expect)
+        except CouncilError:
+            log.warning("council reply from [%s] did not parse; retrying once with a compact-JSON reminder",
+                        label)
+            firmer = (f"{user}\n\nIMPORTANT: reply with ONLY one valid, COMPLETE JSON {expect} — no "
+                      "markdown fences, no prose, no commentary. Keep every field to one short sentence.")
+            return _extract_json(self._llm.complete(label=f"{label}:retry", system=system, user=firmer,
+                                                    max_tokens=max_tokens), expect=expect)
+
     # -- stage 1: independent design ---------------------------------------- #
 
     def _stage_independent_design(self, brief: str) -> list[dict]:
@@ -404,8 +426,7 @@ class ClaudeCouncil:
                 '{"area": "<decision area>", "position": "<the recommendation>", '
                 '"rationale": "<why, qualitatively>", "risk": "<the main risk or trade-off>"}'
             )
-            raw = self._llm.complete(label=f"design:{p.key}", system=system, user=user, max_tokens=4096)
-            items = _extract_json(raw, expect="array")
+            items = self._complete_json(label=f"design:{p.key}", system=system, user=user, max_tokens=4096)
             for it in items if isinstance(items, list) else []:
                 if isinstance(it, dict):
                     it["_persona"] = p.title
@@ -443,8 +464,7 @@ class ClaudeCouncil:
                 '{"target": "P<n>", "concern": "<the critique>", '
                 '"severity": "low|med|high"}'
             )
-            raw = self._llm.complete(label=f"review:{p.key}", system=system, user=user, max_tokens=4096)
-            items = _extract_json(raw, expect="array")
+            items = self._complete_json(label=f"review:{p.key}", system=system, user=user, max_tokens=4096)
             for it in items if isinstance(items, list) else []:
                 if isinstance(it, dict):
                     it["_reviewer"] = p.title
@@ -482,8 +502,7 @@ class ClaudeCouncil:
             '"confidence": "low|med|high", '
             '"kill_criteria": ["<condition that would force revisiting this>", ...]}'
         )
-        raw = self._llm.complete(label="chairman", system=_CHAIRMAN_SYSTEM, user=user, max_tokens=8192)
-        items = _extract_json(raw, expect="array")
+        items = self._complete_json(label="chairman", system=_CHAIRMAN_SYSTEM, user=user, max_tokens=8192)
         adrs: list[ADR] = []
         for it in items if isinstance(items, list) else []:
             if not isinstance(it, dict):
