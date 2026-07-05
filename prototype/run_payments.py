@@ -26,7 +26,8 @@ def main() -> None:
     load_env()                              # activate local .env (council/grounding); existing env wins
     baseline = ground_model(payments.build())          # 80 req/s, 80% checkout (grounding activated)
     sim = simulate_with_confidence(baseline)           # output ranges from cited input uncertainty (values unchanged)
-    adrs = make_council().design(baseline)
+    council = make_council()
+    adrs = council.design(baseline)
 
     whatifs = [
         ("Sale: 2× traffic (160 rps), 85% checkout",
@@ -35,7 +36,8 @@ def main() -> None:
          simulate(payments.sale(system_rps=320, checkout_share=0.90))),
     ]
 
-    md = render(baseline, adrs, sim, whatifs)
+    md = render(baseline, adrs, sim, whatifs,
+                context_trimmed=getattr(council, "context_trimmed", False))
     out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:

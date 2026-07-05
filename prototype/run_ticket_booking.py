@@ -25,7 +25,8 @@ def main() -> None:
     load_env()                              # activate local .env (council/grounding); existing env wins
     baseline = ground_model(ticket_booking.build())   # steady state: 5k rps, 5% book (grounding activated)
     sim = simulate_with_confidence(baseline)           # output ranges from cited input uncertainty (values unchanged)
-    adrs = make_council().design(baseline)
+    council = make_council()
+    adrs = council.design(baseline)
 
     whatifs = [
         ("Flash sale: 8× traffic, browsing → buying (50% book)",
@@ -34,7 +35,8 @@ def main() -> None:
          simulate(ticket_booking.build(system_rps=10_000, book_share=0.2))),
     ]
 
-    md = render(baseline, adrs, sim, whatifs)
+    md = render(baseline, adrs, sim, whatifs,
+                context_trimmed=getattr(council, "context_trimmed", False))
     out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:

@@ -531,6 +531,13 @@ class TestReportBannerHonesty(unittest.TestCase):
         self.assertNotIn("Provide a Claude API key", md)
         self.assertIn("not the LLM", md)                   # reaffirms the prime directive
 
+    def test_render_discloses_context_trim_only_when_it_happened(self):
+        # #113: the report tells the reader when the council's context was trimmed — and stays silent
+        # otherwise (so the stub goldens, which never trim, are unaffected).
+        adrs = make_council("claude", model="m", client=FakeLLM()).design(self.model)
+        self.assertIn("Council context was trimmed", render(self.model, adrs, self.sim, context_trimmed=True))
+        self.assertNotIn("Council context was trimmed", render(self.model, adrs, self.sim, context_trimmed=False))
+
     def test_banner_makes_no_absolute_guarantee(self):
         md = render(self.model, DeterministicStubCouncil().design(self.model), self.sim)
         self.assertNotIn("produced by the deterministic engine, not the LLM", md)
@@ -603,6 +610,17 @@ class TestChairmanPromptBounding(unittest.TestCase):
         self.assertNotIn("P" * 400, chair)                        # the 700-char field was clipped
         for persona in ("YAGNI skeptic", "AI-infusion specialist", "Backend / application architect"):
             self.assertIn(persona, chair, f"{persona} must survive the budget trim (fair representation)")
+
+    def test_trim_sets_the_context_trimmed_disclosure_flag(self):
+        # #113: when the synthesis prompt is trimmed, the council must flag it so the report can disclose.
+        council = make_council("claude", model="m", client=_VerboseRecordingLLM())
+        council.design(url_shortener.build())
+        self.assertTrue(council.context_trimmed, "a trimmed prompt must set context_trimmed")
+
+    def test_no_trim_leaves_the_flag_false(self):
+        council = make_council("claude", model="m", client=FakeLLM())   # small clean replies, no overflow
+        council.design(url_shortener.build())
+        self.assertFalse(council.context_trimmed)
 
 
 class _FlakyOnceLLM:

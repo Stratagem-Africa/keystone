@@ -146,7 +146,11 @@ def _rate_evidence_section(model: SystemModel) -> list[str]:
 
 
 def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
-           whatifs: list[tuple[str, SimulationResult]] | None = None) -> str:
+           whatifs: list[tuple[str, SimulationResult]] | None = None,
+           *, context_trimmed: bool = False) -> str:
+    # `context_trimmed`: the live council's synthesis prompt was trimmed to fit the model's input limit
+    # (#113). Disclosed honestly in the 'Where this is wrong' section — never silently (Doc 03). Defaults
+    # False, so the deterministic stub (which never trims) and every committed golden are unaffected.
     L: list[str] = []
     L.append(f"# Keystone Stress-Test Report — {model.name}")
     L.append("")
@@ -356,6 +360,12 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     L.append("")
     for cav in sim.caveats:
         L.append(f"- {cav}")
+    if context_trimmed:
+        # #113: never hide a trim. Fair-trimming keeps every persona, so this is a completeness caveat.
+        L.append("- **Council context was trimmed to fit the model.** The synthesis prompt exceeded the "
+                 "model's input limit, so it was bounded — every persona is still represented (the trim "
+                 "drops secondary points, never a whole viewpoint), but some detail did not reach the "
+                 "chairman. A larger-context model would avoid the trim.")
     # When the KB grounded some inputs, say so honestly: grounded != calibrated. Most matches are by
     # component-kind; a component tagged with its setup (e.g. a vendor) is matched to that CONTEXT, so
     # the match-basis clause adapts to stay accurate either way. Any RECONCILE row still needs a human's eye.

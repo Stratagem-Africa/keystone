@@ -33,10 +33,11 @@ def main() -> None:
     result = make_ingestor().ingest(Source(text=NOTE, name="URL Shortener (from note)"))
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
-    adrs = make_council().design(model)
+    council = make_council()
+    adrs = council.design(model)
     sim = simulate_with_confidence(model)   # output ranges from cited input uncertainty (values unchanged)
     # 4. Report with the mandatory honesty section.
-    md = render(model, adrs, sim)
+    md = render(model, adrs, sim, context_trimmed=getattr(council, "context_trimmed", False))
     out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:

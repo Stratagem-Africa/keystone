@@ -32,7 +32,8 @@ def build_and_render(kb=None):
 
     # 2. Council reasons. Defaults to the deterministic stub ($0, no key); set
     #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
-    adrs = make_council().design(model)
+    council = make_council()
+    adrs = council.design(model)
 
     # 3. Deterministic simulation — the engine produces the numbers; confidence bands propagate the
     #    cited input uncertainty into output ranges (evidence-only; values identical to simulate()).
@@ -47,7 +48,8 @@ def build_and_render(kb=None):
     ]
 
     # 5. Report with the mandatory honesty section.
-    return model, sim, whatifs, render(model, adrs, sim, whatifs)
+    return model, sim, whatifs, render(model, adrs, sim, whatifs,
+                                       context_trimmed=getattr(council, "context_trimmed", False))
 
 
 def main() -> None:
