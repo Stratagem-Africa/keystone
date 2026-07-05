@@ -605,5 +605,50 @@ class TestChairmanPromptBounding(unittest.TestCase):
             self.assertIn(persona, chair, f"{persona} must survive the budget trim (fair representation)")
 
 
+class _FlakyOnceLLM:
+    """Returns un-parseable text on the FIRST call of each stage-label, valid JSON on the ':retry' call —
+    models the small/free-model failure (truncation, prose, fences) the one-shot repair retry rescues."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def complete(self, *, label, system, user, max_tokens):
+        self.calls.append(label)
+        if not label.endswith(":retry"):
+            return "Sure, here is the JSON you asked for:\n```json\n[ {\"area\": \"A\", \"posi"  # truncated
+        if label.startswith("design:"):
+            return '[{"area": "A", "position": "p", "rationale": "r", "risk": "k"}]'
+        if label.startswith("review:"):
+            return '[{"target": "P1", "concern": "c", "severity": "high"}]'
+        return ('[{"area": "A", "decision": "d", "rationale": "r", "dissent": [], '
+                '"confidence": "high", "kill_criteria": ["k"]}]')
+
+
+class TestCouncilJsonRepairRetry(unittest.TestCase):
+    """A parse failure (small models truncate/wrap JSON) gets ONE repair retry before giving up —
+    so a transient malformed reply doesn't hard-fail the whole council. Fail-loud is preserved."""
+
+    def test_parse_failure_is_rescued_by_a_single_retry(self):
+        flaky = _FlakyOnceLLM()
+        adrs = make_council("claude", model="m", client=flaky).design(url_shortener.build())
+        self.assertTrue(adrs, "council should recover via the repair retry")
+        # every stage's first reply failed then its ':retry' succeeded → retries actually fired
+        self.assertTrue(any(c.endswith(":retry") for c in flaky.calls))
+        self.assertTrue(any(c.startswith("chairman") for c in flaky.calls))
+
+    def test_no_retry_on_a_clean_reply(self):
+        # A well-behaved model must NOT trigger the extra call (retry only on failure).
+        fake = FakeLLM()
+        make_council("claude", model="m", client=fake).design(url_shortener.build())
+        self.assertFalse(any(c.endswith(":retry") for c in fake.calls), "retried despite a clean reply")
+
+    def test_persistent_parse_failure_still_fails_loud(self):
+        class _AlwaysBad:
+            def complete(self, *, label, system, user, max_tokens):
+                return "no JSON here, just an apology."
+        with self.assertRaises(CouncilError):
+            make_council("claude", model="m", client=_AlwaysBad()).design(url_shortener.build())
+
+
 if __name__ == "__main__":
     unittest.main()
