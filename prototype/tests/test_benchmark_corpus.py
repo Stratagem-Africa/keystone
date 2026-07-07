@@ -244,9 +244,14 @@ class TestFactoryAndComponentEvidence(unittest.TestCase):
         app_rps = kb.ground(ComponentKind.APP_SERVER, "per_instance_rps")
         self.assertIsNotNone(app_rps)
         self.assertTrue(app_rps.confidence_low <= app_rps.value <= app_rps.confidence_high)
-        # ...and still grounds NOTHING where we deliberately have no datapoint (app-server service-time
-        # latency stayed ASSUMPTION — its proposal didn't survive adversarial review).
-        self.assertIsNone(kb.ground(ComponentKind.APP_SERVER, "base_latency_ms"))
+        # app-server service-time latency NOW grounds (TechEmpower-anchored, 3x-verified; corpus 33->35)
+        # to an honestly-wide LIGHT-endpoint band — an earlier proposal for this metric did not survive.
+        app_lat = kb.ground(ComponentKind.APP_SERVER, "base_latency_ms")
+        self.assertIsNotNone(app_lat)
+        self.assertTrue(app_lat.confidence_low <= app_lat.value <= app_lat.confidence_high)
+        # ...and still grounds NOTHING where we deliberately have no datapoint (a queue is usage-priced,
+        # so there is no per-instance cost datapoint — better ASSUMPTION than a wrong number).
+        self.assertIsNone(kb.ground(ComponentKind.QUEUE, "monthly_cost_per_instance"))
 
     def test_component_reports_grounded_per_metric(self):
         g = Grounding(80_000, "rps", 68_000, 92_000, (_cite(),))

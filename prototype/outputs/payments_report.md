@@ -12,7 +12,7 @@
 
 - **Bottleneck:** Payment gateway (Stripe) (utilisation 64%)
 - **Max sustainable load:** ~106 req/s [90–212] at the 85% safe ceiling · ~125 req/s theoretical
-- **Latency (dominant path):** p50 ~274 ms [85–708] · p95 ~1184 ms [369–3058] · p99 ~1820 ms [567–4701] (mean 395 ms)
+- **Latency (dominant path):** p50 ~274 ms [83–711] · p95 ~1184 ms [357–3073] · p99 ~1820 ms [549–4725] (mean 395 ms)
 - **Single points of failure:** API gateway / load balancer, Payments ledger (ACID, idempotent writes), Idempotency / order cache
 - **Estimated monthly cost:** ~$428.00/month [$418–$442]
 - _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
@@ -24,10 +24,10 @@
 | bottleneck_utilization | 64% | 32% – 75% | max rho = arrival / capacity | medium |
 | breakpoint_rps_safe | 106 req/s | 90 req/s – 212 req/s | system_rps * (85% ceiling / rho_max) | medium |
 | breakpoint_rps_theoretical | 125 req/s | 106 req/s – 250 req/s | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 395 ms | 123 ms – 1,021 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 274 ms | 85 ms – 708 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 1,184 ms | 369 ms – 3,058 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 1,820 ms | 567 ms – 4,701 ms | exponential-tail: mean * ln(100) | medium |
+| mean_latency_ms | 395 ms | 119 ms – 1,026 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 274 ms | 83 ms – 711 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 1,184 ms | 357 ms – 3,073 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 1,820 ms | 549 ms – 4,725 ms | exponential-tail: mean * ln(100) | medium |
 | monthly_cost | $428.00/mo | $417.89/mo – $442.31/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
 
 _Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
@@ -59,6 +59,7 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**, or
 |---|---|--:|--:|:--:|:--|:--|:--|
 | API gateway / load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | Managed/software L7 load balancer (AWS ALB / HAProx… | AWS — Application Load Balancer access logs (official docs) |
 | API gateway / load balancer | per_instance_rps | 50,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | 8 CPU cores, 4 GB RAM, Intel Xeon E5-2699 v4 @ 2.2 … | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
+| Checkout service | base_latency_ms | 5.00 ms | 3.00 ms | 1.00–10.00 ms | GROUNDED ✓ | ~2-4 vCPU app-server instance running a typical web… | Fiber (Go framework) official docs — TechEmpower benchmark results (republishes official TechEmpower run data with hardware context) |
 | Checkout service | per_instance_rps | 4,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | One app-server instance, ~2-4 vCPU (e.g. AWS c5.xla… | Sharkbench (go-gin web benchmark) |
 | Payment gateway (Stripe) | base_latency_ms | 140.00 ms | 140.00 ms | 80.00–250.00 ms | GROUNDED ✓ | Stripe/Adyen-class payment-gateway external HTTPS A… | Probecast — Adyen API status / latency monitoring (independent third-party) |
 | Payment gateway (Stripe) | per_instance_rps | 100 rps | 100 rps | 85–200 rps | GROUNDED ✓ | stripe · live_mode · per_account | Stripe Documentation — Rate limits (official vendor doc) |
@@ -78,6 +79,10 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**, or
 - NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) — https://ia801500.us.archive.org/31/items/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09_djvu.txt
 - Internet Archive item landing page (provenance for the OCR full-text above) — https://archive.org/details/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09
 - NGINX/F5 — NGINX Plus Sizing Guide: How We Tested (methodology, corroborates test conditions) — https://www.f5.com/company/blog/nginx/nginx-plus-sizing-guide-how-we-tested
+- Fiber (Go framework) official docs — TechEmpower benchmark results (republishes official TechEmpower run data with hardware context) — https://docs.gofiber.io/extra/benchmarks/
+- GoFrame official docs — TechEmpower Round 23 Web Benchmarks evaluation (Go frameworks JSON test, P99) — https://goframe.org/en/articles/techempower-web-benchmarks-r23
+- Pau Sanchez — 'Yet another nodejs benchmark' (independent benchmark, Express vs node:http, text handler) — https://www.pausanchez.com/en/articles/yet-another-nodejs-benchmark/
+- Deno — 'Who has the best response time for Hello world: Node.js, Deno, or Bun?' (independent runtime benchmark) — https://medium.com/deno-the-complete-reference/who-has-the-best-response-time-for-hello-world-node-js-deno-or-bun-65bd1ae3bc64
 - Sharkbench (go-gin web benchmark) — https://sharkbench.dev/web/go-gin
 - nDmitry/web-benchmarks (GitHub) — https://github.com/nDmitry/web-benchmarks
 - DEV.to — Under Pressure: Benchmarking Node.js on a Single-Core EC2 — https://dev.to/ocodista/under-pressure-benchmarking-nodejs-on-a-single-core-ec2-5ghe
