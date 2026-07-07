@@ -10,7 +10,7 @@
 
 - **Bottleneck:** Booking app tier (utilisation 62%)
 - **Max sustainable load:** ~6,800 req/s [6,800–27,200] at the 85% safe ceiling · ~8,000 req/s theoretical
-- **Latency (dominant path):** p50 ~21 ms [11–24] · p95 ~93 ms [46–103] · p99 ~142 ms [70–158] (mean 31 ms)
+- **Latency (dominant path):** p50 ~21 ms [3–24] · p95 ~93 ms [14–103] · p99 ~142 ms [21–158] (mean 31 ms)
 - **Single points of failure:** Load balancer, Seat-availability cache, Booking request queue, Inventory DB (seats)
 - **Estimated monthly cost:** ~$895.00/month
 - _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
@@ -22,10 +22,10 @@
 | bottleneck_utilization | 62% | 16% – 62% | max rho = arrival / capacity | medium |
 | breakpoint_rps_safe | 6,800 req/s | 6,800 req/s – 27,200 req/s | system_rps * (85% ceiling / rho_max) | medium |
 | breakpoint_rps_theoretical | 8,000 req/s | 8,000 req/s – 32,000 req/s | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 31 ms | 15 ms – 34 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 21 ms | 11 ms – 24 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 93 ms | 46 ms – 103 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 142 ms | 70 ms – 158 ms | exponential-tail: mean * ln(100) | medium |
+| mean_latency_ms | 31 ms | 5 ms – 34 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
+| p50_ms | 21 ms | 3 ms – 24 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 93 ms | 14 ms – 103 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 142 ms | 21 ms – 158 ms | exponential-tail: mean * ln(100) | medium |
 | monthly_cost | $895.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
 
 _Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
@@ -60,9 +60,11 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 |---|---|--:|--:|:--:|:--|:--|:--|
 | Load balancer | base_latency_ms | 1.00 ms | 1.00 ms | 0.40–3.00 ms | GROUNDED ✓ | Managed/software L7 load balancer (AWS ALB / HAProx… | AWS — Application Load Balancer access logs (official docs) |
 | Load balancer | per_instance_rps | 40,000 rps | 350,000 rps | 315,000–385,000 rps | RECONCILE ⚠ | 8 CPU cores, 4 GB RAM, Intel Xeon E5-2699 v4 @ 2.2 … | NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) |
+| Booking app tier | base_latency_ms | 10.00 ms | 3.00 ms | 1.00–10.00 ms | GROUNDED ✓ | ~2-4 vCPU app-server instance running a typical web… | Fiber (Go framework) official docs — TechEmpower benchmark results (republishes official TechEmpower run data with hardware context) |
 | Booking app tier | per_instance_rps | 2,000 rps | 4,000 rps | 2,000–8,000 rps | GROUNDED ✓ | One app-server instance, ~2-4 vCPU (e.g. AWS c5.xla… | Sharkbench (go-gin web benchmark) |
 | Seat-availability cache | base_latency_ms | 0.50 ms | 1.00 ms | 0.40–1.50 ms | GROUNDED ✓ | HPE ProLiant DL380 Gen10, one Intel Xeon Gold 6230 … | Redis official documentation — How fast is Redis? (redis-benchmark) |
 | Seat-availability cache | per_instance_rps | 100,000 rps | 110,000 rps | 70,000–180,000 rps | GROUNDED ✓ | Redis single node, GET/SET, NON-pipelined (pipeline… | Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) |
+| Booking request queue | base_latency_ms | 2.00 ms | 5.00 ms | 1.00–25.00 ms | GROUNDED ✓ | One ordered queue unit (one Kafka partition OR one … | Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar Performance (OpenMessaging Benchmark) |
 | Booking request queue | per_instance_rps | 20,000 rps | 10,000 rps | 1,000–50,000 rps | GROUNDED ✓ | Per single ordered queue unit (one RabbitMQ classic… | Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) |
 | Inventory DB (seats) | base_latency_ms | 6.00 ms | 0.30 ms | 0.15–0.80 ms | RECONCILE ⚠ | PostgreSQL/MySQL/MariaDB, sysbench warm-cache singl… | computingforgeeks (PostgreSQL vs MySQL vs MariaDB benchmark) |
 | Inventory DB (seats) | monthly_cost_per_instance | $300.00/mo | $122.10/mo | $109.89–$134.31 | RECONCILE ⚠ | Managed PostgreSQL — 8 GiB RAM / 4 vCPUs / 140 GiB … | https://www.digitalocean.com/pricing/managed-databases |
@@ -87,6 +89,10 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - NGINX/F5 — Sizing Guide for Deploying NGINX Plus on Bare Metal Servers (official datasheet, published 11 Nov 2019; retrieved via Internet Archive OCR full-text) — https://ia801500.us.archive.org/31/items/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09_djvu.txt
 - Internet Archive item landing page (provenance for the OCR full-text above) — https://archive.org/details/sizing-guide-for-deploying-nginx-plus-on-bare-metal-servers-2019-11-09
 - NGINX/F5 — NGINX Plus Sizing Guide: How We Tested (methodology, corroborates test conditions) — https://www.f5.com/company/blog/nginx/nginx-plus-sizing-guide-how-we-tested
+- Fiber (Go framework) official docs — TechEmpower benchmark results (republishes official TechEmpower run data with hardware context) — https://docs.gofiber.io/extra/benchmarks/
+- GoFrame official docs — TechEmpower Round 23 Web Benchmarks evaluation (Go frameworks JSON test, P99) — https://goframe.org/en/articles/techempower-web-benchmarks-r23
+- Pau Sanchez — 'Yet another nodejs benchmark' (independent benchmark, Express vs node:http, text handler) — https://www.pausanchez.com/en/articles/yet-another-nodejs-benchmark/
+- Deno — 'Who has the best response time for Hello world: Node.js, Deno, or Bun?' (independent runtime benchmark) — https://medium.com/deno-the-complete-reference/who-has-the-best-response-time-for-hello-world-node-js-deno-or-bun-65bd1ae3bc64
 - Sharkbench (go-gin web benchmark) — https://sharkbench.dev/web/go-gin
 - nDmitry/web-benchmarks (GitHub) — https://github.com/nDmitry/web-benchmarks
 - DEV.to — Under Pressure: Benchmarking Node.js on a Single-Core EC2 — https://dev.to/ocodista/under-pressure-benchmarking-nodejs-on-a-single-core-ec2-5ghe
@@ -94,6 +100,11 @@ Input numbers matched to **cited benchmark evidence**, by component **kind**. Th
 - Redis official documentation (How fast is Redis? / Benchmarks, readthedocs) — https://redis-doc-test.readthedocs.io/en/latest/topics/benchmarks/
 - Redis official documentation (Benchmarks, current docs) — https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/
 - OneUptime — How to Benchmark Redis Performance with redis-benchmark — https://oneuptime.com/blog/post/2026-03-31-redis-benchmark-performance/view
+- Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar Performance (OpenMessaging Benchmark) — https://www.confluent.io/blog/kafka-fastest-messaging-system/
+- Confluent (developer.confluent.io) — Apache Kafka Performance, Latency, Throughput, and Test Results — https://developer.confluent.io/learn/kafka-performance/
+- Benchmarking Message Brokers for IoT Edge Computing: A Comprehensive Performance Study (arXiv, independent academic) — https://arxiv.org/html/2603.21600v1
+- Amazon SQS FAQs (AWS official docs) — https://aws.amazon.com/sqs/faqs/
+- Brave New Geek — Benchmarking Message Queue Latency (independent) — https://bravenewgeek.com/benchmarking-message-queue-latency/
 - Confluent — Benchmarking RabbitMQ vs Kafka vs Pulsar (OpenMessaging Benchmark) — https://www.confluent.io/blog/kafka-fastest-messaging-system/
 - Factor House — Kafka topic & partition best practices (citing Confluent, LinkedIn, Netflix, Uber) — https://factorhouse.io/articles/kafka-topic-partition-best-practices
 - CloudAMQP — Part 2: RabbitMQ Best Practice for High Performance — https://www.cloudamqp.com/blog/part2-rabbitmq-best-practice-for-high-performance.html
