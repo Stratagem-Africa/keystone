@@ -53,6 +53,14 @@ else
   echo; echo "==> ruff: skipped (not installed — pip install 'keystone[dev]')"
 fi
 
+if command -v mypy >/dev/null 2>&1; then
+  echo; echo "==> mypy (prototype/api)"
+  (cd "$root" && mypy) || status=1
+else
+  echo; echo "==> mypy: skipped (not installed — pip install 'keystone[dev]')"
+fi
+
+
 echo
 if [ "$status" -eq 0 ]; then
   echo "✅ CHECK PASSED — safe to merge (after review)."

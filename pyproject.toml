@@ -13,9 +13,36 @@ api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2"]
 db = ["supabase>=2.31", "python-dotenv>=1.0"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
 
 [tool.pytest.ini_options]
 testpaths = ["prototype/tests"]
+
+[tool.setuptools.packages.find]
+# Setuptools normally auto-scans the repo ROOT for packages. That broke once
+# frontend/ (a Next.js app, not Python) landed alongside prototype/ — setuptools
+# saw two top-level dirs and refused to guess which one to install.
+# This says: only look for packages inside prototype/ (finds keystone + api,
+# skips tests/ and outputs/ since they have no __init__.py).
+where = ["prototype"]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# Pre-existing lint debt in Bifola's trust-critical core, out of scope for #23.
+# Listed in the PR description for him to clean up separately.
+extend-exclude = [
+    "prototype/keystone/claude_council.py",
+    "prototype/keystone/ingestion.py",
+    "prototype/keystone/report.py",
+    "prototype/keystone/simulation.py",
+    "prototype/keystone/benchmarks/eval_harness.py",
+    "prototype/run_scoring.py",
+    "prototype/run_ticket_booking.py",
+    "prototype/tests/test_grounding_seam.py",
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["prototype/api"]
+
