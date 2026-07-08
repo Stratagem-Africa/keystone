@@ -45,4 +45,17 @@ extend-exclude = [
 [tool.mypy]
 python_version = "3.10"
 files = ["prototype/api"]
+# api/ imports from keystone/ (real pre-existing type debt, Bifola's core, out of
+# scope for #23). follow_imports="silent" still type-checks api/ against keystone's
+# REAL signatures (so a wrong-type call into the engine is still caught) but stops
+# mypy reporting errors that live inside keystone/ itself.
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+# supabase ships no type stubs, and it's a "db" extra, not part of "dev" — a plain
+# `pip install -e ".[dev]"` won't have it installed. Without this, mypy fails on
+# api/jobs.py's `from supabase import create_client`.
+module = ["supabase", "supabase.*"]
+ignore_missing_imports = true
+
 
