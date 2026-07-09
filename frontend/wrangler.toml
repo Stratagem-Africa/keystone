@@ -7,3 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
+
+# Binds the "keystone-uploads" R2 bucket to this Worker.
+# [[r2_buckets]] uses DOUBLE brackets because it's a repeatable block —
+# you could bind more than one bucket if you ever needed to.
+[[r2_buckets]]
+bucket_name = "keystone-uploads"   # the real bucket name in Cloudflare (must match exactly)
+binding = "UPLOADS"                # the name your Worker code uses, e.g. env.UPLOADS.put(...)
