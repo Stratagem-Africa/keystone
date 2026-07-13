@@ -18,8 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # The engine is zero-dependency and the council tests use an injected fake
-      # client, so the suite runs with no pip install and no API key ($0).
+      # The engine + council tests are zero-dependency (injected fake client, no API
+      # key, $0) — but the api/worker tests import fastapi/supabase, so those extras
+      # still need installing.
+      - name: Install api + db extras
+        run: pip install -e ".[api,db]"
       - name: Run test suite
         working-directory: prototype
         run: python -m unittest discover -s tests -v
@@ -32,10 +35,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # Installs the project + its dev extras (ruff, mypy) from pyproject.toml,
-      # same as your local `pip install -e ".[dev]"`.
-      - name: Install dev tools
-        run: pip install -e ".[dev]"
+      # Installs the project + its dev extras (ruff, mypy) AND the api/db extras
+      # (fastapi, pydantic, uvicorn, supabase) — mypy needs the real libs on disk to
+      # type-check api/ against their actual signatures, same as
+      # `pip install -e ".[dev,api,db]"` locally.
+      - name: Install dev + api + db tools
+        run: pip install -e ".[dev,api,db]"
       - name: ruff check
         run: ruff check .
       - name: mypy (prototype/api)
