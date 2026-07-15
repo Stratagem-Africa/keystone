@@ -6,7 +6,10 @@ Keystone runs **trunk-based** with one rule above all:
 ## The loop
 1. Branch from `main`: `feat/…`, `fix/…`, `docs/…`, `chore/…` — short-lived.
 2. Build in your lane (see [`docs/07`](docs/07-Team-and-Roadmap.md) §4). Before pushing, get the
-   **local gate** green: **`scripts/check.sh`** (runs the suite — zero-dependency, $0).
+   **local gate** green: **`scripts/check.sh`** (runs the suite — zero-dependency, $0). Ruff and
+   mypy only run if installed (`pip install -e ".[dev,api,db]"` once per clone — the api/db
+   extras are needed too, since api/'s code and tests import fastapi/pydantic/uvicorn/supabase)
+   — otherwise `check.sh` silently skips ruff/mypy and only the test suite runs.
 3. Open a PR. **CODEOWNERS** auto-requests Bifola. (GitHub Actions is **dormant** — see below — so
    there's no auto-CI check on the PR; the test signal comes from the local gate the reviewer runs.)
 4. Bifola reviews — runs the gate + an adversarial Review→Verify — and leaves clear feedback for
@@ -34,6 +37,8 @@ hard-blocked. Mitigated by the local gate + the Bifola-gated prod deploy + the c
 With Actions dormant, the merge gate is **manual and local** — and merging never needed Actions
 anyway (`gh pr merge` is a plain git op). For each contributor PR, the reviewer (Bifola / his Claude):
 1. **`scripts/review-pr.sh <PR#>`** — checks out the PR, shows the diff vs `origin/main`, runs the gate.
+   (Needs `pip install -e ".[dev,api,db]"` once — without it, ruff/mypy are silently skipped and only
+   the test suite runs, so a lint/type regression could slip through unnoticed.)
 2. **Adversarial Review→Verify** of the diff against the gates below (prime directive, accuracy
    honesty, harm floor, correctness). Trust-critical changes (auth, money, PII, tenant isolation,
    schema, crypto, the prime-directive guard) get an independent, author-recused pass.

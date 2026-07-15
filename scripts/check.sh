@@ -50,8 +50,16 @@ if command -v ruff >/dev/null 2>&1; then
   echo; echo "==> ruff check ."
   ruff check . || status=1
 else
-  echo; echo "==> ruff: skipped (not installed — pip install 'keystone[dev]')"
+  echo; echo "==> ruff: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
+
+if command -v mypy >/dev/null 2>&1; then
+  echo; echo "==> mypy (prototype/api)"
+  (cd "$root" && mypy) || status=1
+else
+  echo; echo "==> mypy: skipped (not installed — pip install 'keystone[dev,api,db]')"
+fi
+
 
 echo
 if [ "$status" -eq 0 ]; then
