@@ -1,6 +1,8 @@
 # Secrets — never commit (harm floor)
 .env
 .env.*
+# prefixed env files (e.g. keystone.env) — the .env* globs above miss a NAME.env
+*.env
 !.env.example
 *.key
 *.pem
@@ -18,6 +20,7 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+*.code-workspace
 
 # Local scratch
 *.log
