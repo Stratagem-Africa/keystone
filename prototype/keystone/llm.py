@@ -13,6 +13,8 @@ import os
 import urllib.request
 from typing import Protocol
 
+from keystone.cost_meter import CostMeter, anthropic_usage, openai_usage
+
 log = logging.getLogger("keystone.llm")
 
 
@@ -35,7 +37,8 @@ class AnthropicLLM:
     (`pip install 'keystone[council]'`), imported lazily so the zero-dependency engine
     never pulls it in. The API key is never logged."""
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, *, meter: CostMeter | None = None,
+                 provider: str = "claude") -> None:
         try:
             import anthropic  # optional dep — only needed for a live provider
         except ImportError as e:  # pragma: no cover - exercised only without the extra
@@ -45,6 +48,8 @@ class AnthropicLLM:
             ) from e
         self._client = anthropic.Anthropic()
         self._model = model
+        self._meter = meter          # operational spend telemetry, opt-in (never a product number)
+        self._provider = provider
 
     def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
         log.debug("llm call [%s] model=%s", label, self._model)
@@ -54,6 +59,8 @@ class AnthropicLLM:
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        if self._meter is not None:
+            self._meter.record(self._provider, self._model, *anthropic_usage(resp))
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
@@ -66,13 +73,16 @@ class OpenAICompatibleLLM:
     Same `LLM` seam as `AnthropicLLM`, so the council/ingestion/consensus layers are provider-agnostic.
     Inject a fake `LLM` for $0 offline tests; this transport only runs when a real provider is selected."""
 
-    def __init__(self, model: str, *, base_url: str, api_key_env: str | None = None, timeout: int = 120) -> None:
+    def __init__(self, model: str, *, base_url: str, api_key_env: str | None = None, timeout: int = 120,
+                 meter: CostMeter | None = None, provider: str | None = None) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._api_key = os.getenv(api_key_env) if api_key_env else None
         if api_key_env and not self._api_key:
             raise LLMError(f"{api_key_env} is not set — required for the {base_url} provider.")
         self._timeout = timeout
+        self._meter = meter          # operational spend telemetry, opt-in (never a product number)
+        self._provider = provider    # telemetry label so a $0 provider (ollama/github/:free) is priced right
 
     def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
         log.debug("llm call [%s] model=%s base=%s", label, self._model, self._base_url)
@@ -91,6 +101,8 @@ class OpenAICompatibleLLM:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:   # transport/HTTP/JSON failure — fail loud, never silently empty
             raise LLMError(f"{label}: {self._base_url} call failed: {e}") from e
+        if self._meter is not None:
+            self._meter.record(self._provider, self._model, *openai_usage(data))
         try:
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as e:
@@ -123,14 +135,15 @@ def known_providers() -> frozenset:
     return frozenset({"claude", "anthropic"} | set(_OPENAI_COMPATIBLE))
 
 
-def make_llm(provider: str, model: str) -> LLM:
+def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LLM:
     """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
     `claude`/`anthropic` → `AnthropicLLM` (SDK); every other registered provider (openai | openrouter |
     gemini | groq | cerebras | xai | github | ollama) → `OpenAICompatibleLLM` (stdlib HTTP). Used by the
-    council factory + the multi-model consensus layer."""
+    council factory + the multi-model consensus layer. An optional `meter` records this transport's
+    token-usage as Keystone's own API spend (opt-in telemetry — never a product number)."""
     p = provider.strip().lower()
     if p in ("claude", "anthropic"):
-        return AnthropicLLM(model)
+        return AnthropicLLM(model, meter=meter, provider=p)
     if p == "ollama":
         base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         if not base.endswith("/v1"):
@@ -139,9 +152,10 @@ def make_llm(provider: str, model: str) -> LLM:
         # peer-review stage over 7 proposals) can exceed the 120s default and time out mid-council.
         # Give Ollama a longer, env-tunable timeout so a full local run completes.
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=None,
-                                   timeout=int(os.getenv("OLLAMA_TIMEOUT", "600")))
+                                   timeout=int(os.getenv("OLLAMA_TIMEOUT", "600")),
+                                   meter=meter, provider=p)
     if p in _OPENAI_COMPATIBLE:
         base, key_env = _OPENAI_COMPATIBLE[p]
-        return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env)
+        return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env, meter=meter, provider=p)
     raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | "
                    "gemini | groq | cerebras | xai | github | ollama)")

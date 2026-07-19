@@ -26,6 +26,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from keystone.cost_meter import CostMeter
 from keystone.council import ADR, ensure_high_stakes_gate
 from keystone.llm import LLM, AnthropicLLM
 from keystone.model import SystemModel
@@ -365,9 +366,12 @@ class ClaudeCouncil:
     """Real consensus council. Satisfies the `Council` protocol from council.py."""
 
     def __init__(self, model: str, *, client: LLM | None = None,
-                 personas: tuple[Persona, ...] = PERSONAS, source: str = "claude") -> None:
+                 personas: tuple[Persona, ...] = PERSONAS, source: str = "claude",
+                 meter: CostMeter | None = None) -> None:
         self._model = model
-        self._llm: LLM = client if client is not None else AnthropicLLM(model)
+        # An injected client already owns its own metering (make_council attaches it); only meter the
+        # SDK transport we build ourselves here, so usage is never double-counted.
+        self._llm: LLM = client if client is not None else AnthropicLLM(model, meter=meter, provider="claude")
         self._personas = personas
         # Honest provenance stamped on every ADR (Doc 03): "<provider>:<model>", e.g.
         # "github:openai/gpt-4o-mini". The report shows this so a reader knows WHICH model reasoned —

@@ -140,7 +140,7 @@ class DeterministicStubCouncil:
 
 
 def make_council(provider: str | None = None, model: str | None = None,
-                 *, client=None) -> Council:
+                 *, client=None, meter=None) -> Council:
     """Build the configured council.
 
     Defaults to the deterministic stub so the whole loop runs with no API key and
@@ -156,6 +156,10 @@ def make_council(provider: str | None = None, model: str | None = None,
 
     `client` lets a caller (or a test) inject an LLM transport for ANY non-stub
     provider — the path used for $0 offline testing (no network, no key).
+
+    `meter` is an optional `CostMeter` (keystone.cost_meter) threaded to every real
+    transport so a run can report Keystone's own API spend. It is opt-in operational
+    telemetry — it changes NO product number and is untouched on the stub path.
     """
     provider = (provider or os.getenv("COUNCIL_PROVIDER", "stub")).strip().lower()
     if provider == "stub":
@@ -166,8 +170,9 @@ def make_council(provider: str | None = None, model: str | None = None,
         # primary can now be ANY provider (e.g. gemini:gemini-2.0-flash). Lazy; stays $0 until configured.
         from keystone.consensus import make_consensus_council  # lazy
         prim_provider, _, prim_model = os.getenv("CONSENSUS_PRIMARY", "claude").partition(":")
-        primary = make_council(prim_provider.strip() or "claude", prim_model.strip() or None, client=client)
-        return make_consensus_council(primary=primary)
+        primary = make_council(prim_provider.strip() or "claude", prim_model.strip() or None,
+                               client=client, meter=meter)
+        return make_consensus_council(primary=primary, meter=meter)
 
     # Any single LLM provider drives the REAL council — it is provider-agnostic (ADR-010): the council
     # REASONS through the `LLM` seam and the prime-directive guard scrubs its output regardless of vendor.
@@ -177,7 +182,7 @@ def make_council(provider: str | None = None, model: str | None = None,
     from keystone.claude_council import ClaudeCouncil  # lazy: optional dep
     if provider in ("claude", "anthropic"):
         claude_model = model or os.getenv("COUNCIL_MODEL", DEFAULT_COUNCIL_MODEL)
-        return ClaudeCouncil(model=claude_model, client=client, source=f"claude:{claude_model}")
+        return ClaudeCouncil(model=claude_model, client=client, source=f"claude:{claude_model}", meter=meter)
     # Validate the provider NAME before anything else, so a blank/typo'd provider gives one clear
     # error (not a misleading "needs a model") — preserving main's diagnostic on the fail-closed path.
     from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
@@ -192,5 +197,5 @@ def make_council(provider: str | None = None, model: str | None = None,
             f"COUNCIL_PROVIDER={provider!r} needs an explicit model — set COUNCIL_MODEL "
             "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
         )
-    return ClaudeCouncil(model=council_model, source=f"{provider}:{council_model}",
-                         client=client if client is not None else make_llm(provider, council_model))
+    return ClaudeCouncil(model=council_model, source=f"{provider}:{council_model}", meter=meter,
+                         client=client if client is not None else make_llm(provider, council_model, meter=meter))

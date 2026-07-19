@@ -9,6 +9,7 @@ import os
 
 from _env import load_env, report_path
 from keystone.blueprints import url_shortener
+from keystone.cost_meter import CostMeter
 from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.confidence_bands import simulate_with_confidence
@@ -18,12 +19,14 @@ from keystone.report import render
 OUT = os.path.join(os.path.dirname(__file__), "outputs", "url_shortener_report.md")
 
 
-def build_and_render(kb=None):
+def build_and_render(kb=None, meter=None):
     """The full loop, as a single source so the golden-report test renders EXACTLY what main() writes.
 
     `kb` defaults to the env-driven Knowledge Base (CURATED by default — grounding is ACTIVATED for
     reports; KB_PROVIDER=stub disables). Returns (model, sim, whatifs, markdown). Grounding is
-    evidence-only — it changes no computed number, only adds the cited GROUNDED/RECONCILE sections."""
+    evidence-only — it changes no computed number, only adds the cited GROUNDED/RECONCILE sections.
+    `meter` (optional) records Keystone's own API spend for a live council — operational telemetry that
+    changes NO product number and stays empty on the stub path (the golden test passes no meter)."""
     # 1. Canonical model (LLM-derived in product; hand-built here for validation).
     model = url_shortener.build(system_rps=10_000, cache_hit_rate=0.90)
 
@@ -32,7 +35,7 @@ def build_and_render(kb=None):
 
     # 2. Council reasons. Defaults to the deterministic stub ($0, no key); set
     #    COUNCIL_PROVIDER=claude (+ ANTHROPIC_API_KEY) to activate the real council.
-    council = make_council()
+    council = make_council(meter=meter)
     adrs = council.design(model)
 
     # 3. Deterministic simulation — the engine produces the numbers; confidence bands propagate the
@@ -54,7 +57,8 @@ def build_and_render(kb=None):
 
 def main() -> None:
     load_env()                              # activate local .env (council/grounding); existing env wins
-    model, sim, whatifs, md = build_and_render()
+    meter = CostMeter()                     # Keystone's own API spend for this run (empty on the stub path)
+    model, sim, whatifs, md = build_and_render(meter=meter)
     out, provider = report_path(OUT)        # LIVE council -> gitignored *.local.md (never clobber the golden)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
@@ -66,6 +70,7 @@ def main() -> None:
     print("=" * 70)
     print(f"Council          : {provider}"
           + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
+    print(f"API spend (ours) : {meter.summary()}")   # our inference cost — NOT the user's system cost
     print(f"Bottleneck       : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
     print(f"Max safe load    : {sim.breakpoint_rps_safe:,.0f} rps "
           f"(theoretical {sim.breakpoint_rps_theoretical:,.0f})")
