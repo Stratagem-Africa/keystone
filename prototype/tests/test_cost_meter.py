@@ -56,14 +56,29 @@ class TestHonestZeroAndUnknown(unittest.TestCase):
         m.record("openai", "gpt-4o", 1000, 1000)                 # no cited price → unknown
         self.assertEqual(m.total_micro_usd(), 0)                 # excluded from the total…
         self.assertEqual(m.unpriced_models, {"gpt-4o"})          # …but surfaced, not hidden
-        self.assertIn("unpriced", m.summary())
+        s = m.summary()
+        self.assertIn("not fully priceable", s)                  # never a precise fake $0
+        self.assertNotIn("$0.0000", s)
+        self.assertIn("unpriced", s)
 
-    def test_unknown_does_not_swallow_priced(self):
+    def test_unknown_does_not_swallow_priced_shows_floor(self):
         m = CostMeter()
         m.record("openrouter", "moonshotai/kimi-k3", 1000, 0)    # 3000 µUSD
         m.record("openai", "gpt-4o", 1000, 1000)                 # unknown → 0
         self.assertEqual(m.total_micro_usd(), 3000)
         self.assertEqual(m.unpriced_models, {"gpt-4o"})
+        s = m.summary()
+        self.assertIn("≥ $", s)                                  # a floor, not a complete total…
+        self.assertIn("PARTIAL", s)
+        self.assertIn("unpriced", s)
+
+    def test_default_claude_haiku_is_priced(self):
+        # The default council model (.env.example) must price honestly, not read as $0.
+        m = CostMeter()
+        m.record("claude", "claude-haiku-4-5-20251001", 1_000_000, 500_000)  # $1/M in, $5/M out
+        self.assertEqual(m.total_micro_usd(), 1_000_000 + 2_500_000)         # $3.50
+        self.assertEqual(m.unpriced_models, set())
+        self.assertIn("≈ $3.5000", m.summary())
 
 
 class TestMissingAndBadUsage(unittest.TestCase):

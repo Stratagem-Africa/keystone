@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from _env import load_env, report_path
+from keystone.cost_meter import CostMeter
 from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.ingestion import Source, make_ingestor
@@ -33,7 +34,8 @@ def main() -> None:
     result = make_ingestor().ingest(Source(text=NOTE, name="URL Shortener (from note)"))
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
-    council = make_council()
+    meter = CostMeter()                     # OUR council API spend (council only; ingestion spend not yet metered)
+    council = make_council(meter=meter)
     adrs = council.design(model)
     sim = simulate_with_confidence(model)   # output ranges from cited input uncertainty (values unchanged)
     # 4. Report with the mandatory honesty section.
@@ -48,6 +50,7 @@ def main() -> None:
     print("=" * 70)
     print(f"Council            : {provider}"
           + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
+    print(f"Council API spend  : {meter.summary()}")   # OUR council inference spend — NOT the user's system cost (excludes ingestion)
     for n in result.notes:
         print(f"  note: {n}")
     print(f"Components inferred : {', '.join(model.components)}")

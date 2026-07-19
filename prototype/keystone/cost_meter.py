@@ -37,9 +37,14 @@ _LIST_PRICES: dict[str, tuple[int, int]] = {
     "moonshotai/kimi-k2-thinking": (  600_000,  2_500_000),
     "moonshotai/kimi-k2-0905":     (  600_000,  2_500_000),
     "moonshotai/kimi-k2":          (  570_000,  2_300_000),
-    # Claude / OpenAI / Gemini list prices intentionally OMITTED until a cited,
-    # ratified snapshot exists — an un-cited price would be an invented number
-    # (honesty charter). Such a model is reported "unpriced (cost unknown)", not $0.
+    # Anthropic — the DEFAULT council model (.env.example COUNCIL_MODEL / CONSENSUS_PRIMARY),
+    # so the common path prices honestly instead of reading a fake $0. Standard API list price
+    # $1/M in · $5/M out, snapshot 2026-07 (anthropic.com/pricing; corroborated). Batch/cache
+    # discounts NOT modelled — AnthropicLLM sends no cache_control today (see anthropic_usage).
+    "claude-haiku-4-5-20251001":   (1_000_000,  5_000_000),
+    # Other OpenAI/Gemini/etc. list prices intentionally OMITTED until a cited snapshot exists —
+    # an un-cited price would be an invented number (honesty charter). Such a model is reported
+    # "unpriced (cost unknown)", never $0.
 }
 
 # Genuinely-zero-cost paths (recognised as $0, NOT "unknown"):
@@ -122,16 +127,27 @@ class CostMeter:
                 sum(c.output_tokens or 0 for c in self.calls))
 
     def summary(self) -> str:
-        """One honest human line for the run console/log. Never a bare number: it
-        carries the snapshot, and names anything it could not price or count."""
+        """One honest human line for the run console/log. Never presents a precise dollar
+        figure as if COMPLETE when some calls are unpriced — a partial/floor is marked `≥`
+        (or "not fully priceable" when nothing priced), so an unpriced paid model can never
+        be read as a fake $0. Carries the snapshot and names anything it could not price or
+        count. The $0 of a hosted free tier is itself a dated assumption (see `_SNAPSHOT`)."""
         if not self.calls:
             return "Keystone API spend: no live LLM calls (stub / offline) — $0.00"
-        usd = self.total_micro_usd() / _MICRO          # display-only float formatting
+        priced_micro = self.total_micro_usd()
+        usd = priced_micro / _MICRO                    # display-only float formatting
         tin, tout = self.total_tokens()
-        parts = [f"Keystone API spend ≈ ${usd:.4f} (list price, snapshot {_SNAPSHOT})",
+        unpriced = sorted(self.unpriced_models)
+        if unpriced and priced_micro == 0:
+            head = "Keystone API spend: not fully priceable (0 priced calls)"
+        elif unpriced:
+            head = f"Keystone API spend ≥ ${usd:.4f} (PARTIAL — priced calls only)"
+        else:
+            head = f"Keystone API spend ≈ ${usd:.4f}"
+        parts = [f"{head} (list/free-tier prices, snapshot {_SNAPSHOT})",
                  f"{len(self.calls)} call(s) · {tin:,} in / {tout:,} out tokens"]
-        if self.unpriced_models:
-            parts.append("unpriced, cost unknown: " + ", ".join(sorted(self.unpriced_models)))
+        if unpriced:
+            parts.append("unpriced, cost unknown: " + ", ".join(unpriced))
         if self.calls_missing_usage:
             parts.append(f"{self.calls_missing_usage} call(s) returned no usage")
         return " · ".join(parts)
@@ -146,6 +162,11 @@ def openai_usage(data: object) -> tuple[int | None, int | None]:
 
 
 def anthropic_usage(resp: object) -> tuple[int | None, int | None]:
-    """(input, output) token counts from an Anthropic SDK message response."""
+    """(input, output) token counts from an Anthropic SDK message response.
+
+    Reads `input_tokens`/`output_tokens` only — exact today because `AnthropicLLM.complete`
+    sends no `cache_control`, so `input_tokens` is the full billed input. If prompt caching
+    is ever enabled, add the `cache_read_input_tokens`/`cache_creation_input_tokens` dimensions
+    here (billed at different rates) so the meter stays honest."""
     u = getattr(resp, "usage", None)
     return _int_or_none(getattr(u, "input_tokens", None)), _int_or_none(getattr(u, "output_tokens", None))

@@ -70,7 +70,7 @@ def main() -> None:
     print("=" * 70)
     print(f"Council          : {provider}"
           + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
-    print(f"API spend (ours) : {meter.summary()}")   # our inference cost — NOT the user's system cost
+    print(f"Council API spend: {meter.summary()}")   # OUR inference spend (council only) — NOT the user's system cost
     print(f"Bottleneck       : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
     print(f"Max safe load    : {sim.breakpoint_rps_safe:,.0f} rps "
           f"(theoretical {sim.breakpoint_rps_theoretical:,.0f})")
