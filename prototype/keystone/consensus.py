@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass
 
 from keystone.claude_council import _NO_NUMBERS_RULE, _extract_json, _redact_engine_metrics
+from keystone.cost_meter import CostMeter
 from keystone.council import ADR, Council
 from keystone.llm import LLM, make_llm
 from keystone.model import SystemModel
@@ -114,23 +115,26 @@ class ConsensusCouncil:
         return out
 
 
-def _voters_from_spec(spec: str) -> list[Voter]:
+def _voters_from_spec(spec: str, *, meter: CostMeter | None = None) -> list[Voter]:
     """Parse CONSENSUS_VOTERS ('provider:model, provider:model, …') into voter transports. Split on the
-    FIRST ':' so model names that contain ':' (e.g. openrouter '…llama-3.1:free') survive."""
+    FIRST ':' so model names that contain ':' (e.g. openrouter '…llama-3.1:free') survive. An optional
+    `meter` records each voter's own API spend (opt-in telemetry — never a product number)."""
     voters: list[Voter] = []
     for raw in spec.split(","):
         raw = raw.strip()
         if not raw or ":" not in raw:
             continue
         provider, model = (s.strip() for s in raw.split(":", 1))
-        voters.append(Voter(label=f"{provider} {model}", llm=make_llm(provider, model)))
+        voters.append(Voter(label=f"{provider} {model}", llm=make_llm(provider, model, meter=meter)))
     return voters
 
 
-def make_consensus_council(*, primary: Council, voters: list[Voter] | None = None) -> ConsensusCouncil:
+def make_consensus_council(*, primary: Council, voters: list[Voter] | None = None,
+                           meter: CostMeter | None = None) -> ConsensusCouncil:
     """Build a consensus council. `voters` defaults to the `CONSENSUS_VOTERS` env spec
     ('openai:gpt-5-mini, openrouter:meta-llama/llama-3.1-8b-instruct:free, ollama:llama3'). A caller (or
-    test) can inject fake voters for $0 offline runs."""
+    test) can inject fake voters for $0 offline runs. `meter` is threaded to env-built voters only —
+    injected voters own their own metering."""
     if voters is None:
-        voters = _voters_from_spec(os.getenv("CONSENSUS_VOTERS", ""))
+        voters = _voters_from_spec(os.getenv("CONSENSUS_VOTERS", ""), meter=meter)
     return ConsensusCouncil(primary=primary, voters=voters)

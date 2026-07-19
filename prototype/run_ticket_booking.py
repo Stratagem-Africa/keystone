@@ -12,6 +12,7 @@ import os
 
 from _env import load_env, report_path
 from keystone.blueprints import ticket_booking
+from keystone.cost_meter import CostMeter
 from keystone.council import make_council
 from keystone.grounding import ground_model
 from keystone.report import render
@@ -25,7 +26,8 @@ def main() -> None:
     load_env()                              # activate local .env (council/grounding); existing env wins
     baseline = ground_model(ticket_booking.build())   # steady state: 5k rps, 5% book (grounding activated)
     sim = simulate_with_confidence(baseline)           # output ranges from cited input uncertainty (values unchanged)
-    council = make_council()
+    meter = CostMeter()                     # OUR council API spend for this run (empty on the stub path)
+    council = make_council(meter=meter)
     adrs = council.design(baseline)
 
     whatifs = [
@@ -47,6 +49,7 @@ def main() -> None:
     print("=" * 74)
     print(f"Council    : {provider}"
           + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
+    print(f"Council API spend: {meter.summary()}")   # OUR inference spend (council only) — NOT the user's system cost
     print(f"Baseline ({baseline.workload.description}) @ {sim.system_rps:,.0f} rps")
     print(f"  bottleneck : {sim.bottleneck_name} ({sim.bottleneck_utilization*100:.0f}% util)")
     print(f"  max safe   : {sim.breakpoint_rps_safe:,.0f} rps · compute ${sim.monthly_cost / 100:,.0f}/mo")  # cost is cents (ADR-008)
