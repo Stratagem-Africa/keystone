@@ -6,16 +6,16 @@ type Provenance = "GROUNDED" | "ASSUMPTION" | "GAP";
 
 type ConfidenceBandProps = {
   provenance: Provenance;
-  low: number;   // lower bound of the confidence interval
-  high: number;  // upper bound of the confidence interval
+  low: number | null;   // null = no cited range yet (not zero uncertainty — just unknown)
+  high: number | null;  // null = no cited range yet (not zero uncertainty — just unknown)
   value: number; // the centre value — used to compute relative spread
 };
 
 type MetricProps = {
   value: number;       // the engine-computed number
   unit: string;        // e.g. "ms", "req/s", "%"
-  low: number;         // lower bound of confidence interval
-  high: number;        // upper bound of confidence interval
+  low: number | null;         // null = no cited range yet
+  high: number | null;        // null = no cited range yet
   provenance: Provenance;
   model: string;       // what produced this number, e.g. "M/M/1 queue"
 };
@@ -23,6 +23,17 @@ type MetricProps = {
 // ConfidenceBand — horizontal bar whose width encodes uncertainty and
 // whose hue rides the Doubt→Trust ramp (amber → green). docs/09 §3.1.
 export function ConfidenceBand({ provenance, low, high, value }: ConfidenceBandProps) {
+  // No cited range to show — render a visibly "unknown width" dashed outline
+  // instead of computing a spread from missing numbers. Fabricating a width
+  // here would be false precision (docs/09: no bare/faked numbers).
+  if (low === null || high === null) {
+    return (
+      <div className="relative h-1 w-full rounded-full bg-mist mt-1" aria-hidden="true">
+        <div className="absolute left-0 top-0 h-full w-full rounded-full border border-dashed border-assumption-amber/50" />
+      </div>
+    );
+  }
+
   // Relative spread: (range / value), clamped so the bar is always readable.
   const spread = value > 0
     ? Math.min(Math.max((high - low) / value, 0.08), 0.92)
