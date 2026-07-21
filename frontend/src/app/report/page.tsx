@@ -78,16 +78,30 @@ const PROVENANCE = "ASSUMPTION" as const;
 // units (a 0–1 ratio, integer cents) aren't what a reader wants to see. This
 // only changes how a value is displayed, never what it means.
 function displayMetric(key: string, m: EngineMetric): EngineMetric {
+  // Whichever transform we pick below, we apply it to value AND low/high
+  // together. If only `value` moved to a new scale, ConfidenceBand's
+  // (high - low) / value math would mix raw and display units and draw a
+  // wrong-scale band the moment a grounded source fills in low/high.
+  let transform: (n: number) => number = (n) => n; // default: no change
+  let unit = m.unit;
+
   if (key === "bottleneck_utilization") {
-    return { ...m, value: Math.round(m.value * 1000) / 10, unit: "%" };
+    transform = (n) => Math.round(n * 1000) / 10;
+    unit = "%";
+  } else if (key === "monthly_cost") {
+    transform = (n) => Math.round(n) / 100;
+    unit = "USD/mo";
+  } else if (m.unit === "ms" || m.unit === "rps") {
+    transform = (n) => Math.round(n * 10) / 10;
   }
-  if (key === "monthly_cost") {
-    return { ...m, value: Math.round(m.value) / 100, unit: "USD/mo" };
-  }
-  if (m.unit === "ms" || m.unit === "rps") {
-    return { ...m, value: Math.round(m.value * 10) / 10 };
-  }
-  return m;
+
+  return {
+    ...m,
+    value: transform(m.value),
+    low: m.low === null ? null : transform(m.low),
+    high: m.high === null ? null : transform(m.high),
+    unit,
+  };
 }
 
 function VerdictMetric({
@@ -215,8 +229,11 @@ function ADRSection({ adrs }: { adrs: ADR[] }) {
         </p>
       )}
 
-      {adrs.map((adr) => (
-        <ADRCard key={adr.area} adr={adr} />
+      {adrs.map((adr, i) => (
+        // `area` alone isn't guaranteed unique (two decisions could share
+        // one, or a future high-stakes gate could add its own "Review
+        // gate" area) — appending the index guarantees uniqueness.
+        <ADRCard key={`${adr.area}-${i}`} adr={adr} />
       ))}
     </div>
   );
@@ -271,7 +288,6 @@ export default function ReportPage() {
         }
 
         const json: DesignResponse = await res.json();
-        console.log("design response:", json); // <- look at this in devtools
         setData(json);
       } catch (err) {
         setError(err instanceof Error ? err.message : "unknown error");
