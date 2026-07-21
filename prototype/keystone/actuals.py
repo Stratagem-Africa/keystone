@@ -15,11 +15,16 @@ Invariants (this is trust-critical):
   - **Never auto-resolve (ADR-004 ethos):** a divergence is SURFACED side-by-side
     (predicted vs observed + the gap), never silently reconciled or used to "correct"
     the model. A hard divergence is flagged prominently for the human reviewer.
-  - **Honesty:** every observed value carries its provenance (source + measurement
-    window + context); a metric the engine did not predict is flagged NO_PREDICTION,
-    never dropped or faked.
-  - **Read-only:** actuals arrive from a file/export — NO load is generated against
-    the user's system (that is a v2 concern). This module is pure + deterministic.
+  - **Honesty:** every observed value carries mandatory provenance (source + window);
+    a metric the engine did not predict is flagged NO_PREDICTION, never dropped or
+    faked; an observation in the wrong unit is UNIT_MISMATCH (no verdict asserted from
+    incomparable numbers), never silently compared.
+  - **Untrusted input (harm floor):** actuals arrive from an external file/export —
+    treated as UNTRUSTED. Parsing is fail-closed (missing field / non-numeric / bool /
+    non-finite / blank-provenance all rejected); string fields are sanitised + length-
+    bounded so they cannot break or inject the markdown report or the calibration JSON.
+  - **Read-only:** NO load is generated against the user's system (that is a v2
+    concern). This module is pure + deterministic.
 
 Real external-client actuals are commercially sensitive → gated on the model store's
 tenant-isolation MUST (#21) before any multi-tenant upload; single-user/offline runs
@@ -27,6 +32,7 @@ tenant-isolation MUST (#21) before any multi-tenant upload; single-user/offline 
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from keystone.simulation import SimulationResult
@@ -36,8 +42,8 @@ from keystone.simulation import SimulationResult
 _COMPONENT_FIELDS = frozenset({"arrival_rps", "capacity_rps", "utilization", "mean_latency_ms"})
 
 # The engine unit each metric is expressed in — so an observation supplied in the WRONG
-# unit (e.g. utilisation as "72"% vs the engine's 0.72 ratio) is FLAGGED, never silently
-# compared or auto-converted (auto-conversion could hide a real error — honesty).
+# unit (e.g. utilisation as "72"% vs the engine's 0.72 ratio) is flagged UNIT_MISMATCH and
+# NOT compared (auto-conversion or a raw comparison could assert a false MATCH/DIVERGE).
 _ENGINE_UNIT = {
     "arrival_rps": "rps", "capacity_rps": "rps", "utilization": "ratio",
     "mean_latency_ms": "ms",
@@ -46,7 +52,37 @@ _ENGINE_UNIT = {
     "monthly_cost": "usd_minor_per_month",
 }
 
-MATCH, DIVERGE, NO_PREDICTION = "MATCH", "DIVERGE", "NO_PREDICTION"
+MATCH, DIVERGE, NO_PREDICTION, UNIT_MISMATCH = "MATCH", "DIVERGE", "NO_PREDICTION", "UNIT_MISMATCH"
+
+_MAX_FIELD = 200   # untrusted string fields are length-bounded (report-flood guard)
+
+
+def _sanitize_field(s: object, *, limit: int = _MAX_FIELD) -> str:
+    """Make an untrusted export string safe + bounded before it is stored, rendered, or
+    persisted: collapse CR/LF/tabs to spaces, drop other control chars, strip, and clip to
+    `limit` — so a newline cannot forge a table row/heading and one field cannot flood the
+    report. Unlike ingestion._clean_text we do NOT scrub numbers: a measurement window or
+    value IS legitimate evidence here. Pipe-escaping for markdown happens at render (`_cell`)."""
+    out = str(s).replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    out = "".join(ch for ch in out if ch >= " ").strip()
+    return out if len(out) <= limit else out[:limit - 1].rstrip() + "…"
+
+
+def _cell(s: object) -> str:
+    """Render an (untrusted) string into a markdown table cell, self-defending: sanitise
+    (newline/control/bound) AND escape the pipe, so a forged column/row can't be drawn even
+    if an Observation was built without going through the parser."""
+    return _sanitize_field(s).replace("|", r"\|")
+
+
+def _num(n: float | None) -> str:
+    """Readable magnitude for the report — thousands-separated, no scientific notation, no
+    trailing-zero noise (a `:g` on a large cost/rps would print e.g. 1.05e+05)."""
+    if n is None:
+        return "—"
+    if not math.isfinite(n):
+        return str(n)
+    return f"{n:,.4f}".rstrip("0").rstrip(".")
 
 
 @dataclass(frozen=True)
@@ -59,7 +95,7 @@ class Observation:
 
     `component_id` names the component to compare against (`None` = a system-level metric
     such as p99_ms). `metric` is the field/key. Provenance is mandatory: a measurement
-    with no source/window is not evidence."""
+    with no source/window is not evidence (enforced by `observed_from_records`)."""
     metric: str
     value: float
     unit: str
@@ -74,8 +110,8 @@ class PredictionVsActual:
     """One observed metric set beside the engine's prediction for the same thing."""
     observed: Observation
     predicted: float | None     # the engine's predicted value (None = engine did not predict it)
-    gap_ratio: float | None     # (observed - predicted) / predicted, or None if not computable
-    verdict: str                # MATCH | DIVERGE | NO_PREDICTION
+    gap_ratio: float | None     # (observed - predicted) / predicted, or None if not comparable
+    verdict: str                # MATCH | DIVERGE | NO_PREDICTION | UNIT_MISMATCH
     severity: str               # "hard" | "soft" | ""  (only set for DIVERGE)
     note: str
 
@@ -101,17 +137,23 @@ class ActualsReconciliation:
     def no_prediction(self) -> list[PredictionVsActual]:
         return [r for r in self.rows if r.verdict == NO_PREDICTION]
 
+    @property
+    def unit_mismatched(self) -> list[PredictionVsActual]:
+        return [r for r in self.rows if r.verdict == UNIT_MISMATCH]
+
     def calibration_pairs(self) -> list[dict]:
-        """(predicted, observed) pairs for the calibration store — the L0→L1 flywheel.
-        Only rows the engine actually predicted; each keeps its provenance so a future
-        calibration pass knows the measurement's context. Pure data (the caller persists)."""
+        """(predicted, observed) pairs for the calibration store — the L0→L1 flywheel. ONLY
+        comparable rows seed it: a real MATCH/DIVERGE with a finite prediction in matching
+        units. NO_PREDICTION and UNIT_MISMATCH rows are fail-closed EXCLUDED so an
+        incomparable measurement can never poison the store. Each pair carries the unit +
+        provenance so a downstream calibration pass can re-verify. Pure data (caller persists)."""
         out = []
         for r in self.rows:
-            if r.predicted is None:
+            if r.predicted is None or r.verdict not in (MATCH, DIVERGE):
                 continue
             out.append({
                 "component_id": r.observed.component_id, "metric": r.observed.metric,
-                "predicted": r.predicted, "observed": r.observed.value,
+                "unit": r.observed.unit, "predicted": r.predicted, "observed": r.observed.value,
                 "gap_ratio": r.gap_ratio, "verdict": r.verdict,
                 "source": r.observed.source, "window": r.observed.window,
                 "context": r.observed.context,
@@ -120,12 +162,13 @@ class ActualsReconciliation:
 
 
 def observed_from_records(records: list) -> list[Observation]:
-    """Parse a list of plain dicts (e.g. from a JSON export) into Observations, fail-closed.
+    """Parse a list of plain dicts (e.g. from a JSON export) into Observations, FAIL-CLOSED.
 
     Required keys: metric, value, unit, source, window. Optional: component_id, context.
-    A missing required field or a non-numeric value raises ValueError (untrusted input —
-    never silently coerced). Kept pure (no file IO) so the trust-critical parse is testable;
-    the demo/run script does the file read."""
+    Rejected with ValueError (untrusted input — never silently coerced): a missing field, a
+    non-numeric or bool or non-finite (NaN/inf) value, or blank provenance (source/window).
+    String fields are sanitised + length-bounded so no consumer can be injected/flooded.
+    Kept pure (no file IO) so the trust-critical parse is testable; the caller reads the file."""
     out: list[Observation] = []
     for i, rec in enumerate(records):
         if not isinstance(rec, dict):
@@ -134,11 +177,19 @@ def observed_from_records(records: list) -> list[Observation]:
             value = rec["value"]
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"observed record {i}: 'value' must be a number, got {value!r}")
+            value = float(value)
+            if not math.isfinite(value):
+                raise ValueError(f"observed record {i}: 'value' must be finite, got {value!r}")
+            source = _sanitize_field(rec["source"])
+            window = _sanitize_field(rec["window"])
+            if not source or not window:
+                raise ValueError(f"observed record {i}: 'source' and 'window' are mandatory "
+                                 "provenance — a measurement with no traceable origin is not evidence")
             out.append(Observation(
-                metric=str(rec["metric"]), value=float(value), unit=str(rec["unit"]),
-                source=str(rec["source"]), window=str(rec["window"]),
-                component_id=(str(rec["component_id"]) if rec.get("component_id") is not None else None),
-                context=str(rec.get("context", "")),
+                metric=_sanitize_field(rec["metric"]), value=value, unit=_sanitize_field(rec["unit"]),
+                source=source, window=window,
+                component_id=(_sanitize_field(rec["component_id"]) if rec.get("component_id") is not None else None),
+                context=_sanitize_field(rec.get("context", "")),
             ))
         except KeyError as e:
             raise ValueError(f"observed record {i} missing required field {e}") from e
@@ -160,53 +211,64 @@ def _predicted_value(sim: SimulationResult, o: Observation) -> float | None:
 def reconcile_observed(sim: SimulationResult, observed: list[Observation], *,
                        tol: float = 0.15, hard_tol: float = 0.5) -> ActualsReconciliation:
     """Compare each observed metric to the engine's prediction. Deterministic; the engine
-    result is only READ (the prime-directive boundary). A metric within `tol` (relative) is
-    MATCH; beyond it DIVERGE (hard beyond `hard_tol`); one the engine did not predict is
-    NO_PREDICTION. Nothing is auto-resolved — divergences are evidence for the human."""
+    result is only READ (the prime-directive boundary). Precedence per observation:
+      - the engine predicted nothing for it            → NO_PREDICTION
+      - the engine's prediction is non-finite (saturated) → NO_PREDICTION (no comparable value)
+      - the observation's unit ≠ the engine's unit      → UNIT_MISMATCH (no verdict asserted)
+      - otherwise                                        → MATCH / DIVERGE (hard beyond hard_tol)
+    Nothing is auto-resolved — divergences are evidence for the human."""
     rows: list[PredictionVsActual] = []
     for o in observed:
         predicted = _predicted_value(sim, o)
-        expected_unit = _ENGINE_UNIT.get(o.metric)
-        unit_note = ""
-        if expected_unit and o.unit != expected_unit:
-            # Surface a probable unit mismatch (don't convert — that could hide a real error).
-            unit_note = (f" [unit '{o.unit}' ≠ engine unit '{expected_unit}' — confirm the "
-                         f"observation is in engine units before trusting the gap]")
 
         if predicted is None:
             where = (f"component {o.component_id!r} / field {o.metric!r}" if o.component_id
                      else f"system metric {o.metric!r}")
+            rows.append(PredictionVsActual(o, None, None, NO_PREDICTION, "",
+                                           f"engine produced no prediction for {where}"))
+            continue
+
+        if not math.isfinite(predicted):
             rows.append(PredictionVsActual(
                 o, None, None, NO_PREDICTION, "",
-                f"engine produced no prediction for {where}"))
+                f"engine prediction for {o.metric!r} is non-finite (component saturated); "
+                "no comparable value"))
+            continue
+
+        expected_unit = _ENGINE_UNIT.get(o.metric)
+        if expected_unit and o.unit != expected_unit:
+            # Incomparable units — never assert a MATCH/DIVERGE from raw numbers (honesty).
+            rows.append(PredictionVsActual(
+                o, predicted, None, UNIT_MISMATCH, "",
+                f"observed unit {o.unit!r} ≠ engine unit {expected_unit!r} — not comparable; "
+                "supply the observation in engine units to get a verdict"))
             continue
 
         if predicted <= 0:
             # No stable ratio at/through zero — compare absolutely, and say so.
             verdict = MATCH if abs(o.value - predicted) < 1e-9 else DIVERGE
-            sev = ("soft" if verdict == DIVERGE else "")
+            sev = "soft" if verdict == DIVERGE else ""
             rows.append(PredictionVsActual(
                 o, predicted, None, verdict, sev,
-                "predicted is 0 — compared absolutely, not as a ratio" + unit_note))
+                f"predicted is {predicted:g} (≤0) — compared absolutely, not as a ratio"))
             continue
 
         gap = (o.value - predicted) / predicted
         if abs(gap) <= tol:
-            rows.append(PredictionVsActual(o, predicted, gap, MATCH, "",
-                                           "within tolerance" + unit_note))
+            rows.append(PredictionVsActual(o, predicted, gap, MATCH, "", "within tolerance"))
         else:
             sev = "hard" if abs(gap) > hard_tol else "soft"
             direction = "above" if gap > 0 else "below"
             rows.append(PredictionVsActual(
                 o, predicted, gap, DIVERGE, sev,
-                f"observed is {abs(gap) * 100:.0f}% {direction} the engine's prediction" + unit_note))
+                f"observed is {abs(gap) * 100:.0f}% {direction} the engine's prediction"))
     return ActualsReconciliation(rows)
 
 
 def render_actuals_section(outcome: ActualsReconciliation) -> str:
     """Markdown 'Model vs observed reality' section — the audit finding. Predicted vs observed
     side by side, divergences emphasised, provenance shown. Never asserts the observed value is
-    correct — it reports the gap for the reviewer to judge."""
+    correct — it reports the gap for the reviewer to judge. Every untrusted string is escaped."""
     rows = outcome.rows
     L: list[str] = ["## Model vs observed reality", ""]
     if not rows:
@@ -220,19 +282,20 @@ def render_actuals_section(outcome: ActualsReconciliation) -> str:
                  "nothing was auto-corrected.")
     else:
         L.append(f"> {len(outcome.matched)} matched · {len(outcome.diverged)} diverged · "
-                 f"{len(outcome.no_prediction)} not predicted. Observed values are evidence, "
-                 "not corrections — the engine's numbers are unchanged.")
+                 f"{len(outcome.unit_mismatched)} unit-mismatch · {len(outcome.no_prediction)} "
+                 "not predicted. Observed values are evidence, not corrections — the engine's "
+                 "numbers are unchanged.")
     L.append("")
     L.append("| Target | Metric | Predicted | Observed | Gap | Verdict | Provenance |")
     L.append("|---|---|---|---|---|---|---|")
     for r in rows:
         o = r.observed
-        target = o.component_id or "(system)"
-        pred = "—" if r.predicted is None else f"{r.predicted:g}"
+        target = _cell(o.component_id or "(system)")
         gap = "—" if r.gap_ratio is None else f"{r.gap_ratio * 100:+.0f}%"
         verdict = r.verdict + (f" ({r.severity})" if r.severity else "")
-        prov = f"{o.source}; {o.window}" + (f"; {o.context}" if o.context else "")
-        L.append(f"| {target} | {o.metric} | {pred} | {o.value:g} {o.unit} | {gap} | {verdict} | {prov} |")
+        prov = _cell(f"{o.source}; {o.window}" + (f"; {o.context}" if o.context else ""))
+        L.append(f"| {target} | {_cell(o.metric)} | {_num(r.predicted)} | "
+                 f"{_num(o.value)} {_cell(o.unit)} | {gap} | {verdict} | {prov} |")
     L.append("")
     L.append("_Observed metrics are read-only evidence measured from the running system; "
              "they never change an engine-computed number (prime directive). Divergences are "

@@ -32,8 +32,12 @@ def main() -> None:
     sim = simulate(model)
 
     # 2. Load the real system's observed metrics (a read-only export — no load generated).
+    #    Reject NaN/Infinity JSON literals up front (untrusted input; they are not real
+    #    measurements and would emit invalid strict-JSON into the calibration store).
+    def _no_nonfinite(tok):
+        raise ValueError(f"non-finite JSON literal {tok!r} in observed export")
     with open(OBSERVED) as f:
-        observed = observed_from_records(json.load(f))
+        observed = observed_from_records(json.load(f, parse_constant=_no_nonfinite))
 
     # 3. Reconcile: predicted vs observed, deterministically. Never auto-resolved.
     outcome = reconcile_observed(sim, observed)
@@ -44,8 +48,10 @@ def main() -> None:
         f.write(section + "\n")
 
     # 4. Capture (predicted, observed) pairs — the L0→L1 calibration flywheel seed.
+    #    The demo TRUNCATES (idempotent re-runs — no double-counting a window); a real
+    #    calibration store is the caller's responsibility (append with a run-id + dedup).
     pairs = outcome.calibration_pairs()
-    with open(CALIBRATION, "a") as f:
+    with open(CALIBRATION, "w") as f:
         for p in pairs:
             f.write(json.dumps(p) + "\n")
 
