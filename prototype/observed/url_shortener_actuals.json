@@ -1,0 +1,47 @@
+[
+  {
+    "component_id": "app",
+    "metric": "utilization",
+    "value": 0.72,
+    "unit": "ratio",
+    "source": "Datadog export",
+    "window": "2026-07-01..14, peak hour",
+    "context": "t4g.medium x12, prod us-east-1"
+  },
+  {
+    "component_id": "db",
+    "metric": "mean_latency_ms",
+    "value": 6.1,
+    "unit": "ms",
+    "source": "Datadog export",
+    "window": "2026-07-01..14, peak hour",
+    "context": "r7g.large primary, prod us-east-1"
+  },
+  {
+    "component_id": null,
+    "metric": "p99_ms",
+    "value": 180.0,
+    "unit": "ms",
+    "source": "Datadog APM",
+    "window": "2026-07-01..14, p99 over peak hour",
+    "context": "end-to-end redirect path"
+  },
+  {
+    "component_id": "cache",
+    "metric": "utilization",
+    "value": 0.35,
+    "unit": "ratio",
+    "source": "Redis INFO / Datadog",
+    "window": "2026-07-01..14, peak hour",
+    "context": "real hit-rate lower than the modeled 90%"
+  },
+  {
+    "component_id": "app",
+    "metric": "error_rate",
+    "value": 0.02,
+    "unit": "ratio",
+    "source": "Datadog APM",
+    "window": "2026-07-01..14, peak hour",
+    "context": "the engine does not model error rate"
+  }
+]
