@@ -269,6 +269,12 @@ class TestCsvAdapter(unittest.TestCase):
     def test_header_only_is_empty(self):
         self.assertEqual(observed_from_csv("metric,value,unit,source,window\n"), [])
 
+    def test_ragged_row_rejected_not_given_fake_provenance(self):
+        # A short row → DictReader fills missing cells with None; those must NOT become the
+        # string "None" and smuggle blank provenance past the fail-closed check.
+        with self.assertRaises(ValueError):
+            observed_from_csv("metric,value,unit,source,window\nutil,0.72,ratio\n")
+
     def test_csv_demo_matches_json_demo(self):
         # The committed CSV demo must yield the SAME Observations as the JSON demo.
         with open(os.path.join(_OBSERVED_DIR, "url_shortener_actuals.csv")) as f:
