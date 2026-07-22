@@ -32,6 +32,8 @@ tenant-isolation MUST (#21) before any multi-tenant upload; single-user/offline 
 """
 from __future__ import annotations
 
+import csv
+import io
 import math
 from dataclasses import dataclass, field
 
@@ -194,6 +196,45 @@ def observed_from_records(records: list) -> list[Observation]:
         except KeyError as e:
             raise ValueError(f"observed record {i} missing required field {e}") from e
     return out
+
+
+_CSV_REQUIRED = ("metric", "value", "unit", "source", "window")
+
+
+def observed_from_csv(text: str) -> list[Observation]:
+    """Parse a CSV telemetry export into Observations — CSV is the universal export (any
+    tool, from Datadog/Grafana to a spreadsheet, can dump it). Required columns: metric,
+    value, unit, source, window; optional: component_id, context; extra columns are ignored.
+    A CSV cell is always a string, so 'value' is coerced to float FAIL-CLOSED here; every
+    other field then flows through observed_from_records' fail-closed sanitisation (finite
+    check, mandatory provenance, injection/length bounds). A header row is required."""
+    reader = csv.DictReader(io.StringIO(text))
+    cols = {(f or "").strip() for f in (reader.fieldnames or [])}
+    if not cols:
+        raise ValueError("CSV has no header row")
+    missing = [c for c in _CSV_REQUIRED if c not in cols]
+    if missing:
+        raise ValueError(f"CSV missing required column(s): {', '.join(missing)}")
+
+    records: list[dict] = []
+    for i, row in enumerate(reader):
+        raw = (row.get("value") or "").strip()
+        try:
+            value = float(raw)
+        except ValueError as e:
+            raise ValueError(f"CSV row {i}: 'value' is not a number: {raw!r}") from e
+        cid = (row.get("component_id") or "").strip()
+        records.append({
+            # `... or ""` (not a get-default): a RAGGED row (fewer cells than the header) makes
+            # DictReader set missing cells to None — the KEY exists, so a get-default is skipped and
+            # None would sanitise to the string "None", smuggling fake provenance past the fail-closed
+            # provenance check. Coercing None→"" makes a missing source/window blank → rejected.
+            "metric": row.get("metric") or "", "value": value, "unit": row.get("unit") or "",
+            "source": row.get("source") or "", "window": row.get("window") or "",
+            "component_id": cid or None,     # blank component_id column → a system-level metric
+            "context": row.get("context") or "",
+        })
+    return observed_from_records(records)
 
 
 def _predicted_value(sim: SimulationResult, o: Observation) -> float | None:
