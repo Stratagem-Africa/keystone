@@ -7,11 +7,15 @@ and deterministic rendering.
 """
 import copy
 import dataclasses
+import json
+import os
 import unittest
 
 from keystone.actuals import (DIVERGE, MATCH, NO_PREDICTION, UNIT_MISMATCH, Observation,
-                             observed_from_records, reconcile_observed,
+                             observed_from_csv, observed_from_records, reconcile_observed,
                              render_actuals_section)
+
+_OBSERVED_DIR = os.path.join(os.path.dirname(__file__), "..", "observed")
 from keystone.blueprints import url_shortener
 from keystone.simulation import ComponentResult, simulate
 
@@ -223,6 +227,55 @@ class TestCalibrationAndRender(unittest.TestCase):
 
     def test_render_empty(self):
         self.assertIn("No observed metrics", render_actuals_section(reconcile_observed(self.sim, [])))
+
+
+class TestCsvAdapter(unittest.TestCase):
+    _CSV = ("component_id,metric,value,unit,source,window,context\n"
+            "app,utilization,0.72,ratio,Datadog,2026-07,prod\n"
+            ",p99_ms,180,ms,Datadog,2026-07,e2e\n")
+
+    def test_parses_canonical_csv(self):
+        out = observed_from_csv(self._CSV)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].component_id, "app")
+        self.assertEqual(out[0].value, 0.72)          # coerced from the CSV string
+        self.assertIsInstance(out[0].value, float)
+
+    def test_blank_component_id_is_system_level(self):
+        out = observed_from_csv(self._CSV)
+        self.assertIsNone(out[1].component_id)         # empty component_id column → system metric
+
+    def test_missing_required_column_fails_closed(self):
+        with self.assertRaises(ValueError):
+            observed_from_csv("metric,value,unit,source\napp,0.7,ratio,x\n")  # no 'window'
+
+    def test_no_header_fails_closed(self):
+        with self.assertRaises(ValueError):
+            observed_from_csv("")
+
+    def test_non_numeric_value_fails_closed(self):
+        with self.assertRaises(ValueError):
+            observed_from_csv("metric,value,unit,source,window\nx,high,ratio,s,w\n")
+
+    def test_non_finite_value_fails_closed(self):
+        with self.assertRaises(ValueError):
+            observed_from_csv("metric,value,unit,source,window\nx,inf,ratio,s,w\n")
+
+    def test_extra_columns_ignored(self):
+        out = observed_from_csv("metric,value,unit,source,window,junk\n"
+                                "utilization,0.7,ratio,s,w,ignored\n")
+        self.assertEqual(len(out), 1)
+
+    def test_header_only_is_empty(self):
+        self.assertEqual(observed_from_csv("metric,value,unit,source,window\n"), [])
+
+    def test_csv_demo_matches_json_demo(self):
+        # The committed CSV demo must yield the SAME Observations as the JSON demo.
+        with open(os.path.join(_OBSERVED_DIR, "url_shortener_actuals.csv")) as f:
+            from_csv = observed_from_csv(f.read())
+        with open(os.path.join(_OBSERVED_DIR, "url_shortener_actuals.json")) as f:
+            from_json = observed_from_records(json.load(f))
+        self.assertEqual(from_csv, from_json)
 
 
 class TestBoundaryGuard(unittest.TestCase):

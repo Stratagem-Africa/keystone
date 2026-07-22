@@ -1,0 +1,6 @@
+component_id,metric,value,unit,source,window,context
+app,utilization,0.72,ratio,Datadog export,"2026-07-01..14, peak hour","t4g.medium x12, prod us-east-1"
+db,mean_latency_ms,6.1,ms,Datadog export,"2026-07-01..14, peak hour","r7g.large primary, prod us-east-1"
+,p99_ms,180.0,ms,Datadog APM,"2026-07-01..14, p99 over peak hour",end-to-end redirect path
+cache,utilization,0.35,ratio,Redis INFO / Datadog,"2026-07-01..14, peak hour",real hit-rate lower than the modeled 90%
+app,error_rate,0.02,ratio,Datadog APM,"2026-07-01..14, peak hour",the engine does not model error rate
