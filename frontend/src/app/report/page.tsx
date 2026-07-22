@@ -268,36 +268,51 @@ function WhereThisIsWrong({ caveats }: { caveats: string[] }) {
 
 export default function ReportPage() {
   const [data, setData] = useState<DesignResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);       // true only for the FIRST load
+  const [resimulating, setResimulating] = useState(false); // true while a what-if re-run is in flight
+  const [rpsInput, setRpsInput] = useState(10_000);    // controlled input's current value
   const [error, setError] = useState<string | null>(null);
+
+  // Pulled out of useEffect so both the initial load AND the "Re-simulate"
+  // button can call the same code — one fetch, two callers, no duplication.
+  async function runDesign(systemRps?: number) {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/design`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // systemRps undefined (first load) -> {} -> server uses its own default (10_000).
+        // systemRps a number (what-if click) -> { system_rps: <value> } sent explicitly.
+        body: JSON.stringify(systemRps === undefined ? {} : { system_rps: systemRps }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API returned ${res.status}`);
+      }
+
+      const json: DesignResponse = await res.json();
+      setData(json);
+      setError(null); // clear any earlier error once a re-simulate succeeds
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    }
+  }
 
   useEffect(() => {
     // An async function declared *inside* useEffect, then called immediately.
     // (useEffect itself can't be async — React requires its return value to
     // be a cleanup function or nothing.)
-    async function fetchReport() {
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/design`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}), // {} = use every server-side default
-        });
-
-        if (!res.ok) {
-          throw new Error(`API returned ${res.status}`);
-        }
-
-        const json: DesignResponse = await res.json();
-        setData(json);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "unknown error");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchReport();
+    // First load: no argument -> server default. loading (not resimulating)
+    // drives the full-page spinner below, since there's no report to show yet.
+    runDesign().finally(() => setLoading(false));
   }, []); // empty array = run once, when the page first mounts
+
+  // Handler for the "Re-simulate" button — separate from the effect above so
+  // it can use its OWN loading flag (resimulating) instead of the full-page one.
+  async function handleResimulate() {
+    setResimulating(true);
+    await runDesign(rpsInput);
+    setResimulating(false);
+  }
 
   if (loading) return <p className="p-8 font-mono text-provenance">Loading report…</p>;
   if (error) return <p className="p-8 font-mono text-provenance text-assumption-amber">Error: {error}</p>;
@@ -308,6 +323,31 @@ export default function ReportPage() {
   return (
     <section className="p-8 flex flex-col gap-6">
       <h1 className="font-sans text-h1 font-semibold">Verdict</h1>
+
+      <div className="flex items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="font-sans text-label uppercase tracking-widest text-ink-muted">
+            What if traffic reaches…
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={rpsInput}
+            // Number(...) because <input> values are always strings — without
+            // this, rpsInput would silently become a string and break the
+            // `system_rps: number` field the API expects.
+            onChange={(e) => setRpsInput(Number(e.target.value))}
+            className="font-mono border border-mist rounded-md px-2 py-1 w-32"
+          />
+        </label>
+        <button
+          onClick={handleResimulate}
+          disabled={resimulating}
+          className="font-sans text-label uppercase tracking-widest bg-architect-blue text-white rounded-md px-4 py-2 disabled:opacity-50"
+        >
+          {resimulating ? "Re-simulating…" : "Re-simulate"}
+        </button>
+      </div>
 
       <p className="font-serif text-body">
         Bottleneck: <span className="font-mono text-mono-data">{simulation.bottleneck_name}</span>
