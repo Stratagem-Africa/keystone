@@ -104,22 +104,70 @@ function displayMetric(key: string, m: EngineMetric): EngineMetric {
   };
 }
 
+// F6 ("show the delta", docs/04 F6): how far a what-if metric moved from the
+// baseline it was compared against. A pure calculation, not stored in state —
+// it's re-derived every render from whatever `current`/`base` are, so it can
+// never go stale the way a separately-stored delta could.
+//
+// Both arguments are expected to already be display-scaled (i.e. passed
+// through `displayMetric`) so the delta matches what's printed on screen —
+// subtracting RAW engine values and only converting the result afterwards
+// could round differently than "the two numbers you can see minus each
+// other," which would be a confusing mismatch on a page all about honesty.
+//
+// Rounded to 2dp: subtracting two already-rounded floats (e.g. 12.3 - 12.0)
+// can produce binary floating-point noise like 0.30000000000000004 — rounding
+// keeps the displayed delta clean, and lets `=== 0` checks work reliably to
+// decide whether to show a ghost at all.
+function metricDelta(current: EngineMetric, base: EngineMetric): number {
+  return Math.round((current.value - base.value) * 100) / 100;
+}
+
+// docs/09 §3.3: a what-if delta "ghosts in" beside the changed band — a
+// faint, secondary readout, not a competing claim with its own provenance
+// pill. It's arithmetic on two numbers the engine already produced, not a
+// new engine output, so it deliberately does NOT reuse grounded-green /
+// assumption-amber / signal-red — docs/09 reserves those hues EXCLUSIVELY for
+// provenance and failure-mode meanings, and reusing them here for "went up" /
+// "went down" would blur a distinction the rest of the report is built to
+// keep sharp. Muted ink-color, mono (still a computed number), nothing more.
+function DeltaGhost({ value, unit }: { value: number; unit: string }) {
+  const sign = value > 0 ? "+" : ""; // negative numbers already print their own "-"
+  return (
+    <span className="font-mono text-provenance text-ink-muted">
+      {sign}{value}{unit} vs baseline
+    </span>
+  );
+}
+
 function VerdictMetric({
   label,
   metricKey,
   metric,
+  baselineMetric,
 }: {
   label: string;
   metricKey: string;
   metric: EngineMetric;
+  // null = nothing to compare against yet — either no what-if has been run,
+  // or (in principle) this metric key was missing from the baseline result.
+  baselineMetric: EngineMetric | null;
 }) {
   const m = displayMetric(metricKey, metric);
+  // Both sides go through the SAME displayMetric transform before the
+  // subtraction — see the comment on metricDelta for why raw-then-scale
+  // would be the wrong order.
+  const baseM = baselineMetric ? displayMetric(metricKey, baselineMetric) : null;
+  const delta = baseM ? metricDelta(m, baseM) : null;
+
   return (
     <div className="flex flex-col gap-1">
       <p className="font-sans text-label uppercase tracking-widest text-ink-muted">
         {label}
       </p>
       <Metric value={m.value} unit={m.unit} low={m.low} high={m.high} provenance={PROVENANCE} model={m.model} />
+      {/* delta === 0 means the what-if didn't move THIS metric — say nothing rather than "+0ms vs baseline" */}
+      {delta !== null && delta !== 0 && <DeltaGhost value={delta} unit={m.unit} />}
     </div>
   );
 }
@@ -268,50 +316,67 @@ function WhereThisIsWrong({ caveats }: { caveats: string[] }) {
 
 export default function ReportPage() {
   const [data, setData] = useState<DesignResponse | null>(null);
+  // The FIRST result ever loaded — the fixed reference point every what-if is
+  // compared against. Set once, on initial load, and never touched again
+  // (deliberately NOT updated by handleResimulate) so re-simulating twice in a
+  // row still diffs against the original report, not the last what-if.
+  const [baseline, setBaseline] = useState<DesignResponse | null>(null);
   const [loading, setLoading] = useState(true);       // true only for the FIRST load
   const [resimulating, setResimulating] = useState(false); // true while a what-if re-run is in flight
   const [rpsInput, setRpsInput] = useState(10_000);    // controlled input's current value
   const [error, setError] = useState<string | null>(null);
 
-  // Pulled out of useEffect so both the initial load AND the "Re-simulate"
-  // button can call the same code — one fetch, two callers, no duplication.
-  async function runDesign(systemRps?: number) {
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/design`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // systemRps undefined (first load) -> {} -> server uses its own default (10_000).
-        // systemRps a number (what-if click) -> { system_rps: <value> } sent explicitly.
-        body: JSON.stringify(systemRps === undefined ? {} : { system_rps: systemRps }),
-      });
+  // Just the network call — no state writes here. The two callers below need
+  // to do DIFFERENT things with the result (initial load sets two boxes;
+  // Re-simulate sets only one), so deciding "what to store" is left to them.
+  async function runDesign(systemRps?: number): Promise<DesignResponse> {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/design`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // systemRps undefined (first load) -> {} -> server uses its own default (10_000).
+      // systemRps a number (what-if click) -> { system_rps: <value> } sent explicitly.
+      body: JSON.stringify(systemRps === undefined ? {} : { system_rps: systemRps }),
+    });
 
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}`);
-      }
-
-      const json: DesignResponse = await res.json();
-      setData(json);
-      setError(null); // clear any earlier error once a re-simulate succeeds
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "unknown error");
+    if (!res.ok) {
+      throw new Error(`API returned ${res.status}`);
     }
+
+    return res.json();
   }
 
   useEffect(() => {
     // An async function declared *inside* useEffect, then called immediately.
     // (useEffect itself can't be async — React requires its return value to
     // be a cleanup function or nothing.)
-    // First load: no argument -> server default. loading (not resimulating)
-    // drives the full-page spinner below, since there's no report to show yet.
-    runDesign().finally(() => setLoading(false));
+    async function loadInitial() {
+      try {
+        const json = await runDesign(); // no argument -> server default
+        setBaseline(json); // the fixed reference point, set exactly once
+        setData(json);     // what's currently on screen
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "unknown error");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadInitial();
   }, []); // empty array = run once, when the page first mounts
 
   // Handler for the "Re-simulate" button — separate from the effect above so
   // it can use its OWN loading flag (resimulating) instead of the full-page one.
   async function handleResimulate() {
     setResimulating(true);
-    await runDesign(rpsInput);
-    setResimulating(false);
+    try {
+      const json = await runDesign(rpsInput);
+      setData(json);   // baseline is deliberately left untouched
+      setError(null);  // clear any earlier error once a re-simulate succeeds
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setResimulating(false);
+    }
   }
 
   if (loading) return <p className="p-8 font-mono text-provenance">Loading report…</p>;
@@ -319,6 +384,12 @@ export default function ReportPage() {
   if (!data) return null; // fetch finished with no error but also no data — shouldn't happen, keeps TS happy
 
   const { simulation } = data;
+  // Only treat baseline as a real comparison point once it's DIFFERENT from
+  // what's on screen. Right after initial load, data and baseline are the
+  // SAME object (loadInitial sets both from one fetch) — `!==` here is an
+  // object-identity check, true the instant handleResimulate calls setData
+  // with a freshly-fetched result. Until then there's nothing to diff yet.
+  const baselineSim = baseline && data !== baseline ? baseline.simulation : null;
 
   return (
     <section className="p-8 flex flex-col gap-6">
@@ -354,14 +425,14 @@ export default function ReportPage() {
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        <VerdictMetric label="Utilisation" metricKey="bottleneck_utilization" metric={simulation.metrics.bottleneck_utilization} />
-        <VerdictMetric label="Max safe load" metricKey="breakpoint_rps_safe" metric={simulation.metrics.breakpoint_rps_safe} />
-        <VerdictMetric label="Theoretical max" metricKey="breakpoint_rps_theoretical" metric={simulation.metrics.breakpoint_rps_theoretical} />
-        <VerdictMetric label="Mean latency" metricKey="mean_latency_ms" metric={simulation.metrics.mean_latency_ms} />
-        <VerdictMetric label="p50 latency" metricKey="p50_ms" metric={simulation.metrics.p50_ms} />
-        <VerdictMetric label="p95 latency" metricKey="p95_ms" metric={simulation.metrics.p95_ms} />
-        <VerdictMetric label="p99 latency" metricKey="p99_ms" metric={simulation.metrics.p99_ms} />
-        <VerdictMetric label="Monthly cost" metricKey="monthly_cost" metric={simulation.metrics.monthly_cost} />
+        <VerdictMetric label="Utilisation" metricKey="bottleneck_utilization" metric={simulation.metrics.bottleneck_utilization} baselineMetric={baselineSim?.metrics.bottleneck_utilization ?? null} />
+        <VerdictMetric label="Max safe load" metricKey="breakpoint_rps_safe" metric={simulation.metrics.breakpoint_rps_safe} baselineMetric={baselineSim?.metrics.breakpoint_rps_safe ?? null} />
+        <VerdictMetric label="Theoretical max" metricKey="breakpoint_rps_theoretical" metric={simulation.metrics.breakpoint_rps_theoretical} baselineMetric={baselineSim?.metrics.breakpoint_rps_theoretical ?? null} />
+        <VerdictMetric label="Mean latency" metricKey="mean_latency_ms" metric={simulation.metrics.mean_latency_ms} baselineMetric={baselineSim?.metrics.mean_latency_ms ?? null} />
+        <VerdictMetric label="p50 latency" metricKey="p50_ms" metric={simulation.metrics.p50_ms} baselineMetric={baselineSim?.metrics.p50_ms ?? null} />
+        <VerdictMetric label="p95 latency" metricKey="p95_ms" metric={simulation.metrics.p95_ms} baselineMetric={baselineSim?.metrics.p95_ms ?? null} />
+        <VerdictMetric label="p99 latency" metricKey="p99_ms" metric={simulation.metrics.p99_ms} baselineMetric={baselineSim?.metrics.p99_ms ?? null} />
+        <VerdictMetric label="Monthly cost" metricKey="monthly_cost" metric={simulation.metrics.monthly_cost} baselineMetric={baselineSim?.metrics.monthly_cost ?? null} />
       </div>
 
       {simulation.spofs.length > 0 && (
