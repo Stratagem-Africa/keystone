@@ -17,12 +17,14 @@ import os
 
 from keystone.actuals import (observed_from_records, reconcile_observed,
                               render_actuals_section)
+from keystone.audit_report import render_audit_report
 from keystone.blueprints import url_shortener
 from keystone.simulation import simulate
 
 HERE = os.path.dirname(__file__)
 OBSERVED = os.path.join(HERE, "observed", "url_shortener_actuals.json")
 REPORT = os.path.join(HERE, "outputs", "actuals_url_shortener_report.md")
+AUDIT = os.path.join(HERE, "outputs", "audit_url_shortener_report.md")
 CALIBRATION = os.path.join(HERE, "outputs", "calibration.jsonl")
 
 
@@ -47,6 +49,10 @@ def main() -> None:
     with open(REPORT, "w") as f:
         f.write(section + "\n")
 
+    # 3b. The full audit deliverable (exec summary + severity findings + non-guarantee disclaimer).
+    with open(AUDIT, "w") as f:
+        f.write(render_audit_report(model, sim, outcome) + "\n")
+
     # 4. Capture (predicted, observed) pairs — the L0→L1 calibration flywheel seed.
     #    The demo TRUNCATES (idempotent re-runs — no double-counting a window); a real
     #    calibration store is the caller's responsibility (append with a run-id + dedup).
@@ -65,12 +71,14 @@ def main() -> None:
     print("-" * 74)
     for r in outcome.diverged:
         arrow = "⛔ HARD" if r.severity == "hard" else "⚠ soft"
+        gap = f"{r.gap_ratio * 100:+.0f}%" if r.gap_ratio is not None else "gap n/a"
         print(f"  {arrow}  {r.observed.component_id or '(system)'} / {r.observed.metric}: "
-              f"predicted {r.predicted:g}, observed {r.observed.value:g} ({r.gap_ratio * 100:+.0f}%)")
+              f"predicted {r.predicted:g}, observed {r.observed.value:g} ({gap})")
     print("-" * 74)
     print(f"Calibration pairs captured: {len(pairs)} -> outputs/{os.path.basename(CALIBRATION)} "
           "(the L0→L1 flywheel seed)")
     print(f"Full section -> outputs/{os.path.basename(REPORT)}")
+    print(f"Audit report  -> outputs/{os.path.basename(AUDIT)}  (the client deliverable)")
     print("\nNOTE: observed values are evidence only — no engine number was changed "
           "(prime directive); divergences are surfaced for review, never auto-resolved.")
 
