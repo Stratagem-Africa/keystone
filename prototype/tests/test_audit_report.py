@@ -74,9 +74,24 @@ class TestAuditReport(unittest.TestCase):
         self.assertIn("mandatory expert", pmd.lower())
         self.assertNotIn("HIGH-STAKES DOMAIN", self.md)   # url_shortener isn't high-stakes
 
-    def test_no_observed_is_model_only(self):
+    def test_no_observed_is_model_only_not_a_pass(self):
         md0 = render_audit_report(self.model, self.sim, reconcile_observed(self.sim, []))
         self.assertIn("MODEL-ONLY", md0)
+        self.assertNotIn("within tolerance", md0)          # must not read as a validation pass
+        self.assertIn("nothing was reconciled", md0.lower())
+
+    def test_all_incomparable_is_not_a_pass(self):
+        # Observations supplied but none comparable (unit-mismatch + not-predicted): the headline
+        # must NOT claim consistency/within-tolerance — the overclaim the review caught.
+        outcome = reconcile_observed(self.sim, [
+            _obs("utilization", 72, component_id="app", unit="percent"),   # UNIT_MISMATCH
+            _obs("error_rate", 0.02, component_id="app"),                  # NO_PREDICTION
+        ])
+        md = render_audit_report(self.model, self.sim, outcome)
+        self.assertIn("NOT RECONCILED", md)
+        self.assertNotIn("BROADLY CONSISTENT", md)
+        self.assertNotIn("within tolerance", md)
+        self.assertIn("Nothing was reconciled", md)
 
     def test_zero_predicted_finding_does_not_crash(self):
         zero = ComponentResult(id="z", name="z", arrival_rps=0.0, capacity_rps=100.0,
@@ -86,12 +101,16 @@ class TestAuditReport(unittest.TestCase):
         md = render_audit_report(self.model, sim0, outcome)
         self.assertIn("gap n/a", md)                     # None gap rendered safely
 
-    def test_does_not_mutate_sim(self):
-        before = copy.deepcopy(self.sim)
+    def test_does_not_mutate_inputs(self):
+        # Prime-directive boundary: the report READS its inputs; it must not mutate the engine
+        # result, the model, or the reconciliation. Deep-compare the whole objects.
+        sim_before = copy.deepcopy(self.sim)
+        model_before = copy.deepcopy(self.model)
+        outcome_before = copy.deepcopy(self.outcome)
         render_audit_report(self.model, self.sim, self.outcome)
-        self.assertEqual({k: v.value for k, v in self.sim.metrics.items()},
-                         {k: v.value for k, v in before.metrics.items()})
-        self.assertEqual(self.sim.components["app"].utilization, before.components["app"].utilization)
+        self.assertEqual(self.sim, sim_before)
+        self.assertEqual(self.model, model_before)
+        self.assertEqual(self.outcome, outcome_before)
 
     def test_deterministic(self):
         self.assertEqual(render_audit_report(self.model, self.sim, self.outcome),

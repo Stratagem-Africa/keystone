@@ -21,14 +21,20 @@ from keystone.simulation import SimulationResult
 
 
 def _overall(outcome: ActualsReconciliation) -> str:
-    """A qualitative headline for the reconciliation — never a certification."""
+    """A qualitative headline for the reconciliation — never a certification. Critically, a
+    'consistent' verdict is reserved for when observations were ACTUALLY compared: no rows, or
+    rows that were all incomparable (unit-mismatch / not-predicted), must NOT read as a pass."""
     if not outcome.rows:
         return "MODEL-ONLY — no observed data supplied, so nothing was reconciled against reality"
     if outcome.hard_divergences:
         return "NEEDS ATTENTION — the running system diverges hard from the model in places"
     if outcome.diverged:
         return "SOFT DIVERGENCES — worth review, none severe"
-    return "BROADLY CONSISTENT — observed metrics track the model within tolerance"
+    if not outcome.matched:
+        # rows exist but every one was unit-mismatch / not-predicted — nothing was truly compared
+        return ("NOT RECONCILED — observations were supplied but none could be compared to an "
+                "engine prediction (unit mismatch / not predicted); nothing was validated")
+    return "BROADLY CONSISTENT — the compared metrics track the model within tolerance"
 
 
 def _gap_str(gap_ratio: float | None) -> str:
@@ -88,9 +94,17 @@ def render_audit_report(model: SystemModel, sim: SimulationResult,
             L.append(f"- **[{sev}] {tgt} / {_sanitize_field(o.metric)}** — predicted {r.predicted:g}, "
                      f"observed {o.value:g} {_sanitize_field(o.unit)} ({_gap_str(r.gap_ratio)}). "
                      f"{_sanitize_field(r.note)}")
-    else:
-        L.append("_No divergence between the observed metrics and the engine's predictions "
+    elif outcome.matched:
+        L.append("_No divergence between the compared metrics and the engine's predictions "
                  "(within tolerance). This is **not** a guarantee of correctness — see Limitations._")
+    elif outcome.rows:
+        # rows were supplied but none were comparable — do NOT imply a within-tolerance pass
+        L.append("_None of the supplied observations could be compared to an engine prediction "
+                 "(unit mismatch / not predicted) — see \"Could not be compared\" below. "
+                 "**Nothing was reconciled.**_")
+    else:
+        L.append("_No observed metrics were supplied, so nothing was reconciled against your "
+                 "running system (model-only)._")
 
     # Rows that could not be compared — surfaced, never dropped (honesty).
     unresolved = outcome.unit_mismatched + outcome.no_prediction
