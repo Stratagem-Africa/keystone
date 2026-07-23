@@ -14,10 +14,10 @@ import unittest
 from keystone.actuals import (DIVERGE, MATCH, NO_PREDICTION, UNIT_MISMATCH, Observation,
                              observed_from_csv, observed_from_records, reconcile_observed,
                              render_actuals_section)
-
-_OBSERVED_DIR = os.path.join(os.path.dirname(__file__), "..", "observed")
 from keystone.blueprints import url_shortener
 from keystone.simulation import ComponentResult, simulate
+
+_OBSERVED_DIR = os.path.join(os.path.dirname(__file__), "..", "observed")
 
 
 def _sim():
