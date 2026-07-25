@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Newsreader, Geist_Mono } from "next/font/google";
+import { AuthProvider } from "@/lib/auth-context";
 import "./globals.css";
 
 // Grotesque — chrome, wordmark, UI labels, hero headlines.
@@ -40,7 +41,7 @@ export default function RootLayout({
       className={`${inter.variable} ${newsreader.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans bg-paper text-slate-ink">
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
