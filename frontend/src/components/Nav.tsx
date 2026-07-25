@@ -30,7 +30,7 @@ export function Nav() {
         {!loading && (
           user ? (
             <button
-              onClick={() => supabase.auth.signOut()}
+              onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
               className="font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui"
             >
               Sign out

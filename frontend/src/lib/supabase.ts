@@ -1,3 +1,6 @@
+// Full @supabase/supabase-js (not the slimmer @supabase/auth-js) even though we
+// only use .auth today — Storage is on the roadmap (docs/08 Epic 5), so the
+// umbrella package's DX outweighs the unused postgrest/realtime/functions weight.
 import { createClient } from "@supabase/supabase-js";
 
 // One shared client for the whole app — talks directly to Supabase's Auth API,
@@ -13,6 +16,5 @@ if (!url || !anonKey) {
   );
 }
 
-// The anon key is safe to ship to the browser (docs/08 issue #19): it identifies
-// the Supabase project, not a user. Real access control is per-user JWT + RLS.
+// Real per-user access control will come from JWT + RLS (#10, not yet wired).
 export const supabase = createClient(url, anonKey);

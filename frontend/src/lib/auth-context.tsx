@@ -23,8 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // from localStorage (e.g. the user was logged in on a previous visit).
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
-      setLoading(false);
-    });
+    }).finally(() => setLoading(false));
 
     // Stay in sync after that: fires on sign-in, sign-out, token refresh, and
     // even sign-out triggered from another tab.

@@ -24,7 +24,7 @@ export function AuthPanel() {
           Signed in as <span className="font-medium">{user.email}</span>
         </p>
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
           className="self-start font-sans text-label font-medium px-6 py-3 rounded-full border border-steel text-slate-ink transition-all ease-settle duration-ui hover:bg-mist"
         >
           Sign out

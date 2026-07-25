@@ -1,5 +1,24 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment
+
+Copy `.env.example` to `.env.local` and fill in the two Supabase values:
+
+```bash
+cp .env.example .env.local
+```
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+Get both from the Supabase project dashboard: **Project Settings → API**.
+The anon key is safe to expose in the browser — it identifies the
+project, not a user.
+Without these set, the app throws at build/prerender time
+(`lib/supabase.ts`) — every page imports `Nav`, which imports the Supabase client.
+
 ## Getting Started
 
 First, run the development server:
@@ -34,3 +53,4 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
