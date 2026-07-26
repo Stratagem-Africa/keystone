@@ -17,6 +17,7 @@ import os
 
 from keystone.actuals import (observed_from_records, reconcile_observed,
                               render_actuals_section)
+from keystone.audit_map import render_audit_map_html
 from keystone.audit_report import render_audit_report
 from keystone.blueprints import url_shortener
 from keystone.simulation import simulate
@@ -25,6 +26,7 @@ HERE = os.path.dirname(__file__)
 OBSERVED = os.path.join(HERE, "observed", "url_shortener_actuals.json")
 REPORT = os.path.join(HERE, "outputs", "actuals_url_shortener_report.md")
 AUDIT = os.path.join(HERE, "outputs", "audit_url_shortener_report.md")
+AUDIT_MAP = os.path.join(HERE, "outputs", "audit_url_shortener_map.html")
 CALIBRATION = os.path.join(HERE, "outputs", "calibration.jsonl")
 
 
@@ -53,6 +55,10 @@ def main() -> None:
     with open(AUDIT, "w") as f:
         f.write(render_audit_report(model, sim, outcome) + "\n")
 
+    # 3c. The SAME audit as an interactive map — nodes coloured by model-vs-observed divergence.
+    with open(AUDIT_MAP, "w", encoding="utf-8") as f:
+        f.write(render_audit_map_html(model, sim, outcome) + "\n")
+
     # 4. Capture (predicted, observed) pairs — the L0→L1 calibration flywheel seed.
     #    The demo TRUNCATES (idempotent re-runs — no double-counting a window); a real
     #    calibration store is the caller's responsibility (append with a run-id + dedup).
@@ -79,6 +85,7 @@ def main() -> None:
           "(the L0→L1 flywheel seed)")
     print(f"Full section -> outputs/{os.path.basename(REPORT)}")
     print(f"Audit report  -> outputs/{os.path.basename(AUDIT)}  (the client deliverable)")
+    print(f"Audit map     -> outputs/{os.path.basename(AUDIT_MAP)}  (interactive — open in a browser)")
     print("\nNOTE: observed values are evidence only — no engine number was changed "
           "(prime directive); divergences are surfaced for review, never auto-resolved.")
 

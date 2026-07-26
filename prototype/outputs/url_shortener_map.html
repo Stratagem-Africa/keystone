@@ -76,6 +76,11 @@ svg#edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .node .tag{font-size:8.5px;font-weight:800;padding:1px 5px;border-radius:5px;letter-spacing:.03em}
 .tag.bn{background:#fbe3df;color:#a5342a}
 .tag.spof{background:#f3ecff;color:#5b34b0}
+.tag.dv.matched{background:#e5f2ea;color:#1f6b40}
+.tag.dv.soft{background:#fbf3e3;color:#8a5a12}
+.tag.dv.hard{background:#fbe3df;color:#a5342a}
+.tag.dv.not_compared{background:#eef0f3;color:#5b6472}
+.badge.audit{background:#f0f4ff;color:#2a3f7a;border:1px solid #cdd9f6}
 .node:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(20,30,60,.16)}
 .node.dim{opacity:.22;filter:saturate(.6)}
 .node.hot{box-shadow:0 0 0 1px var(--sc),0 6px 18px rgba(20,30,60,.14)}
@@ -140,6 +145,7 @@ table.k td.n{text-align:right;font-variant-numeric:tabular-nums}
     <span class="badge l0" id="bL0"></span>
     <span class="badge load" id="bLoad"></span>
     <span class="badge conf" id="bConf"></span>
+    <span class="badge audit" id="bAudit" style="display:none"></span>
   </div>
 </div>
 <div id="hs"></div>
@@ -184,9 +190,15 @@ table.k td.n{text-align:right;font-variant-numeric:tabular-nums}
 </div>
 
 <div class="legend glass">
-  <div class="col"><div class="t">Provenance (confidence)</div>
+  <div class="col" id="legProv"><div class="t">Provenance (confidence)</div>
     <div class="r"><span class="chip" style="background:#2fb67c"></span>Grounded (cited)</div>
     <div class="r"><span class="chip" style="background:#e8a33d"></span>Assumption / reconcile / gap</div></div>
+  <div class="col" id="legDiv" style="display:none"><div class="t">Audit · model vs observed</div>
+    <div class="r"><span class="chip" style="background:#2fb67c"></span>matched (within tolerance)</div>
+    <div class="r"><span class="chip" style="background:#e8a33d"></span>soft divergence</div>
+    <div class="r"><span class="chip" style="background:#c2463b"></span>hard divergence</div>
+    <div class="r"><span class="chip" style="background:#5b6472"></span>not compared (unit / not predicted)</div>
+    <div class="r"><span class="chip" style="background:#c3c8d2"></span>not observed (no telemetry)</div></div>
   <div class="col"><div class="t">Load (engine result)</div>
     <div class="r"><span class="chip" style="background:#8a93a6"></span>ok</div>
     <div class="r"><span class="chip" style="background:#c2410c"></span>hot (≥85%)</div>
@@ -207,6 +219,12 @@ const ms=v=>v==null?'—':Math.round(v).toLocaleString()+' ms';
 const usd=c=>c==null?'—':'$'+(c/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const statusColor={ok:'var(--ok)',hot:'var(--hot)',saturated:'var(--sat)'};
 const provColor={GROUNDED:'var(--green)',RECONCILE:'var(--amber)',ASSUMPTION:'var(--amber)',GAP:'var(--amber)'};
+// Audit overlay (optional): model-vs-observed divergence maps onto the confidence semantics —
+// matched=green ("reality confirms it"), soft=amber ("where this is wrong"), hard=red (failure).
+const AUDIT=DATA.meta.audit||null;
+const divColor={matched:'var(--green)',soft:'var(--amber)',hard:'#c2463b',not_compared:'var(--muted)',not_observed:'var(--steel)'};
+const divBadge={matched:'✓ matched',soft:'⚠ soft',hard:'⛔ HARD',not_compared:'– n/c',not_observed:''};
+const gapStr=g=>g==null?'':(g>=0?'+':'')+Math.round(g*100)+'%';
 
 // ---- layout ---------------------------------------------------------------
 const COLW=250,ROWH=140,PADX=70,PADY=90,NW=190,NH=94;
@@ -254,9 +272,12 @@ const nodeEls={};
 DATA.nodes.forEach(n=>{
   const d=el('div','node'+(n.status==='hot'||n.status==='saturated'?' hot':''));
   d.style.left=pos[n.id].x+'px';d.style.top=pos[n.id].y+'px';
-  d.style.setProperty('--pc',provColor[n.provenance]||'var(--steel)');
+  // In audit mode the left edge signals DIVERGENCE (the audit's core finding); otherwise provenance.
+  d.style.setProperty('--pc', n.divergence?(divColor[n.divergence.status]||'var(--steel)'):(provColor[n.provenance]||'var(--steel)'));
   d.style.setProperty('--sc',statusColor[n.status]);
   const tags=el('div','tags');
+  if(n.divergence&&n.divergence.status!=='not_observed')
+    tags.appendChild(el('span','tag dv '+n.divergence.status,(divBadge[n.divergence.status]+' '+gapStr(n.divergence.gap)).trim()));
   if(n.is_bottleneck)tags.appendChild(el('span','tag bn','⚑ BN'));
   if(n.is_spof)tags.appendChild(el('span','tag spof','SPOF'));
   d.appendChild(tags);
@@ -327,6 +348,18 @@ function openNode(n){
   }else{
     b.appendChild(el('div','note','No cited evidence attached to this component’s inputs — treat its capacity/latency as an ASSUMPTION (L0). Grounding adds citations; it never changes a computed number.'));
   }
+  if(n.divergence&&n.divergence.rows.length){
+    b.appendChild(el('div','sec','Observed vs predicted (audit)'));
+    n.divergence.rows.forEach(r=>{
+      const c=el('div','ev');
+      c.appendChild(el('div','m',r.metric+' — '+r.verdict+(r.severity?' ('+r.severity+')':'')));
+      c.appendChild(el('div','band','observed '+fmtEv(r,r.observed)+'  ·  predicted '+(r.predicted==null?'—':fmtEv(r,r.predicted))+'  ·  gap '+(r.gap_ratio==null?'n/a':gapStr(r.gap_ratio))));
+      if(r.source)c.appendChild(el('div','src','↳ observed: '+r.source));
+      if(r.note)c.appendChild(el('div','on',r.note));
+      b.appendChild(c);
+    });
+    b.appendChild(el('div','note','Observed values are read-only EVIDENCE — they never changed an engine number (prime directive); divergences are surfaced for review, never auto-resolved (ADR-004).'));
+  }
   panel.classList.add('open');
 }
 function fmtEv(e,v){if(v==null)return '—';if(e.unit==='rps')return rps(v)+' rps';if(e.unit==='ms')return ms(v);if(e.unit&&e.unit.indexOf('usd')>=0)return usd(v);return (''+v);}
@@ -338,13 +371,18 @@ window.addEventListener('keydown',e=>{if(e.key==='Escape'){closePanel();clearFlo
 
 // ---- header / verdict / where-wrong / metrics -----------------------------
 $('#ttl').textContent=DATA.meta.title;
-$('#subttl').textContent='Architecture map · every result is engine-computed; every input is declared and carries its provenance';
+$('#subttl').textContent=AUDIT?'Audit map · model vs OBSERVED reality — where your running system diverges from the design'
+  :'Architecture map · every result is engine-computed; every input is declared and carries its provenance';
 $('#bL0').textContent=DATA.meta.accuracy_level;
 $('#bLoad').textContent=rps(DATA.meta.offered_load_rps)+' req/s offered';
 // Show the engine's FULL confidence qualifier — never strip the parenthetical (it is the honesty
 // payload, e.g. "directional…" / "a component is saturated; beyond the model's stable range").
 $('#bConf').textContent='confidence: '+(DATA.meta.confidence||'');
 $('#bConf').title=DATA.meta.confidence||'';
+if(AUDIT){const ab=$('#bAudit');ab.style.display='';
+  ab.textContent='audit: '+AUDIT.matched+' matched · '+AUDIT.diverged+' diverged ('+AUDIT.hard+' hard)';
+  ab.title=AUDIT.overall;
+  $('#legProv').style.display='none';$('#legDiv').style.display='';}
 if(DATA.meta.high_stakes){$('#hs').classList.add('on');
   $('#hs').textContent='⚠ HIGH-STAKES DOMAIN — mandatory expert review. This design REQUIRES expert / legal / security review before any production use. Keystone does not certify safety or production-readiness.';}
 
@@ -357,6 +395,14 @@ DATA.flows.forEach(f=>{const btn=el('button','jbtn');const sw=el('span','sw');sw
 
 // verdict drawer content
 function buildVerdict(){const v=DATA.verdict,b=$('#dbVerdict');b.textContent='';
+  if(AUDIT){b.appendChild(el('div','sec','Audit — model vs observed reality'));
+    b.appendChild(el('div','wrongli','Overall: '+AUDIT.overall));
+    b.appendChild(el('div','wrongli','Reconciliation: '+AUDIT.matched+' matched · '+AUDIT.diverged+' diverged ('+AUDIT.hard+' hard) · '+AUDIT.unit_mismatch+' unit-mismatch · '+AUDIT.no_prediction+' not predicted (of '+AUDIT.observed_count+' observed).'));
+    // When the map reads as a pass (matches, no divergences), say plainly that a match is not a guarantee.
+    if(AUDIT.reads_as_pass)
+      b.appendChild(el('div','wrongli','A matched metric is consistent with the prediction within tolerance — it is NOT a validation pass or a guarantee of correctness (L0, Directional).'));
+    (DATA.audit_unmatched||[]).forEach(u=>b.appendChild(el('div','wrongli','• not tied to a component — '+(u.component_id||'(system)')+' / '+u.metric+': '+u.note)));
+    b.appendChild(el('div','note','Observed values are read-only evidence — no engine number was changed (prime directive); divergences are surfaced for review, never auto-resolved (ADR-004) — your model’s value is kept, not overwritten. L0: a divergence flags where to look, not a certified defect.'));}
   const rows=[['Bottleneck',v.bottleneck_name+'  ('+pct(v.bottleneck_utilization)+' utilisation)'],
     ['Max safe load','~'+rps(v.breakpoint_rps_safe)+' req/s  (85% ceiling) · ~'+rps(v.breakpoint_rps_theoretical)+' theoretical'],
     ['Latency (dominant path)','p50 '+ms(v.latency.p50_ms)+' · p95 '+ms(v.latency.p95_ms)+' · p99 '+ms(v.latency.p99_ms)],
