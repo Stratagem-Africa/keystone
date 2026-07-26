@@ -104,7 +104,7 @@ export default function Home() {
           <div className="relative isolate flex items-center gap-2 mb-8">
             {/* ONE request glides across the whole chain (above the stack, always visible); the response
                 returns behind it, hollow. Rendered once here = a single request/response cycle. */}
-            <span className="pointer-events-none absolute z-20 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full bg-architect-blue shadow-[0_0_10px_2px_var(--color-architect-blue)] animate-req" aria-hidden="true" />
+            <span className="pointer-events-none absolute z-20 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-architect-blue shadow-[0_0_6px_1px_var(--color-architect-blue)] animate-req" aria-hidden="true" />
             <span className="pointer-events-none absolute z-20 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-architect-blue bg-slate-ink animate-res" aria-hidden="true" />
             <SimNode
               label="LB" Icon={Network}
