@@ -46,21 +46,26 @@
   --ease-settle:    cubic-bezier(0.2, 0.8, 0.2, 1); /* critically-damped settle */
   --duration-ui:    220ms;  /* standard UI interactions */
   --duration-band:  420ms;  /* confidence band reveal */
+
+  /* Custom animations as @theme tokens so Tailwind v4 GENERATES the `animate-*` utilities AND emits the
+     @keyframes. A raw `.animate-*` class is claimed by the reserved utility namespace and dropped in dev
+     (build resolves it, dev doesn't) — this is the reliable v4 way. Order: name duration timing [delay] iter. */
+  --animate-hero-rise: hero-rise 0.7s var(--ease-settle) both;
+  --animate-req: req-flow 3.4s linear infinite;
+  --animate-res: res-flow 3.4s linear 1.7s infinite;
 }
 
 /* ─── Hero motion (docs/09 §4.1 Act 1) — the instrument panel settles in over a faint substrate.
    A restrained, reduced-motion-safe subset of the living-sim; the full reseedable WebGL hero
    (packet flood, bottleneck ring) is a separate, visually-verified effort (issue #134). ──────── */
 @keyframes hero-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-.animate-hero-rise { animation: hero-rise 0.7s var(--ease-settle) both; }
 /* Living-sim packets (CSS-only; reduced-motion path below stills them to a poster frame). ONE request
    glides the whole stack at constant speed (linear) — visible on the wires, hidden behind each opaque
    node — then the response returns right→left, delayed so it follows the request back (docs/09 §3.2:
-   the value crosses the seam and settles back). Positions are % of the whole stack row, not per-wire. */
+   the value crosses the seam and settles back). Positions are % of the whole stack row, not per-wire.
+   The `.animate-req/res` utilities are generated from the @theme tokens above. */
 @keyframes req-flow { 0% { left: 3%; opacity: 0; } 6% { opacity: 1; } 94% { opacity: 1; } 100% { left: 97%; opacity: 0; } }
 @keyframes res-flow { 0% { left: 97%; opacity: 0; } 6% { opacity: 1; } 94% { opacity: 1; } 100% { left: 3%; opacity: 0; } }
-.animate-req { animation: req-flow 3.4s linear infinite; }
-.animate-res { animation: res-flow 3.4s linear infinite; animation-delay: 1.7s; }
 .hero-substrate {
   background-image:
     linear-gradient(rgba(140,152,168,0.06) 1px, transparent 1px),

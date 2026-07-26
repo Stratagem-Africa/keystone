@@ -29,10 +29,10 @@ function SimNode({
         {label}
       </span>
 
-      {/* Info popover — hover to peek, click to pin (focus keeps it open). Honest/qualitative, no fake numbers. */}
+      {/* Info popover — opens ABOVE the stack (clear of the metric below); hover to peek, click to pin. */}
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full z-30 mt-9 hidden w-64 flex-col gap-1.5 rounded-lg border border-steel bg-slate-ink p-3 text-left shadow-xl group-hover:flex group-focus-within:flex"
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full z-30 mb-3 hidden w-64 flex-col gap-1.5 rounded-lg border border-steel bg-slate-ink p-3 text-left shadow-xl group-hover:flex group-focus-within:flex"
       >
         <span className="flex items-center gap-2">
           <Icon size={14} strokeWidth={1.75} className={bottleneck ? "text-signal-red" : "text-ink-muted"} aria-hidden="true" />
@@ -61,7 +61,7 @@ function Track({ name, detail }: { name: string; detail: string }) {
       <span className="h-px w-full bg-steel transition-colors ease-settle duration-ui group-hover:bg-ink-muted" aria-hidden="true" />
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full z-30 mt-4 hidden w-56 flex-col gap-1 rounded-lg border border-steel bg-slate-ink p-3 text-left shadow-xl group-hover:flex group-focus-within:flex"
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full z-30 mb-3 hidden w-56 flex-col gap-1 rounded-lg border border-steel bg-slate-ink p-3 text-left shadow-xl group-hover:flex group-focus-within:flex"
       >
         <span className="font-sans text-label font-semibold text-paper normal-case tracking-normal">{name}</span>
         <span className="font-serif text-provenance text-ink-muted leading-relaxed normal-case tracking-normal">{detail}</span>
@@ -102,10 +102,10 @@ export default function Home() {
             a real stack · simulated
           </p>
           <div className="relative isolate flex items-center gap-2 mb-8">
-            {/* ONE request glides the whole chain (hidden behind each opaque node, visible on the wires);
-                the response returns behind it, hollow. Rendered once here = a single request/response cycle. */}
-            <span className="pointer-events-none absolute z-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-architect-blue shadow-[0_0_8px_var(--color-architect-blue)] animate-req" aria-hidden="true" />
-            <span className="pointer-events-none absolute z-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full border-2 border-architect-blue bg-transparent animate-res" aria-hidden="true" />
+            {/* ONE request glides across the whole chain (above the stack, always visible); the response
+                returns behind it, hollow. Rendered once here = a single request/response cycle. */}
+            <span className="pointer-events-none absolute z-20 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full bg-architect-blue shadow-[0_0_10px_2px_var(--color-architect-blue)] animate-req" aria-hidden="true" />
+            <span className="pointer-events-none absolute z-20 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-architect-blue bg-slate-ink animate-res" aria-hidden="true" />
             <SimNode
               label="LB" Icon={Network}
               name="Application Load Balancer"
