@@ -7,29 +7,26 @@ export default function Home() {
     <>
       <Nav />
 
-      {/* Hero — slate-ink, the "instrument panel" surface */}
+      {/* Hero — slate-ink "instrument panel". Competence BEFORE confession (docs/09 §4.1 Act 1,
+          §11.5): the headline + a number settling through its band land first; the honest caveats
+          come later (the flaws section, below the fold), so honesty reads as mastery, not weakness. */}
       <section className="flex-1 flex flex-col items-center justify-center bg-slate-ink text-paper px-6 py-24 text-center gap-8">
-        <p className="font-mono text-provenance text-ink-muted uppercase tracking-widest">
-          scaffold · no real data yet
-        </p>
-
-        {/* Primary headline — grotesque signals chrome/UI (docs/09 §2.5) */}
-        <h1 className="font-sans text-h1 font-semibold tracking-tight max-w-2xl">
+        {/* Primary headline — Display scale, grotesque signals chrome/UI (docs/09 §2.5) */}
+        <h1 className="font-sans text-display font-semibold tracking-tight max-w-3xl">
           Show your work.
         </h1>
 
-        {/* Sub-copy — serif signals model-reasoned prose */}
-        <p className="font-serif text-body max-w-xl">
-          The model reasons. The engine computes. Every number ships with its
-          assumptions, a confidence band, and a{" "}
-          <span className="text-assumption-amber">&ldquo;where this is wrong&rdquo;</span>{" "}
-          section.
+        {/* Sub-copy — serif signals model-reasoned prose. Competence framing. */}
+        <p className="font-serif text-body max-w-[52ch]">
+          A grounded consensus of AI architects designs your system, justifies every
+          decision, and validates it with a deterministic engine.
         </p>
 
-        {/* Demo Metric — shows what a real metric will look like */}
-        <div className="mt-4 p-6 bg-graphite border border-steel rounded-lg text-left">
+        {/* Demo Metric — the competence proof: a real number resolving through its confidence band.
+            Hover or focus it to x-ray how it was made. */}
+        <div className="mt-2 p-6 bg-graphite border border-steel rounded-lg text-left">
           <p className="font-mono text-provenance text-ink-muted mb-4 uppercase tracking-wider">
-            example metric
+            example metric — hover to x-ray
           </p>
           <Metric
             value={86}
@@ -37,20 +34,21 @@ export default function Home() {
             low={72}
             high={104}
             provenance="ASSUMPTION"
-            model="placeholder — wire to API"
+            model="M/M/1 sojourn — placeholder"
           />
         </div>
 
-        {/* CTA — links to the intent input page */}
-        <Link
-          href="/design"
-          className="font-sans text-label font-medium px-6 py-3 rounded-full bg-paper text-slate-ink transition-all ease-settle duration-ui hover:bg-mist"
+        {/* Gentle scroll affordance — not a conversion CTA (that waits until after the flaws). */}
+        <a
+          href="#flaws"
+          className="font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-ink"
         >
-          Describe what you&apos;re building →
-        </Link>
+          See how — and where it&apos;s wrong ↓
+        </a>
 
-        <p className="font-mono text-provenance text-ink-muted">
-          We&apos;ll tell you when we&apos;re guessing.
+        {/* Stub honesty, demoted to a small note (docs/09 §11 stub-honesty, no longer the first line). */}
+        <p className="font-mono text-provenance text-ink-muted/70">
+          scaffold · no live data yet
         </p>
       </section>
 
@@ -62,13 +60,13 @@ export default function Home() {
             reasoning zone · model
           </p>
           <div className="w-8 h-px bg-mist" />
-          {/* Serif = the model reasoned this */}
-          <p className="font-serif text-body">
+          {/* Serif = the model reasoned this. Bounded to a comfortable reading measure (docs/09 §8). */}
+          <p className="font-serif text-body max-w-[60ch]">
             The council of AI architects deliberates on your system design,
             proposes ADRs, and records dissent. Serif typeface signals the source:
             a language model reasoned this — not the engine.
           </p>
-          <p className="font-serif text-body text-ink-muted italic">
+          <p className="font-serif text-body text-ink-muted italic max-w-[60ch]">
             &ldquo;A cache here reduces read latency by avoiding repeated DB
             round-trips, at the cost of eventual consistency…&rdquo;
           </p>
@@ -103,6 +101,44 @@ export default function Home() {
             />
           </div>
         </div>
+      </section>
+
+      {/* Where this is wrong — the flaws LEAD, above the CTA (docs/09 §3.4, §4.1 Act 5, §11.4).
+          Non-dismissable; amber left-rule; serif caveats. This is the flex, not a footnote. */}
+      <section id="flaws" className="bg-paper text-slate-ink px-6 md:px-12 py-16 flex justify-center">
+        <div className="w-full max-w-2xl flex flex-col gap-4 border-l-4 border-assumption-amber pl-6">
+          <p className="font-mono text-provenance uppercase tracking-widest text-assumption-amber">
+            Read before trusting a number
+          </p>
+          <h2 className="font-sans text-h1 font-semibold tracking-tight">Where this is wrong</h2>
+          <ul className="flex flex-col gap-4 mt-1">
+            <li className="font-serif text-body max-w-[62ch]">
+              This is <span className="font-mono text-mono-data">L0 · Directional</span> — every number is
+              modelled from your design, <span className="italic">not yet calibrated</span> to your real stack.
+            </li>
+            <li className="font-serif text-body max-w-[62ch]">
+              Each figure ships with a confidence band. A <span className="text-assumption-amber">wide amber band</span>{" "}
+              means we are guessing; grounded evidence narrows it toward green.
+            </li>
+            <li className="font-serif text-body max-w-[62ch]">
+              The AI council <span className="italic">reasons</span>; it never produces a number — the
+              deterministic engine does. But reasoning can still be wrong, so we show it and record dissent.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      {/* Primary CTA lockup — AFTER the flaws (docs/09 §11.4: flaws above the CTA). */}
+      <section className="bg-slate-ink text-paper px-6 py-20 flex flex-col items-center text-center gap-5">
+        <Link
+          href="/design"
+          className="font-sans text-label font-medium px-6 py-3 rounded-full bg-paper text-slate-ink transition-all ease-settle duration-ui hover:bg-mist active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-ink"
+        >
+          Describe what you&apos;re building →
+        </Link>
+        <p className="font-mono text-provenance text-ink-muted">
+          We&apos;ll tell you when we&apos;re guessing.
+        </p>
       </section>
 
       {/* Footer */}

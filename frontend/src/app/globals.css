@@ -45,3 +45,16 @@
   --duration-ui:    220ms;  /* standard UI interactions */
   --duration-band:  420ms;  /* confidence band reveal */
 }
+
+/* ─── Reduced-motion — a COMPLETE, equal path (docs/09 §11.9 FIXED) ────────
+   Every settle/transition/animation goes still; bands snap straight to their
+   final width. The static state is already the resting state, so nothing is
+   lost — confidence still reads from width + label + hue, never motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -11,27 +11,28 @@ import { supabase } from "@/lib/supabase";
 export function AuthPanel() {
   const { user, loading } = useAuth();
 
-  if (loading) {
-    // First-paint check for a restored session — brief and not a metric, so a
-    // plain neutral placeholder (no confidence band applies here).
-    return <p className="font-sans text-label text-ink-muted">Loading…</p>;
-  }
-
-  if (user) {
-    return (
-      <div className="flex flex-col gap-4">
-        <p className="font-sans text-body text-slate-ink">
-          Signed in as <span className="font-medium">{user.email}</span>
-        </p>
-        <button
-          onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
-          className="self-start font-sans text-label font-medium px-6 py-3 rounded-full border border-steel text-slate-ink transition-all ease-settle duration-ui hover:bg-mist"
-        >
-          Sign out
-        </button>
-      </div>
-    );
-  }
-
-  return <AuthForm />;
+  // One elevated-panel material for every state, so auth shares the product's card language (docs/09 §9).
+  return (
+    <div className="rounded-xl border border-mist bg-paper p-8 shadow-sm">
+      {loading ? (
+        // First-paint check for a restored session — brief and not a metric, so a
+        // plain neutral placeholder (no confidence band applies here).
+        <p className="font-sans text-label text-ink-muted">Loading…</p>
+      ) : user ? (
+        <div className="flex flex-col gap-4">
+          <p className="font-sans text-body text-slate-ink">
+            Signed in as <span className="font-medium">{user.email}</span>
+          </p>
+          <button
+            onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
+            className="self-start font-sans text-label font-medium px-6 py-3 rounded-full border border-steel text-slate-ink transition-all ease-settle duration-ui hover:bg-mist active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+          >
+            Sign out
+          </button>
+        </div>
+      ) : (
+        <AuthForm />
+      )}
+    </div>
+  );
 }
