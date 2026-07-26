@@ -17,7 +17,7 @@ export function AuthPanel() {
       {loading ? (
         // First-paint check for a restored session — brief and not a metric, so a
         // plain neutral placeholder (no confidence band applies here).
-        <p className="font-sans text-label text-ink-muted">Loading…</p>
+        <p className="font-sans text-label text-ink-muted-strong">Loading…</p>
       ) : user ? (
         <div className="flex flex-col gap-4">
           <p className="font-sans text-body text-slate-ink">

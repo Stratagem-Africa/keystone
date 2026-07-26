@@ -137,7 +137,7 @@ function metricDelta(current: EngineMetric, base: EngineMetric): number {
 function DeltaGhost({ value, unit }: { value: number; unit: string }) {
   const sign = value > 0 ? "+" : ""; // negative numbers already print their own "-"
   return (
-    <span className="font-mono text-provenance text-ink-muted">
+    <span className="font-mono text-provenance text-ink-muted-strong">
       {sign}{value}{unit} vs baseline
     </span>
   );
@@ -165,7 +165,7 @@ function VerdictMetric({
 
   return (
     <div className="flex flex-col gap-1">
-      <p className="font-sans text-label uppercase tracking-widest text-ink-muted">
+      <p className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
         {label}
       </p>
       <Metric value={m.value} unit={m.unit} low={m.low} high={m.high} provenance={PROVENANCE} model={m.model} />
@@ -191,7 +191,7 @@ function ComponentTable({ components }: { components: Record<string, ComponentRe
           binds every cell to it, so no number is orphaned from its provenance (docs/09 §11.1). */}
       <p className="font-mono text-provenance">
         <span className="text-assumption-amber uppercase tracking-widest">ASSUMPTION</span>
-        <span className="text-ink-muted">
+        <span className="text-ink-muted-strong">
           {" "}· same ungrounded simulation as the Verdict — these cells carry that provenance, not a per-cell
           band. See &ldquo;Where this is wrong&rdquo;.
         </span>
@@ -200,12 +200,12 @@ function ComponentTable({ components }: { components: Record<string, ComponentRe
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-mist text-left">
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2">Component</th>
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Arrival (rps)</th>
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Capacity (rps)</th>
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Utilisation</th>
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Mean latency (ms)</th>
-              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Status</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2">Component</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2 text-right">Arrival (rps)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2 text-right">Capacity (rps)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2 text-right">Utilisation</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2 text-right">Mean latency (ms)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted-strong py-2 text-right">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -220,7 +220,7 @@ function ComponentTable({ components }: { components: Record<string, ComponentRe
                   <td className="font-mono text-mono-data py-2 text-right" aria-label={`capacity ${Math.round(c.capacity_rps)} rps, ASSUMPTION`}>{Math.round(c.capacity_rps)}</td>
                   <td className="font-mono text-mono-data py-2 text-right" aria-label={`utilisation ${util} percent, ASSUMPTION`}>{util}%</td>
                   <td className="font-mono text-mono-data py-2 text-right" aria-label={`mean latency ${lat} ms, ASSUMPTION`}>{lat}</td>
-                  <td className={`font-mono text-provenance py-2 text-right ${c.saturated ? "text-signal-red" : "text-ink-muted"}`}>
+                  <td className={`font-mono text-provenance py-2 text-right ${c.saturated ? "text-signal-red" : "text-ink-muted-strong"}`}>
                     {c.saturated ? "SATURATED" : "ok"}
                   </td>
                 </tr>
@@ -245,7 +245,7 @@ function ADRCard({ adr }: { adr: ADR }) {
       <h3 className="font-sans text-h3 font-semibold">{adr.area}</h3>
 
       <p className="font-serif text-body max-w-[62ch]">{adr.decision}</p>
-      <p className="font-serif text-body text-ink-muted italic max-w-[62ch]">{adr.rationale}</p>
+      <p className="font-serif text-body text-ink-muted-strong italic max-w-[62ch]">{adr.rationale}</p>
 
       {adr.dissent.length > 0 && (
         <ul className="flex flex-col gap-1 border-l-2 border-dissent-indigo pl-4">
@@ -272,7 +272,7 @@ function ADRCard({ adr }: { adr: ADR }) {
         </div>
       )}
 
-      <p className="font-mono text-provenance text-ink-muted">
+      <p className="font-mono text-provenance text-ink-muted-strong">
         council confidence: {adr.confidence}
       </p>
     </div>
@@ -399,11 +399,11 @@ export default function ReportPage() {
   // never fakes precision"). The pulse stills under prefers-reduced-motion via the global path.
   if (loading) return (
     <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-4">
-      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted">connecting to the engine…</p>
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">connecting to the engine…</p>
       <div className="h-1 w-44 rounded-full bg-mist overflow-hidden" aria-hidden="true">
         <div className="h-full w-1/3 rounded-full bg-architect-blue animate-pulse" />
       </div>
-      <p className="font-serif text-body text-ink-muted max-w-[60ch]">
+      <p className="font-serif text-body text-ink-muted-strong max-w-[60ch]">
         Running the deterministic simulation. No number appears until the engine has produced it.
       </p>
     </section>
@@ -412,13 +412,13 @@ export default function ReportPage() {
   // failure; §11.3 reserves red for real failure/SPOF). Honest + actionable.
   if (error) return (
     <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-3">
-      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted">could not reach the engine</p>
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">could not reach the engine</p>
       <p className="font-serif text-body max-w-[60ch]">
         This report needs the Keystone API at{" "}
         <span className="font-mono text-mono-data">{process.env.NEXT_PUBLIC_API_URL ?? "(NEXT_PUBLIC_API_URL unset)"}</span>.
         Start the backend, then reload.
       </p>
-      <p className="font-mono text-provenance text-ink-muted">detail: {error}</p>
+      <p className="font-mono text-provenance text-ink-muted-strong">detail: {error}</p>
     </section>
   );
   if (!data) return null; // fetch finished with no error but also no data — shouldn't happen, keeps TS happy
@@ -451,7 +451,7 @@ export default function ReportPage() {
 
       <div className="flex items-end gap-3">
         <label className="flex flex-col gap-1">
-          <span className="font-sans text-label uppercase tracking-widest text-ink-muted">
+          <span className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
             What if traffic reaches…
           </span>
           <input

@@ -54,21 +54,21 @@ export function AuthForm() {
         <button
           type="button"
           onClick={() => { setMode("sign-in"); setError(null); setMessage(null); }}
-          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-in" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted border-transparent hover:text-slate-ink"}`}
+          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-in" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted-strong border-transparent hover:text-slate-ink"}`}
         >
           Sign in
         </button>
         <button
           type="button"
           onClick={() => { setMode("sign-up"); setError(null); setMessage(null); }}
-          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-up" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted border-transparent hover:text-slate-ink"}`}
+          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-up" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted-strong border-transparent hover:text-slate-ink"}`}
         >
           Create account
         </button>
       </div>
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="email" className="font-sans text-label uppercase tracking-widest text-ink-muted">
+        <label htmlFor="email" className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
           Email
         </label>
         <input
@@ -83,7 +83,7 @@ export function AuthForm() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="password" className="font-sans text-label uppercase tracking-widest text-ink-muted">
+        <label htmlFor="password" className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
           Password
         </label>
         <input
@@ -105,7 +105,7 @@ export function AuthForm() {
 
       {/* Neutral instruction, not a confidence signal — no amber */}
       {message && (
-        <p className="font-sans text-label text-ink-muted">{message}</p>
+        <p className="font-sans text-label text-ink-muted-strong">{message}</p>
       )}
 
       <button

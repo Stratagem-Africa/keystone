@@ -19,7 +19,7 @@ export default function AuthPage() {
             <h1 className="font-sans text-h2 font-semibold tracking-tight text-slate-ink">
               Sign in
             </h1>
-            <p className="font-serif text-body text-ink-muted">
+            <p className="font-serif text-body text-ink-muted-strong">
               An account lets you save and revisit your designs.
             </p>
           </div>
