@@ -65,6 +65,9 @@ type DesignResponse = {
   model: string;
   simulation: SimulationResult;
   adrs: ADR[];
+  // Not emitted by /design yet — the frontend high-stakes review block is guarded on this and stays
+  // dark until the backend sends it (payments/health/elections; see prototype council is_high_stakes).
+  high_stakes?: boolean;
 };
 
 // /design bypasses grounding entirely (it builds the reference blueprint
@@ -182,37 +185,50 @@ function ComponentTable({ components }: { components: Record<string, ComponentRe
   const rows = Object.values(components);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <h2 className="font-sans text-h3 font-semibold">Component load</h2>
-      <p className="font-mono text-provenance text-ink-muted">
-        Same ASSUMPTION-provenance simulation as the Verdict above — see &ldquo;Where this is wrong&rdquo;.
+      {/* The table-level provenance tag: one ASSUMPTION note, not 24 pills. The amber left-rule below
+          binds every cell to it, so no number is orphaned from its provenance (docs/09 §11.1). */}
+      <p className="font-mono text-provenance">
+        <span className="text-assumption-amber uppercase tracking-widest">ASSUMPTION</span>
+        <span className="text-ink-muted">
+          {" "}· same ungrounded simulation as the Verdict — these cells carry that provenance, not a per-cell
+          band. See &ldquo;Where this is wrong&rdquo;.
+        </span>
       </p>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="border-b border-mist text-left">
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2">Component</th>
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Arrival (rps)</th>
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Capacity (rps)</th>
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Utilisation</th>
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Mean latency (ms)</th>
-            <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <tr key={c.id} className="border-b border-mist">
-              <td className="font-serif text-body py-2">{c.name}</td>
-              <td className="font-mono text-mono-data py-2 text-right">{Math.round(c.arrival_rps)}</td>
-              <td className="font-mono text-mono-data py-2 text-right">{Math.round(c.capacity_rps)}</td>
-              <td className="font-mono text-mono-data py-2 text-right">{Math.round(c.utilization * 1000) / 10}%</td>
-              <td className="font-mono text-mono-data py-2 text-right">{Math.round(c.mean_latency_ms * 10) / 10}</td>
-              <td className={`font-mono text-provenance py-2 text-right ${c.saturated ? "text-signal-red" : "text-ink-muted"}`}>
-                {c.saturated ? "SATURATED" : "ok"}
-              </td>
+      <div className="border-l-2 border-assumption-amber/40 pl-4">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-mist text-left">
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2">Component</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Arrival (rps)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Capacity (rps)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Utilisation</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Mean latency (ms)</th>
+              <th className="font-sans text-label uppercase tracking-widest text-ink-muted py-2 text-right">Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((c) => {
+              const util = Math.round(c.utilization * 1000) / 10;
+              const lat = Math.round(c.mean_latency_ms * 10) / 10;
+              return (
+                <tr key={c.id} className="border-b border-mist">
+                  <td className="font-serif text-body py-2">{c.name}</td>
+                  {/* aria-label restores the provenance the visual grouping conveys, for screen readers. */}
+                  <td className="font-mono text-mono-data py-2 text-right" aria-label={`arrival ${Math.round(c.arrival_rps)} rps, ASSUMPTION`}>{Math.round(c.arrival_rps)}</td>
+                  <td className="font-mono text-mono-data py-2 text-right" aria-label={`capacity ${Math.round(c.capacity_rps)} rps, ASSUMPTION`}>{Math.round(c.capacity_rps)}</td>
+                  <td className="font-mono text-mono-data py-2 text-right" aria-label={`utilisation ${util} percent, ASSUMPTION`}>{util}%</td>
+                  <td className="font-mono text-mono-data py-2 text-right" aria-label={`mean latency ${lat} ms, ASSUMPTION`}>{lat}</td>
+                  <td className={`font-mono text-provenance py-2 text-right ${c.saturated ? "text-signal-red" : "text-ink-muted"}`}>
+                    {c.saturated ? "SATURATED" : "ok"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -228,8 +244,8 @@ function ADRCard({ adr }: { adr: ADR }) {
     <div className="flex flex-col gap-3 border-b border-mist pb-6">
       <h3 className="font-sans text-h3 font-semibold">{adr.area}</h3>
 
-      <p className="font-serif text-body">{adr.decision}</p>
-      <p className="font-serif text-body text-ink-muted italic">{adr.rationale}</p>
+      <p className="font-serif text-body max-w-[62ch]">{adr.decision}</p>
+      <p className="font-serif text-body text-ink-muted italic max-w-[62ch]">{adr.rationale}</p>
 
       {adr.dissent.length > 0 && (
         <ul className="flex flex-col gap-1 border-l-2 border-dissent-indigo pl-4">
@@ -305,7 +321,7 @@ function WhereThisIsWrong({ caveats }: { caveats: string[] }) {
       </p>
       <ul className="flex flex-col gap-3">
         {caveats.map((caveat, i) => (
-          <li key={i} className="font-serif text-body">
+          <li key={i} className="font-serif text-body max-w-[62ch]">
             {caveat}
           </li>
         ))}
@@ -379,8 +395,32 @@ export default function ReportPage() {
     }
   }
 
-  if (loading) return <p className="p-8 font-mono text-provenance">Loading report…</p>;
-  if (error) return <p className="p-8 font-mono text-provenance text-assumption-amber">Error: {error}</p>;
+  // Honest loading state — a designed hold, never a faked number (docs/09 LATITUDE: "a loading number
+  // never fakes precision"). The pulse stills under prefers-reduced-motion via the global path.
+  if (loading) return (
+    <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-4">
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted">connecting to the engine…</p>
+      <div className="h-1 w-44 rounded-full bg-mist overflow-hidden" aria-hidden="true">
+        <div className="h-full w-1/3 rounded-full bg-architect-blue animate-pulse" />
+      </div>
+      <p className="font-serif text-body text-ink-muted max-w-[60ch]">
+        Running the deterministic simulation. No number appears until the engine has produced it.
+      </p>
+    </section>
+  );
+  // Error state — neutral chrome, NOT signal-red (a connection error is an ops error, not a domain
+  // failure; §11.3 reserves red for real failure/SPOF). Honest + actionable.
+  if (error) return (
+    <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-3">
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted">could not reach the engine</p>
+      <p className="font-serif text-body max-w-[60ch]">
+        This report needs the Keystone API at{" "}
+        <span className="font-mono text-mono-data">{process.env.NEXT_PUBLIC_API_URL ?? "(NEXT_PUBLIC_API_URL unset)"}</span>.
+        Start the backend, then reload.
+      </p>
+      <p className="font-mono text-provenance text-ink-muted">detail: {error}</p>
+    </section>
+  );
   if (!data) return null; // fetch finished with no error but also no data — shouldn't happen, keeps TS happy
 
   const { simulation } = data;
@@ -392,8 +432,22 @@ export default function ReportPage() {
   const baselineSim = baseline && data !== baseline ? baseline.simulation : null;
 
   return (
-    <section className="p-8 flex flex-col gap-6">
-      <h1 className="font-sans text-h1 font-semibold">Verdict</h1>
+    <section className="p-8 md:p-12 max-w-5xl mx-auto flex flex-col gap-8">
+      {/* High-stakes expert-review block — non-dismissable, leads (docs/09 §3.4/§11.4). Guarded on the
+          engine's flag; renders nothing until /design emits `high_stakes` (flagged to backend/Jem). */}
+      {data.high_stakes && (
+        <div className="flex flex-col gap-1 border-l-4 border-signal-red pl-6 py-1">
+          <p className="font-mono text-provenance uppercase tracking-widest text-signal-red">
+            High-stakes domain — mandatory expert review
+          </p>
+          <p className="font-serif text-body max-w-[62ch]">
+            This design touches a high-stakes domain. It requires expert / legal / security review before
+            production use. Keystone produces decision support, <span className="italic">not</span> certification.
+          </p>
+        </div>
+      )}
+
+      <h1 className="font-sans text-display font-semibold tracking-tight">Verdict</h1>
 
       <div className="flex items-end gap-3">
         <label className="flex flex-col gap-1">
@@ -408,19 +462,19 @@ export default function ReportPage() {
             // this, rpsInput would silently become a string and break the
             // `system_rps: number` field the API expects.
             onChange={(e) => setRpsInput(Number(e.target.value))}
-            className="font-mono border border-mist rounded-md px-2 py-1 w-32"
+            className="font-mono border border-mist rounded-md px-2 py-1 w-32 transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
           />
         </label>
         <button
           onClick={handleResimulate}
           disabled={resimulating}
-          className="font-sans text-label uppercase tracking-widest bg-architect-blue text-white rounded-md px-4 py-2 disabled:opacity-50"
+          className="font-sans text-label uppercase tracking-widest bg-architect-blue text-white rounded-md px-4 py-2 transition-all ease-settle duration-ui hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
         >
           {resimulating ? "Re-simulating…" : "Re-simulate"}
         </button>
       </div>
 
-      <p className="font-serif text-body">
+      <p className="font-serif text-body max-w-2xl">
         Bottleneck: <span className="font-mono text-mono-data">{simulation.bottleneck_name}</span>
       </p>
 

@@ -38,7 +38,7 @@ export function IntentForm() {
         </p>
         <button
           onClick={() => { setBrief(""); setFile(null); setFormState("idle"); }}
-          className="mt-4 font-sans text-label text-ink-muted underline underline-offset-2"
+          className="mt-4 font-sans text-label text-ink-muted underline underline-offset-2 rounded-sm hover:text-slate-ink transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
         >
           Start again
         </button>
@@ -64,7 +64,7 @@ export function IntentForm() {
           onChange={(e) => setBrief(e.target.value)}
           placeholder="e.g. a URL shortener, ~10k req/s, mostly reads, Postgres + Redis"
           required
-          className="w-full rounded-lg border border-assumption-amber bg-paper text-slate-ink font-serif text-body px-4 py-3 placeholder:text-ink-muted/60 focus:outline-none focus:ring-2 focus:ring-assumption-amber resize-none transition-all ease-settle duration-ui"
+          className="w-full rounded-lg border border-assumption-amber bg-paper text-slate-ink font-serif text-body px-4 py-3 placeholder:text-ink-muted/60 resize-none transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-assumption-amber"
         />
         <p className="font-mono text-provenance text-ink-muted">
           ASSUMPTION · everything you write is treated as unverified until the engine grounds it
@@ -81,7 +81,7 @@ export function IntentForm() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-full cursor-pointer rounded-lg border border-dashed border-assumption-amber px-4 py-6 text-center transition-all ease-settle duration-ui hover:bg-assumption-amber/5"
+          className="w-full cursor-pointer rounded-lg border border-dashed border-assumption-amber px-4 py-6 text-center transition-all ease-settle duration-ui hover:bg-assumption-amber/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-assumption-amber"
         >
           {file ? (
             <p className="font-mono text-mono-data text-slate-ink">{file.name}</p>
@@ -104,7 +104,7 @@ export function IntentForm() {
       <button
         type="submit"
         disabled={!brief.trim() || formState === "submitting"}
-        className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite disabled:opacity-40 disabled:cursor-not-allowed"
+        className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite hover:shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
       >
         {formState === "submitting" ? "Sending…" : "Send to ingestion →"}
       </button>

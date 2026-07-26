@@ -54,14 +54,14 @@ export function AuthForm() {
         <button
           type="button"
           onClick={() => { setMode("sign-in"); setError(null); setMessage(null); }}
-          className={mode === "sign-in" ? "text-slate-ink font-semibold" : "text-ink-muted"}
+          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-in" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted border-transparent hover:text-slate-ink"}`}
         >
           Sign in
         </button>
         <button
           type="button"
           onClick={() => { setMode("sign-up"); setError(null); setMessage(null); }}
-          className={mode === "sign-up" ? "text-slate-ink font-semibold" : "text-ink-muted"}
+          className={`pb-1 border-b-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${mode === "sign-up" ? "text-slate-ink font-semibold border-architect-blue" : "text-ink-muted border-transparent hover:text-slate-ink"}`}
         >
           Create account
         </button>
@@ -78,7 +78,7 @@ export function AuthForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          className="w-full rounded-lg border border-steel bg-paper text-slate-ink font-sans text-body px-4 py-3 focus:outline-none focus:ring-2 focus:ring-architect-blue transition-all ease-settle duration-ui"
+          className="w-full rounded-lg border border-steel bg-paper text-slate-ink font-sans text-body px-4 py-3 transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue hover:border-ink-muted"
         />
       </div>
 
@@ -94,7 +94,7 @@ export function AuthForm() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={6}
-          className="w-full rounded-lg border border-steel bg-paper text-slate-ink font-sans text-body px-4 py-3 focus:outline-none focus:ring-2 focus:ring-architect-blue transition-all ease-settle duration-ui"
+          className="w-full rounded-lg border border-steel bg-paper text-slate-ink font-sans text-body px-4 py-3 transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue hover:border-ink-muted"
         />
       </div>
 
@@ -111,7 +111,7 @@ export function AuthForm() {
       <button
         type="submit"
         disabled={loading}
-        className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite disabled:opacity-40 disabled:cursor-not-allowed"
+        className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite hover:shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
       >
         {loading ? "Working…" : mode === "sign-in" ? "Sign in" : "Create account"}
       </button>
