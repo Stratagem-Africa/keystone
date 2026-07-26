@@ -48,6 +48,18 @@
   --duration-band:  420ms;  /* confidence band reveal */
 }
 
+/* ─── Hero motion (docs/09 §4.1 Act 1) — the instrument panel settles in over a faint substrate.
+   A restrained, reduced-motion-safe subset of the living-sim; the full reseedable WebGL hero
+   (packet flood, bottleneck ring) is a separate, visually-verified effort (issue #134). ──────── */
+@keyframes hero-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.animate-hero-rise { animation: hero-rise 0.7s var(--ease-settle) both; }
+.hero-substrate {
+  background-image:
+    linear-gradient(rgba(140,152,168,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(140,152,168,0.06) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
 /* ─── Reduced-motion — a COMPLETE, equal path (docs/09 §11.9 FIXED) ────────
    Every settle/transition/animation goes still; bands snap straight to their
    final width. The static state is already the resting state, so nothing is

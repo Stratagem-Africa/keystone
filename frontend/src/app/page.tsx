@@ -10,7 +10,11 @@ export default function Home() {
       {/* Hero — slate-ink "instrument panel". Competence BEFORE confession (docs/09 §4.1 Act 1,
           §11.5): the headline + a number settling through its band land first; the honest caveats
           come later (the flaws section, below the fold), so honesty reads as mastery, not weakness. */}
-      <section className="flex-1 flex flex-col items-center justify-center bg-slate-ink text-paper px-6 py-24 text-center gap-8">
+      <section className="relative overflow-hidden flex-1 flex flex-col items-center justify-center bg-slate-ink text-paper px-6 py-24 text-center">
+        {/* Faint instrument substrate — the living-sim's grid, static (docs/09 §4.1 Act 1). */}
+        <div className="pointer-events-none absolute inset-0 hero-substrate" aria-hidden="true" />
+        {/* Content settles in on load (reduced-motion path stills it to the final state). */}
+        <div className="relative z-10 flex flex-col items-center gap-8 animate-hero-rise">
         {/* Primary headline — Display scale, grotesque signals chrome/UI (docs/09 §2.5) */}
         <h1 className="font-sans text-display font-semibold tracking-tight max-w-3xl">
           Show your work.
@@ -50,6 +54,7 @@ export default function Home() {
         <p className="font-mono text-provenance text-ink-muted/70">
           scaffold · no live data yet
         </p>
+        </div>
       </section>
 
       {/* Reasoning → Computation seam — docs/09 §3.2 */}
