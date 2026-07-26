@@ -286,12 +286,13 @@ class TestCsvAdapter(unittest.TestCase):
 
 class TestBoundaryGuard(unittest.TestCase):
     def test_engine_modules_do_not_import_actuals(self):
-        # Structural prime-directive guard: the engine/model/report must never depend on the
+        # Structural prime-directive guard: the engine/model/pure views must never depend on the
         # actuals layer — observed evidence flows IN to be compared, never back into a number.
+        # (arch_map is a pure engine view; the actuals coupling lives in audit_map, a deliverable.)
         import pathlib
         from keystone import simulation
         pkg = pathlib.Path(simulation.__file__).parent
-        for name in ("simulation.py", "model.py", "report.py", "confidence_bands.py"):
+        for name in ("simulation.py", "model.py", "report.py", "confidence_bands.py", "arch_map.py"):
             src = (pkg / name).read_text(encoding="utf-8")
             self.assertNotIn("keystone.actuals", src, f"{name} imports keystone.actuals")
             self.assertNotIn("import actuals", src, f"{name} imports actuals")
