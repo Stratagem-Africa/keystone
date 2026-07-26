@@ -16,11 +16,17 @@ export function Nav() {
 
   return (
     <nav className="sticky top-0 z-20 flex items-center justify-between px-6 py-4 bg-slate-ink border-b border-steel">
+      {/* Wordmark — lowercase `keystone` per docs/09 §2.1, with the Stratagem parent-brand
+          attribution as a smaller, muted secondary mark (keystone stays the primary). */}
       <Link
         href="/"
-        className={`font-sans font-semibold tracking-tight text-paper transition-colors ease-settle duration-ui hover:text-architect-blue ${navFocus}`}
+        aria-label="Keystone by Stratagem — home"
+        className={`group inline-flex items-baseline gap-1.5 ${navFocus}`}
       >
-        keystone
+        <span className="font-sans font-semibold tracking-tight text-paper transition-colors ease-settle duration-ui group-hover:text-architect-blue">
+          keystone
+        </span>
+        <span className="font-sans text-provenance text-ink-muted tracking-wide">by Stratagem</span>
       </Link>
 
       <div className="flex items-center gap-4">
