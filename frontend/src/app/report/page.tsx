@@ -164,7 +164,9 @@ function VerdictMetric({
   const delta = baseM ? metricDelta(m, baseM) : null;
 
   return (
-    <div className="flex flex-col gap-1">
+    // Each verdict metric is its own instrument card — a bordered readout, not a bare grid cell.
+    // No overflow-clip, so the Metric x-ray popover can escape the card.
+    <div className="flex flex-col gap-2 rounded-lg border border-mist bg-paper p-4 transition-shadow ease-settle duration-ui hover:shadow-sm">
       <p className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
         {label}
       </p>
@@ -241,40 +243,48 @@ function ComponentTable({ components }: { components: Record<string, ComponentRe
 // decision as falsifiable, never final.
 function ADRCard({ adr }: { adr: ADR }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-mist pb-6">
-      <h3 className="font-sans text-h3 font-semibold">{adr.area}</h3>
+    <div className="border-b border-mist pb-6 lg:grid lg:grid-cols-[1fr_16rem] lg:gap-8">
+      {/* Main column — the decision, its reasoning, and its falsifiability */}
+      <div className="flex flex-col gap-3">
+        <h3 className="font-sans text-h3 font-semibold">{adr.area}</h3>
 
-      <p className="font-serif text-body max-w-[62ch]">{adr.decision}</p>
-      <p className="font-serif text-body text-ink-muted-strong italic max-w-[62ch]">{adr.rationale}</p>
+        <p className="font-serif text-body max-w-[62ch]">{adr.decision}</p>
+        <p className="font-serif text-body text-ink-muted-strong italic max-w-[62ch]">{adr.rationale}</p>
 
+        {adr.kill_criteria.length > 0 && (
+          <div className="border border-grounded-green rounded-lg p-3 flex flex-col gap-1">
+            <p className="font-mono text-provenance uppercase tracking-widest text-grounded-green">
+              Kill criteria — revisit if…
+            </p>
+            <ul className="list-disc list-inside">
+              {adr.kill_criteria.map((line, i) => (
+                <li key={i} className="font-serif text-body">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <p className="font-mono text-provenance text-ink-muted-strong">
+          council confidence: {adr.confidence}
+        </p>
+      </div>
+
+      {/* Dissent — a distinct voice in the MARGIN (docs/09 §6.3 / §11.6), never inline body text.
+          Right margin column on lg; stacks below with the indigo rule on narrow. Never hidden. */}
       {adr.dissent.length > 0 && (
-        <ul className="flex flex-col gap-1 border-l-2 border-dissent-indigo pl-4">
-          {adr.dissent.map((line, i) => (
-            <li key={i} className="font-serif text-body text-dissent-indigo">
-              {line}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {adr.kill_criteria.length > 0 && (
-        <div className="border border-grounded-green rounded-lg p-3 flex flex-col gap-1">
-          <p className="font-mono text-provenance uppercase tracking-widest text-grounded-green">
-            Kill criteria — revisit if…
+        <aside className="mt-4 lg:mt-1 flex flex-col gap-1.5 border-l-2 border-dissent-indigo pl-4">
+          <p className="font-mono text-provenance uppercase tracking-widest text-dissent-indigo">
+            Recorded dissent
           </p>
-          <ul className="list-disc list-inside">
-            {adr.kill_criteria.map((line, i) => (
-              <li key={i} className="font-serif text-body">
-                {line}
-              </li>
-            ))}
-          </ul>
-        </div>
+          {adr.dissent.map((line, i) => (
+            <p key={i} className="font-serif text-body text-dissent-indigo">
+              {line}
+            </p>
+          ))}
+        </aside>
       )}
-
-      <p className="font-mono text-provenance text-ink-muted-strong">
-        council confidence: {adr.confidence}
-      </p>
     </div>
   );
 }
