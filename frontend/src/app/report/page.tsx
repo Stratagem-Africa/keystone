@@ -511,6 +511,23 @@ export default function ReportPage() {
 
       <ComponentTable components={simulation.components} />
 
+      {/* Reasoning→Computation seam (docs/09 §3.2) — a persistent, labelled structural divider.
+          Everything ABOVE is engine-computed (mono, inside its band); everything BELOW is
+          council-reasoned prose (serif). The LLM cannot reach into the number column — the seam
+          makes that separation legible, not just a typographic convention. */}
+      <div className="flex flex-col gap-2 py-4" role="separator" aria-label="Seam: engine-computed above, council-reasoned below">
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-mist" />
+          <span className="font-mono text-provenance uppercase tracking-[0.25em] text-ink-muted-strong whitespace-nowrap">
+            parameters →
+          </span>
+          <div className="h-px flex-1 bg-mist" />
+        </div>
+        <p className="text-center font-mono text-provenance text-ink-muted-strong">
+          ↑ the engine computed these numbers &nbsp;·&nbsp; the council reasoned the design below ↓
+        </p>
+      </div>
+
       <ADRSection adrs={data.adrs} />
 
       <WhereThisIsWrong caveats={simulation.caveats} />
