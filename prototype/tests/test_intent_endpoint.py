@@ -1,20 +1,36 @@
 from __future__ import annotations
+import os
 import unittest
 from fastapi.testclient import TestClient  # test helper that fakes HTTP requests
 from api.main import app  # import our FastAPI app so we can send test requests to it
 from api import jobs  # import the jobs module so we can inspect and reset the store
+from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
 
 # TestClient wraps our app — no real server needed, everything runs in memory
 client = TestClient(app)
 
+
+def _auth_headers() -> dict:
+    # /intent is gated by Supabase-JWT auth (#10) — mint a valid test token rather
+    # than a real one, verified via patch_jwks() (set up in setUp below) instead of
+    # a real network call to Supabase's JWKS endpoint.
+    return {"Authorization": f"Bearer {make_test_token()}"}
+
+
 class TestIntentEndpoint(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()
+        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        patch_jwks(self)
 
 
     def test_submit_intent_returns_job_id(self):
         # send a valid POST request with clean text (no secrets)
-        response = client.post("/intent", json={"text": "I am building a URL shortener that handles 50k req/s"})
+        response = client.post(
+            "/intent",
+            json={"text": "I am building a URL shortener that handles 50k req/s"},
+            headers=_auth_headers(),
+        )
 
         self.assertEqual(response.status_code, 200)  # HTTP 200 means success
 
@@ -26,7 +42,7 @@ class TestIntentEndpoint(unittest.TestCase):
 
     def test_submit_intent_too_short_is_rejected(self):
         # Text under 10 characters should be rejected before our code even runs
-        response = client.post("/intent", json={"text": "short"})
+        response = client.post("/intent", json={"text": "short"}, headers=_auth_headers())
 
         self.assertEqual(response.status_code, 422)  # 422 = Unprocessable Entity (validation failed)
 
@@ -35,7 +51,7 @@ class TestIntentEndpoint(unittest.TestCase):
         # A text that contains what looks like an API key
         text = "My system uses sk-ant-api03-AAABBBCCCDDDEEEFFFGGGHHH to call the AI"
 
-        response = client.post("/intent", json={"text": text})
+        response = client.post("/intent", json={"text": text}, headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
 

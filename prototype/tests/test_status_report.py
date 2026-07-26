@@ -1,5 +1,6 @@
 from __future__ import annotations  # allows modern type hints on older Python
 
+import os
 import unittest
 
 from fastapi.testclient import TestClient  # simulates HTTP requests without a real server
@@ -7,8 +8,16 @@ from fastapi.testclient import TestClient  # simulates HTTP requests without a r
 from api.main import app          # the FastAPI app — all routes live here
 from api import jobs              # the module so we can clear _store between tests
 from api.jobs import create_job, update_job  # helpers to set up test data directly
+from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
 
 client = TestClient(app)  # one shared client for all tests in this file
+
+
+def _auth_headers() -> dict:
+    # These endpoints are gated by Supabase-JWT auth (#10) — mint a valid test token
+    # rather than a real one, verified via patch_jwks() (set up in setUp below) instead
+    # of a real network call to Supabase's JWKS endpoint.
+    return {"Authorization": f"Bearer {make_test_token()}"}
 
 
 class TestJobStatusEndpoint(unittest.TestCase):
@@ -19,17 +28,19 @@ class TestJobStatusEndpoint(unittest.TestCase):
         # Without this, a job created in test A would still exist when test B runs.
         jobs._store.clear()
         jobs._db_client = None  # ensure no Postgres client leaks between tests
+        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        patch_jwks(self)
 
     def test_unknown_job_returns_404(self):
         # A made-up ID that was never created — should get a clean 404, not a server crash
-        response = client.get("/jobs/does-not-exist")
+        response = client.get("/jobs/does-not-exist", headers=_auth_headers())
         self.assertEqual(response.status_code, 404)
 
     def test_queued_job_returns_status(self):
         # Create a job — it starts in "queued" state automatically
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
 
-        response = client.get(f"/jobs/{job.job_id}")
+        response = client.get(f"/jobs/{job.job_id}", headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
         data = response.json()  # parse the JSON body into a Python dict
@@ -42,7 +53,7 @@ class TestJobStatusEndpoint(unittest.TestCase):
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
         update_job(job.job_id, status="error", error="something went wrong in the pipeline")
 
-        response = client.get(f"/jobs/{job.job_id}")
+        response = client.get(f"/jobs/{job.job_id}", headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -57,9 +68,11 @@ class TestJobReportEndpoint(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()
         jobs._db_client = None
+        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        patch_jwks(self)
 
     def test_unknown_job_returns_404(self):
-        response = client.get("/jobs/does-not-exist/report")
+        response = client.get("/jobs/does-not-exist/report", headers=_auth_headers())
         self.assertEqual(response.status_code, 404)
 
     def test_report_not_ready_returns_404(self):
@@ -67,7 +80,7 @@ class TestJobReportEndpoint(unittest.TestCase):
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
         update_job(job.job_id, status="processing")
 
-        response = client.get(f"/jobs/{job.job_id}/report")
+        response = client.get(f"/jobs/{job.job_id}/report", headers=_auth_headers())
 
         self.assertEqual(response.status_code, 404)
         # The error message should mention the current status so the client knows why
@@ -78,7 +91,7 @@ class TestJobReportEndpoint(unittest.TestCase):
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
         update_job(job.job_id, status="done", result="# My Report\nsome content here")
 
-        response = client.get(f"/jobs/{job.job_id}/report")
+        response = client.get(f"/jobs/{job.job_id}/report", headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -91,7 +104,7 @@ class TestJobReportEndpoint(unittest.TestCase):
         job = create_job("I am building a URL shortener that handles 50k req/s", [])
         update_job(job.job_id, status="done", result="# My Report\nsome content here")
 
-        response = client.get(f"/jobs/{job.job_id}/report?fmt=markdown")
+        response = client.get(f"/jobs/{job.job_id}/report?fmt=markdown", headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
         # content-type header tells us what kind of data the server returned
@@ -106,7 +119,7 @@ class TestJobReportEndpoint(unittest.TestCase):
 
         response = client.get(
             f"/jobs/{job.job_id}/report",
-            headers={"Accept": "text/markdown"},  # this is how a browser/client signals its preference
+            headers={"Accept": "text/markdown", **_auth_headers()},  # this is how a browser/client signals its preference
         )
 
         self.assertEqual(response.status_code, 200)

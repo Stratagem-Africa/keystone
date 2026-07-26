@@ -3,7 +3,9 @@
 // state, both of which only work outside the default server-rendered flow.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Metric } from "@/components/Metric";
+import { useAuth } from "@/lib/auth-context";
 
 // One metric exactly as the engine returns it (see the `Metric` dataclass in
 // prototype/keystone/simulation.py). `low`/`high` are `null` whenever there's
@@ -341,6 +343,9 @@ function WhereThisIsWrong({ caveats }: { caveats: string[] }) {
 }
 
 export default function ReportPage() {
+  // The API now requires a Supabase session (#10) — /design rejects anonymous
+  // calls, so this page needs the signed-in user's token before it can fetch.
+  const { session, loading: authLoading } = useAuth();
   const [data, setData] = useState<DesignResponse | null>(null);
   // The FIRST result ever loaded — the fixed reference point every what-if is
   // compared against. Set once, on initial load, and never touched again
@@ -358,7 +363,13 @@ export default function ReportPage() {
   async function runDesign(systemRps?: number): Promise<DesignResponse> {
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/design`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // The API verifies this as a real Supabase user session, not just any
+        // caller (#10) — session is guaranteed non-null here because the
+        // effect below never fires loadInitial()/handleResimulate() without one.
+        Authorization: `Bearer ${session!.access_token}`,
+      },
       // systemRps undefined (first load) -> {} -> server uses its own default (10_000).
       // systemRps a number (what-if click) -> { system_rps: <value> } sent explicitly.
       body: JSON.stringify(systemRps === undefined ? {} : { system_rps: systemRps }),
@@ -372,6 +383,12 @@ export default function ReportPage() {
   }
 
   useEffect(() => {
+    if (authLoading) return;  // wait for the one-time session check to resolve
+    if (!session) {           // signed out — nothing to fetch, the render below shows a sign-in prompt
+      setLoading(false);
+      return;
+    }
+
     // An async function declared *inside* useEffect, then called immediately.
     // (useEffect itself can't be async — React requires its return value to
     // be a cleanup function or nothing.)
@@ -388,7 +405,7 @@ export default function ReportPage() {
     }
 
     loadInitial();
-  }, []); // empty array = run once, when the page first mounts
+  }, [authLoading, session]); // re-run once the session check resolves (or the user signs in/out)
 
   // Handler for the "Re-simulate" button — separate from the effect above so
   // it can use its OWN loading flag (resimulating) instead of the full-page one.
@@ -405,6 +422,26 @@ export default function ReportPage() {
     }
   }
 
+  // Same honest-hold treatment while we check for an existing session — this resolves
+  // near-instantly from localStorage, but it's still a real async step, not a fake wait.
+  if (authLoading) return (
+    <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-4">
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">checking your session…</p>
+      <div className="h-1 w-44 rounded-full bg-mist overflow-hidden" aria-hidden="true">
+        <div className="h-full w-1/3 rounded-full bg-architect-blue animate-pulse" />
+      </div>
+    </section>
+  );
+  // No session — the API rejects anonymous calls (#10), so don't even attempt the
+  // fetch; send the person to the existing sign-in flow instead of surfacing a raw 401.
+  if (!session) return (
+    <section className="p-8 md:p-12 max-w-2xl mx-auto flex flex-col gap-3">
+      <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">sign in required</p>
+      <p className="font-serif text-body max-w-[60ch]">
+        This report is generated per signed-in user. <Link href="/auth" className="underline">Sign in</Link> to run the design.
+      </p>
+    </section>
+  );
   // Honest loading state — a designed hold, never a faked number (docs/09 LATITUDE: "a loading number
   // never fakes precision"). The pulse stills under prefers-reduced-motion via the global path.
   if (loading) return (
