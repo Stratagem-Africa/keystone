@@ -17,7 +17,7 @@ export default function DesignPage() {
         <div className="max-w-2xl mx-auto flex flex-col gap-8">
 
           {/* Step indicator */}
-          <p className="font-mono text-provenance text-ink-muted uppercase tracking-widest">
+          <p className="font-mono text-provenance text-ink-muted-strong uppercase tracking-widest">
             step 1 of 4 · intent
           </p>
 
@@ -27,7 +27,7 @@ export default function DesignPage() {
               Describe what you&apos;re building.
             </h1>
             {/* Explanation — serif signals this is model-reasoned context, not UI label */}
-            <p className="font-serif text-body text-ink-muted">
+            <p className="font-serif text-body text-ink-muted-strong">
               Write a plain-English brief. The ingestion layer will infer a
               canonical system model, surface every assumption it made in amber,
               and ask you to resolve contradictions before the council deliberates.

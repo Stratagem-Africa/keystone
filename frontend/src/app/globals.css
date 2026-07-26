@@ -19,7 +19,9 @@
   --color-signal-red:     #E5484D; /* failure / SPOF / high-stakes domain flags */
   --color-architect-blue: #4C7DF0; /* interactive / links / council-voice attribution */
   --color-dissent-indigo: #3B4C8A; /* recorded dissent — minority report */
-  --color-ink-muted:      #8A98A8; /* secondary text, provenance metadata */
+  --color-ink-muted:        #8A98A8; /* secondary text on DARK surfaces (≈6:1 on slate-ink) */
+  --color-ink-muted-strong: #55606D; /* secondary text on LIGHT/paper surfaces — WCAG AA (~5.7:1 on paper).
+                                        ink-muted alone is ≈2.9:1 on paper (below AA); use this on paper. */
 
   /* ─── Fonts — wired from CSS variables set in layout.tsx ───────────────── */
   /* Rule: serif = model reasoned it · mono = engine computed it · sans = chrome */

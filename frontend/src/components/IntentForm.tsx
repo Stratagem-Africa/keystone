@@ -32,13 +32,13 @@ export function IntentForm() {
           Intent received. The ingestion layer is not yet connected — your brief
           will route to the API in a future update.
         </p>
-        <p className="font-mono text-provenance text-ink-muted mt-3">
+        <p className="font-mono text-provenance text-ink-muted-strong mt-3">
           Brief: &ldquo;{brief}&rdquo;
           {file && ` · File: ${file.name}`}
         </p>
         <button
           onClick={() => { setBrief(""); setFile(null); setFormState("idle"); }}
-          className="mt-4 font-sans text-label text-ink-muted underline underline-offset-2 rounded-sm hover:text-slate-ink transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
+          className="mt-4 font-sans text-label text-ink-muted-strong underline underline-offset-2 rounded-sm hover:text-slate-ink transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
         >
           Start again
         </button>
@@ -53,7 +53,7 @@ export function IntentForm() {
       <div className="flex flex-col gap-2">
         <label
           htmlFor="brief"
-          className="font-sans text-label uppercase tracking-widest text-ink-muted"
+          className="font-sans text-label uppercase tracking-widest text-ink-muted-strong"
         >
           Describe what you&apos;re building
         </label>
@@ -64,16 +64,16 @@ export function IntentForm() {
           onChange={(e) => setBrief(e.target.value)}
           placeholder="e.g. a URL shortener, ~10k req/s, mostly reads, Postgres + Redis"
           required
-          className="w-full rounded-lg border border-assumption-amber bg-paper text-slate-ink font-serif text-body px-4 py-3 placeholder:text-ink-muted/60 resize-none transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-assumption-amber"
+          className="w-full rounded-lg border border-assumption-amber bg-paper text-slate-ink font-serif text-body px-4 py-3 placeholder:text-ink-muted-strong/60 resize-none transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-assumption-amber"
         />
-        <p className="font-mono text-provenance text-ink-muted">
+        <p className="font-mono text-provenance text-ink-muted-strong">
           ASSUMPTION · everything you write is treated as unverified until the engine grounds it
         </p>
       </div>
 
       {/* File upload — optional, dashed amber border matches the input theme */}
       <div className="flex flex-col gap-2">
-        <label className="font-sans text-label uppercase tracking-widest text-ink-muted">
+        <label className="font-sans text-label uppercase tracking-widest text-ink-muted-strong">
           Attach a document{" "}
           <span className="normal-case tracking-normal">(optional)</span>
         </label>
@@ -86,7 +86,7 @@ export function IntentForm() {
           {file ? (
             <p className="font-mono text-mono-data text-slate-ink">{file.name}</p>
           ) : (
-            <p className="font-mono text-provenance text-ink-muted">
+            <p className="font-mono text-provenance text-ink-muted-strong">
               Click to attach a PDF, Markdown, or text file
             </p>
           )}
