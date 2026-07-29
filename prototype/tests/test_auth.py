@@ -2,27 +2,28 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
+import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from api.main import app
-from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
+from auth_test_helpers import (
+    make_forged_alg_header_token,
+    make_hs256_confusion_token,
+    make_test_token,
+    patch_jwks,
+    set_test_supabase_url,
+)
 
 client = TestClient(app)
 
 
 class TestAuth(unittest.TestCase):
     def setUp(self):
-        self._orig_url = os.environ.get("SUPABASE_URL")
-        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        set_test_supabase_url(self)
         patch_jwks(self)
-
-    def tearDown(self):
-        if self._orig_url is None:
-            os.environ.pop("SUPABASE_URL", None)
-        else:
-            os.environ["SUPABASE_URL"] = self._orig_url
 
     def test_health_is_public(self):
         # No token attached at all — /health must stay reachable for liveness probes.
@@ -101,6 +102,55 @@ class TestAuth(unittest.TestCase):
         response = client.post(
             "/design", json={}, headers={"Authorization": f"Bearer {token}"}
         )
+        self.assertEqual(response.status_code, 401)
+
+    def test_missing_exp_is_rejected(self):
+        # PyJWT only validates exp if present — options={"require": [...]} in
+        # auth.py is what makes an exp-less token get rejected instead of treated
+        # as never-expiring.
+        token = make_test_token(exp_delta=None)
+        response = client.post(
+            "/design", json={}, headers={"Authorization": f"Bearer {token}"}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_unsupported_algorithm_is_rejected_not_500(self):
+        # A token whose header just claims alg=RS256 — this project's JWKS only
+        # holds an EC key, so algorithms=["ES256"] in auth.py must reject this
+        # cleanly (401) rather than PyJWT raising a bare TypeError trying to read
+        # the EC key as an RSA key (which would surface as an unhandled 500).
+        token = make_forged_alg_header_token("RS256")
+        response = client.post(
+            "/design", json={}, headers={"Authorization": f"Bearer {token}"}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_hs256_confusion_token_is_rejected(self):
+        # Regression test locking in a defense we already have: even though the
+        # "secret" here (the PEM-encoded public key) is technically valid HMAC
+        # input and the signature genuinely matches, ES256-only in the allow-list
+        # means an HS256-header token is rejected before that signature is ever
+        # checked.
+        token = make_hs256_confusion_token()
+        response = client.post(
+            "/design", json={}, headers={"Authorization": f"Bearer {token}"}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_jwks_connection_failure_is_rejected_not_500(self):
+        # Regression test locking in fail-closed behaviour: if Supabase's JWKS
+        # endpoint is unreachable, that must surface as a clean 401, not a 500 —
+        # PyJWKClientConnectionError is a PyJWTError subclass, so the existing
+        # `except jwt.PyJWTError` in auth.py already covers it.
+        token = make_test_token()
+        with patch.object(
+            jwt.PyJWKClient,
+            "get_signing_key_from_jwt",
+            side_effect=jwt.exceptions.PyJWKClientConnectionError("JWKS endpoint unreachable"),
+        ):
+            response = client.post(
+                "/design", json={}, headers={"Authorization": f"Bearer {token}"}
+            )
         self.assertEqual(response.status_code, 401)
 
     def test_valid_token_is_accepted(self):

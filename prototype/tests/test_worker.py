@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import unittest
 from unittest.mock import patch  # lets us fake a function to simulate failures
 
@@ -10,7 +9,7 @@ from api.main import app
 from api import jobs
 from api.jobs import create_job, get_job, update_job
 from api.worker import run_pipeline
-from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
+from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
 
 client = TestClient(app)
 
@@ -27,7 +26,7 @@ class TestWorker(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()       # fresh store before every test
         jobs._db_client = None    # make sure no Postgres client leaks between tests
-        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        set_test_supabase_url(self)
         patch_jwks(self)
 
     def test_update_job_changes_status(self):

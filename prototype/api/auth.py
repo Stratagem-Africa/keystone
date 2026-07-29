@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -49,7 +50,7 @@ class AuthUser:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> AuthUser:
     """FastAPI dependency: verify the request's Supabase JWT or raise 401."""
     supabase_url = os.getenv("SUPABASE_URL")
@@ -68,12 +69,19 @@ def get_current_user(
         payload = jwt.decode(
             credentials.credentials,
             signing_key.key,
-            # Asymmetric only — never add HS256 here. Mixing a symmetric algorithm into
-            # an allow-list meant for a public-key lookup is the classic "algorithm
-            # confusion" hole (a public key gets reused as an HMAC secret).
-            algorithms=["ES256", "RS256"],
+            # ES256 ONLY — this project's JWKS holds one EC (elliptic-curve) key, so
+            # RS256 must not be listed here even though it's also "asymmetric": a
+            # forged token that just CLAIMS alg=RS256 would make PyJWT try to read
+            # the EC key as an RSA key, raising a bare TypeError (not a PyJWTError)
+            # that the except below wouldn't catch — an unauthenticated 500, not a
+            # 401. Only list algorithms this project's key set can actually satisfy.
+            algorithms=["ES256"],
             audience="authenticated",
             issuer=f"{supabase_url}/auth/v1",
+            # Reject a token missing any of these outright, rather than only checking
+            # them when present. Real Supabase tokens always carry all four — this is
+            # defense-in-depth against a hand-crafted token reaching this far.
+            options={"require": ["exp", "aud", "iss", "sub"]},
         )
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid or expired token")

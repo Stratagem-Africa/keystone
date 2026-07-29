@@ -1,6 +1,5 @@
 from __future__ import annotations  # allows modern type hints on older Python
 
-import os
 import unittest
 
 from fastapi.testclient import TestClient  # simulates HTTP requests without a real server
@@ -8,7 +7,7 @@ from fastapi.testclient import TestClient  # simulates HTTP requests without a r
 from api.main import app          # the FastAPI app — all routes live here
 from api import jobs              # the module so we can clear _store between tests
 from api.jobs import create_job, update_job  # helpers to set up test data directly
-from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
+from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
 
 client = TestClient(app)  # one shared client for all tests in this file
 
@@ -28,7 +27,7 @@ class TestJobStatusEndpoint(unittest.TestCase):
         # Without this, a job created in test A would still exist when test B runs.
         jobs._store.clear()
         jobs._db_client = None  # ensure no Postgres client leaks between tests
-        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        set_test_supabase_url(self)
         patch_jwks(self)
 
     def test_unknown_job_returns_404(self):
@@ -68,7 +67,7 @@ class TestJobReportEndpoint(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()
         jobs._db_client = None
-        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        set_test_supabase_url(self)
         patch_jwks(self)
 
     def test_unknown_job_returns_404(self):

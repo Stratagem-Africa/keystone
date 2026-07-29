@@ -1,10 +1,9 @@
 from __future__ import annotations
-import os
 import unittest
 from fastapi.testclient import TestClient  # test helper that fakes HTTP requests
 from api.main import app  # import our FastAPI app so we can send test requests to it
 from api import jobs  # import the jobs module so we can inspect and reset the store
-from auth_test_helpers import TEST_SUPABASE_URL, make_test_token, patch_jwks
+from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
 
 # TestClient wraps our app — no real server needed, everything runs in memory
 client = TestClient(app)
@@ -20,7 +19,7 @@ def _auth_headers() -> dict:
 class TestIntentEndpoint(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()
-        os.environ["SUPABASE_URL"] = TEST_SUPABASE_URL
+        set_test_supabase_url(self)
         patch_jwks(self)
 
 
