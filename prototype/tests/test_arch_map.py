@@ -12,7 +12,7 @@ import re
 import unittest
 
 from keystone import __version__ as ENGINE_VERSION
-from keystone.arch_map import _json_safe, _status, build_arch_map, render_html
+from keystone.arch_map import _json_safe, _round_floats, _status, build_arch_map, render_html
 from keystone.blueprints import payments, url_shortener
 from keystone.model import (Assumption, Component, ComponentKind, Flow, FlowStep,
                             SystemModel, Workload)
@@ -87,7 +87,9 @@ class TestDeterminismAndValidity(unittest.TestCase):
         m, s = _us()
         arch = build_arch_map(m, s)
         recovered = _extract_blob(render_html(arch))
-        self.assertEqual(recovered, arch)   # round-trips through strict JSON unchanged
+        # The blob is the map with floats rounded to a cross-version-stable precision (render-time only),
+        # so it round-trips through strict JSON to exactly the rounded map.
+        self.assertEqual(recovered, _round_floats(arch))
 
     def test_does_not_mutate_inputs(self):
         m, s = _us()
@@ -246,6 +248,30 @@ class TestCommittedGolden(unittest.TestCase):
             with open(golden, encoding="utf-8") as f:
                 self.assertEqual(html, f.read(),
                                  f"outputs/{name}_map.html is stale — regenerate with `python3 run_arch_map.py`")
+
+    def test_serialized_floats_are_cross_version_stable(self):
+        # The embedded blob must carry NO >6dp float — full-precision engine floats differ in the last
+        # ULP across CPython versions (libm) and would break the committed byte-golden on a different
+        # Python (was green on 3.9, red on 3.12+). _round_floats at render time pins this; guard it so a
+        # future change can't silently reintroduce drift-prone precision.
+        import run_arch_map
+        for name, builder in run_arch_map.DEMOS:
+            _model, _sim, html = run_arch_map.render_map(builder)
+            leaked: list[str] = []
+
+            def walk(o, path=""):
+                if isinstance(o, float):
+                    if round(o, 6) != o:
+                        leaked.append(f"{path}={o!r}")
+                elif isinstance(o, dict):
+                    for k, v in o.items():
+                        walk(v, f"{path}.{k}")
+                elif isinstance(o, list):
+                    for i, v in enumerate(o):
+                        walk(v, f"{path}[{i}]")
+
+            walk(_extract_blob(html))
+            self.assertEqual(leaked, [], f"drift-prone >6dp floats leaked into {name} blob: {leaked[:5]}")
 
 
 if __name__ == "__main__":
