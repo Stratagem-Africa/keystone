@@ -116,6 +116,23 @@ def _json_safe(obj):
     return obj
 
 
+def _round_floats(obj, ndigits: int = 6):
+    """Cross-version-stable float precision for the SERIALISED blob only. An engine float can differ in
+    its last ULP between CPython versions (libm), which would break the committed byte-golden on a
+    different Python (green on 3.9, red on 3.12+). Rounding to 6 dp is ~8 orders above that ~1e-14 drift
+    yet far below any value the map DISPLAYS (the JS rounds to int / 1 dp for %, ms, rps), so it makes
+    the embedded numbers identical on every supported interpreter — and incidentally cleans up float
+    artefacts (1089.9999999998 → 1090.0). Applied only at render time, so build_arch_map's dict keeps
+    full precision and the "value == the engine's value" tests still hold exactly."""
+    if isinstance(obj, float):
+        return round(obj, ndigits)
+    if isinstance(obj, dict):
+        return {k: _round_floats(v, ndigits) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_round_floats(v, ndigits) for v in obj]
+    return obj
+
+
 def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
     """The deterministic engine→map serialisation. Numbers come from `sim` (engine results) and the
     model's declared inputs; provenance/evidence come from the model. Nothing here computes a metric."""
@@ -605,7 +622,7 @@ def render_html(arch: dict, *, title: str | None = None) -> str:
     page_title = title or arch["meta"]["title"]
     # Strict JSON (allow_nan=False → raises if a non-finite slipped past _json_safe), then neutralise any
     # "</script>" / entity in string values so the data island cannot break out (XSS defence-in-depth).
-    blob = json.dumps(arch, sort_keys=True, ensure_ascii=True, allow_nan=False)
+    blob = json.dumps(_round_floats(arch), sort_keys=True, ensure_ascii=True, allow_nan=False)
     blob = blob.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     esc_title = (page_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
     return f"""<!doctype html>
