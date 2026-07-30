@@ -9,8 +9,16 @@ from api.main import app
 from api import jobs
 from api.jobs import create_job, get_job, update_job
 from api.worker import run_pipeline
+from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
 
 client = TestClient(app)
+
+
+def _auth_headers() -> dict:
+    # /intent is gated by Supabase-JWT auth (#10) — mint a valid test token rather
+    # than a real one, verified via patch_jwks() (set up in setUp below) instead of
+    # a real network call to Supabase's JWKS endpoint.
+    return {"Authorization": f"Bearer {make_test_token()}"}
 
 
 class TestWorker(unittest.TestCase):
@@ -18,6 +26,8 @@ class TestWorker(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()       # fresh store before every test
         jobs._db_client = None    # make sure no Postgres client leaks between tests
+        set_test_supabase_url(self)
+        patch_jwks(self)
 
     def test_update_job_changes_status(self):
         # create a job, then update it and check the change was saved
@@ -72,7 +82,11 @@ class TestWorker(unittest.TestCase):
     def test_intent_endpoint_triggers_pipeline(self):
         # TestClient runs background tasks synchronously — so by the time we check,
         # the pipeline has already completed
-        response = client.post("/intent", json={"text": "I am building a URL shortener that handles 50k req/s"})
+        response = client.post(
+            "/intent",
+            json={"text": "I am building a URL shortener that handles 50k req/s"},
+            headers=_auth_headers(),
+        )
 
         self.assertEqual(response.status_code, 200)
 

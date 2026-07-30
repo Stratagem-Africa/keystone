@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -18,20 +19,26 @@ from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets
+from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
 from api.worker import run_pipeline
 
 app = FastAPI(title="Keystone API", version="0.1.0")
 
-# CORS. There is no auth yet, so the API exposes no per-user/credentialed data and a
-# wildcard origin is acceptable for dev — but ONLY with credentials OFF. Never pair
-# allow_origins=["*"] with allow_credentials=True: the spec forbids it, so the browser
-# would instead reflect any caller's Origin and allow credentialed cross-site calls.
-# When Supabase-JWT auth lands (#20), replace ["*"] with an explicit allow-list of origins
-# (JWT travels in the Authorization header, so credentials can stay off).
+# CORS. Now that Supabase-JWT auth gates every non-health route (#10), the API carries
+# per-user data and a wildcard origin is no longer acceptable. ALLOWED_ORIGINS is a
+# comma-separated list from the environment (dev default: the local Next.js frontend).
+# Credentials stay OFF — the JWT travels in the Authorization header, not a cookie, so
+# the browser never needs allow_credentials=True (and pairing it with a wildcard origin
+# is forbidden by spec anyway).
+_allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,7 +78,7 @@ class IntentRequest(BaseModel):
 
 
 @app.post("/design")
-def design(req: DesignRequest) -> dict:
+def design(req: DesignRequest, user: AuthUser = Depends(get_current_user)) -> dict:
     """Build the reference model at the requested load, reason over it (ADRs), then simulate."""
     model = build_url_shortener(system_rps=req.system_rps)
 
@@ -89,7 +96,11 @@ def design(req: DesignRequest) -> dict:
     })
 
 @app.post("/intent")
-def submit_intent(req: IntentRequest, background_tasks: BackgroundTasks) -> dict:
+def submit_intent(
+    req: IntentRequest,
+    background_tasks: BackgroundTasks,
+    user: AuthUser = Depends(get_current_user),
+) -> dict:
     # Scan the raw text for secrets BEFORE storing anything (harm floor rule).
     clean_text, secrets_found = scan_and_redact_secrets(req.text)
     
@@ -107,7 +118,7 @@ def submit_intent(req: IntentRequest, background_tasks: BackgroundTasks) -> dict
     return response
 
 @app.get("/jobs/{job_id}")
-def get_job_status(job_id: str) -> dict:
+def get_job_status(job_id: str, user: AuthUser = Depends(get_current_user)) -> dict:
     # {job_id} in the decorator becomes the job_id argument — FastAPI extracts it from the URL
     job = get_job(job_id)
 
@@ -123,7 +134,12 @@ def get_job_status(job_id: str) -> dict:
     return response  # FastAPI auto-converts this dict to JSON
 
 @app.get("/jobs/{job_id}/report", response_model=None)
-def get_job_report(job_id: str, request: Request, fmt: str = "json"):
+def get_job_report(
+    job_id: str,
+    request: Request,
+    fmt: str = "json",
+    user: AuthUser = Depends(get_current_user),
+):
     # `fmt` is a query param — client passes ?fmt=markdown in the URL
     # `request` gives access to HTTP headers the client sent
     job = get_job(job_id)
