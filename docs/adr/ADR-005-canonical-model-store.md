@@ -21,6 +21,8 @@ Three forces constrain the design:
 - **Free-tier / single-source-of-truth.** Supabase Postgres (ADR-003); the engine stays pure-stdlib; the store sits behind a seam (like the council/ingestor) so the offline loop keeps running $0.
 
 > **Reading note for the migration owner (Jem):** where this ADR and `docs/05` disagree, **ADR-005 is the v1 implementation target**; `docs/05` is the aspirational data model and will be reconciled to this in a follow-up docs PR (money → integer minor units; `Edge` vs `Flow`; `Assumption.source`).
+>
+> **⚠️ Reconciliation (2026-08-03):** §4 and §6 below were written before **ADR-008** (integer money) and **ADR-009** (usage-based cost) landed, so their literal field list ("eight typed fields") and the `float→minor-units` conversion note are **stale**. The §6 *principle* — *persist the runnable `model.py` shape, every field, nothing dropped; lossless `model.py ↔ rows ↔ model.py` round-trip* — is unchanged and governs. Where this ADR and current `model.py` disagree, **`model.py` is the target.** The current field-by-field spec is in **[§6a — Reconciliation to `model.py`](#6a--reconciliation-to-modelpy-2026-08-03)** at the end; that is what the migration builds to.
 
 ## Decision
 
@@ -127,3 +129,26 @@ Mirrors ADR-001/002. Merging the seam ≠ activating persistence; **real multi-t
 ## Consequences
 
 Ratifying this unblocks issue **#21** (Jem's migration) and the diff-able design-as-code promise, and **discharges ADR-002's deferred tenant-isolation/no-retention MUST** — the precondition for any real multi-tenant upload. Ingestion's `IngestResult` migrates onto the store (ADR-002 consequence). The engine stays pure-stdlib behind the `ModelStore` seam; persistence stays **stub-default** until Bifola activates it. `docs/05` gets a follow-up reconciliation (money → integer minor units; `Edge` vs `Flow`; `Assumption.source` enum).
+
+---
+
+## §6a — Reconciliation to `model.py` (2026-08-03)
+
+§6's "**eight typed fields**" enumeration and §4's "`model.py:44 monthly_cost_per_instance: float` … float→minor-units conversion boundary" were accurate when this ADR was ratified (2026-06-19) but were **superseded by two later, already-ratified changes**: **ADR-008** made all `model.py` money `int` minor units, and **ADR-009** added usage-based cost inputs (Tier 1) + a `PricingRates` value-object (Tier 2). This section reconciles the schema spec to **current `model.py`** so the migration builds to code, not to a stale list. **The §6 principle is unchanged** — *persist every `model.py` field, nothing dropped; the Milestone-5 gate is a lossless `model.py ↔ rows ↔ model.py` round-trip of the **whole** object.* Only the enumeration changes. The storage rule stays: **engine-read or money → typed column; evidence the engine never reads → `jsonb`.** (Adjudicated on #21, [issue-comment 5172095817](https://github.com/Stratagem-Africa/keystone/issues/21#issuecomment-5172095817).)
+
+**`component` table — the current `Component` (`model.py:40-73`), 13 fields, nothing dropped:**
+
+- The original 8 typed columns stand: `id, kind, name, per_instance_rps, instances, base_latency_ms, monthly_cost_per_instance, provenance`.
+- **+5 usage-billing columns (ADR-009 Tier 1), typed integers** — they are money-driving (`model.py:107-114` validates them as non-negative `int` under the harm floor), so they get the same treatment as `monthly_cost_per_instance`: `egress_gb_per_month`, `storage_gb`, `requests_per_month`, `llm_input_tokens_per_month`, `llm_output_tokens_per_month`, each `bigint NOT NULL DEFAULT 0 CHECK (… >= 0)`. **Not** `jsonb`.
+- **+2 evidence columns → `jsonb`:** `groundings` (`dict[str, Grounding]`) and `match_context` (`dict[str, str]`). The engine **NEVER** reads these (prime directive — grounding is evidence-only), so they need no typed/queryable columns; persist each as its **own** `jsonb` column, read back whole. **They must NOT go in the reserved `params jsonb` bag:** that bag's key-`CHECK` (`cost|capacity|latency|utiliz|throughput|breakpoint|bottleneck|rps`) exists to stop derived *numbers* reaching an input row (§3), but `groundings` is **keyed by metric name** (e.g. `"per_instance_rps"`) and would trip it — citations/bands are evidence *about* a metric, not a derived value on the typed path.
+
+**`system_model.pricing` (`PricingRates`, `model.py:187-208`) — money, so typed columns (NOT `jsonb`):**
+
+- The 5 rate fields are integer **micro-USD** per unit (`model.py:195-201`; 1 cent = 10_000 micro-USD). §4 + the money kill-criterion forbid float/unscaled money *"anywhere, including inside a JSON column,"* and typed columns make the invariant DB-enforceable: `bigint NOT NULL CHECK (… >= 0)` each. **Unit is micro-USD, not cents** — label the columns so nobody stores cents; the engine rounds the usage *total* to integer cents in `simulation_run`, but the **rates** stay micro-USD for sub-cent precision.
+- `compute_pricing`: `text NOT NULL CHECK (compute_pricing IN ('on_demand','reserved_1yr','reserved_3yr','spot'))` — mirror `COMPUTE_PRICING_RETAINED_BP` (`model.py:178`) so a bad value fails closed at the DB too.
+- `PricingRates.groundings`: `jsonb` (same evidence treatment as `component.groundings`).
+- **Shape latitude:** 5 rate columns + `compute_pricing` + a `pricing_groundings jsonb` may live **on `system_model`** (1:1, no join — recommended) **or** in a 1:1 `pricing_rates` table (migration owner's call). The invariants above are the MUSTs.
+
+**§4 correction (money conversion):** there is **no float→minor-units conversion** to perform. `monthly_cost_per_instance` is already `int` cents in `model.py:47` (ADR-008), as are all `model.py` money fields post-ADR-008. Store `bigint` directly; §4's conversion-boundary language no longer applies to any current `model.py` money value.
+
+**Round-trip note:** because `Grounding`/`PricingRates` (de)serialize through `jsonb`, the Milestone-5 round-trip test must confirm the save→load reconstructs the **identical** dataclass — including `int`-vs-`float` inside a `Grounding` band. Everything else in §1–§7 (deny-by-default RLS, `tenant_id` on every table + the custom-access-token claim hook, the engine-write enforcement, `params`-bag `CHECK`, Storage purge-on-delete, the cross-tenant gate test) is **unchanged and binding**.
