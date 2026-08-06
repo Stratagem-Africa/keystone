@@ -53,6 +53,10 @@
   --animate-hero-rise: hero-rise 0.7s var(--ease-settle) both;
   --animate-req: req-flow 3.4s linear infinite;
   --animate-res: res-flow 3.4s linear 1.7s infinite;
+  /* Living-sim interactive flood (issue #134): a faster packet stream when the load is pushed, and
+     the breakpoint readout's settle-in. Tokens (not raw `.animate-*`) so v4 emits utilities+keyframes. */
+  --animate-flood: req-flow 0.85s linear infinite;
+  --animate-snap:  snap-in 0.42s var(--ease-settle) both;
 }
 
 /* ─── Hero motion (docs/09 §4.1 Act 1) — the instrument panel settles in over a faint substrate.
@@ -73,6 +77,17 @@
   background-size: 44px 44px;
 }
 
+/* ─── Living-sim interactive states (issue #134, docs/09 §4.1 Act 1) ──────────────
+   The breakpoint readout settles in when load crosses the ceiling; the saturated tier
+   gets coral + a hatch (state never rides on hue alone — §11.9 FIXED); the substrate
+   reddens locally under it. All reduced-motion-safe (below). */
+@keyframes snap-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.sim-hatch {
+  background-image: repeating-linear-gradient(45deg,
+    rgba(229,72,77,0.30) 0, rgba(229,72,77,0.30) 2px, transparent 2px, transparent 5px);
+}
+.sim-glow-red { background: radial-gradient(circle at center, rgba(229,72,77,0.28), transparent 72%); }
+
 /* ─── Reduced-motion — a COMPLETE, equal path (docs/09 §11.9 FIXED) ────────
    Every settle/transition/animation goes still; bands snap straight to their
    final width. The static state is already the resting state, so nothing is
@@ -84,4 +99,8 @@
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
   }
+  /* The living-sim's moving packets are dropped under reduced-motion via the `motion-reduce:hidden`
+     utility on each packet element (a generated Tailwind variant — a custom class here gets purged by
+     Lightning CSS). A frozen packet mid-flight is noise, not information; the static stack, the coral
+     bottleneck, the load axis and the engine numbers carry the full meaning without any motion (§11.9). */
 }
