@@ -129,6 +129,9 @@ create table system_model (
                           check (compute_pricing in ('on_demand', 'reserved_1yr', 'reserved_3yr', 'spot')),
   -- PricingRates.groundings: evidence, engine never reads it -> jsonb (ADR-005 §6a ruling 2/3).
   pricing_groundings   jsonb not null default '{}',
+  -- FIX (review 🟡 #6): ADR-005 §4 pairs every persisted money value with a currency code —
+  -- these 5 rate columns are money and were missing it. Same USD-only-v1 default as component.
+  currency             char(3) not null default 'USD',
   created_at           timestamptz not null default now(),
   -- The primary key below IS the race guard the version trigger relies on (a second,
   -- explicit UNIQUE on the same two columns would just build a redundant duplicate index).
@@ -145,6 +148,7 @@ create table system_model (
 create function keystone_assign_system_model_version()
 returns trigger
 language plpgsql
+security invoker
 as $$
 begin
   if new.version is null then
@@ -177,9 +181,14 @@ alter table project
 -- time and overwrites whatever the app sent. tenant_id can never disagree with its
 -- parent's tenant, by construction, not by discipline.
 -- =====================================================================================
+-- `security invoker` made explicit on this and every other tenant/scope-derivation trigger
+-- below (matches what the review already confirmed by running it: SECURITY INVOKER is what
+-- makes a hidden cross-tenant parent fail closed — the lookup runs as the CALLING role,
+-- subject to that role's own RLS, not as whoever owns the function).
 create function keystone_derive_tenant_from_project()
 returns trigger
 language plpgsql
+security invoker
 as $$
 begin
   select tenant_id into strict new.tenant_id from project where id = new.project_id;
@@ -190,6 +199,7 @@ $$;
 create function keystone_derive_tenant_from_system_model()
 returns trigger
 language plpgsql
+security invoker
 as $$
 begin
   select tenant_id into strict new.tenant_id
@@ -217,14 +227,27 @@ returns boolean
 language sql
 immutable
 as $$
+  -- FIX (review 🟡 #4): the original list (from ADR-005 §6 verbatim) missed several real
+  -- SimulationResult field names (simulation.py:134-151) — p50_ms/p95_ms/p99_ms, spofs,
+  -- confidence, headroom aren't caught by the original 8-term list, so a key like "p95"
+  -- or "spof_count" could slip a derived value through. Bifola is widening ADR-005 §6 to
+  -- match this list so the spec and the guard stay in lockstep.
   select exists (
     select 1 from jsonb_object_keys(p) as k
-    where k ~* '(cost|capacity|latency|utiliz|throughput|breakpoint|bottleneck|rps)'
+    where k ~* '(cost|capacity|latency|utiliz|throughput|breakpoint|bottleneck|rps|spof|headroom|confidence|p50|p95|p99|percentile|saturat)'
   );
 $$;
 
+-- FIX (review 🔴 #1+#2, both from the same root cause): Component.id is a Python str slug
+-- (model.py:41 — real blueprints use "app"/"db"/"lb", not a UUID), so a bare `uuid` PK here
+-- broke the lossless round-trip on the very first save. Making identity the FULL
+-- (project_id, model_version, id) triple — not just `id` — does a second job too: it lets
+-- flow_step's reference below be a COMPOSITE foreign key scoped to the same model snapshot,
+-- which (via the tenant-derivation triggers already in place) means the same tenant, by
+-- construction. A bare single-column FK to just `id` couldn't express that scoping — that
+-- was the cross-tenant gap in #2. One shape change fixes both.
 create table component (
-  id             uuid primary key default gen_random_uuid(),
+  id             text not null,                 -- the Python str slug, e.g. "app" — NOT a uuid
   project_id     uuid not null,
   model_version  int not null,
   tenant_id      uuid not null references tenant(id),  -- derived by trigger below, not app-supplied
@@ -237,6 +260,11 @@ create table component (
   -- ruling 4; the ADR's original §4 conversion-boundary note is stale, kept here as a
   -- pointer so nobody goes hunting for a conversion step that doesn't exist).
   monthly_cost_per_instance bigint not null default 0 check (monthly_cost_per_instance >= 0),
+  -- FIX (review 🟡 #6): ADR-005 §4 pairs every persisted money value with a currency code —
+  -- this migration originally omitted it. v1 is single-region/USD-only (CLAUDE.md scope
+  -- freeze), so a fixed default closes the deviation without pretending we support
+  -- multi-currency yet; a real multi-currency model is a GAP for a later ADR.
+  currency                  char(3) not null default 'USD',
   -- +5 usage-billing fields (ADR-009 Tier 1, model.py:51-58) — money-driving ints
   -- (validated the same way as monthly_cost_per_instance at model.py:107-114), so they
   -- get the same typed-column + CHECK treatment, NOT jsonb (ADR-005 §6a ruling 1).
@@ -264,6 +292,9 @@ create table component (
   -- here yet; exists so a future non-engine field doesn't need a migration to add.
   params         jsonb not null default '{}'
                    check (not keystone_params_has_forbidden_key(params)),
+  -- FIX (review 🔴 #1+#2): identity is the whole snapshot-scoped triple, not just `id` —
+  -- this IS the composite key flow_step's FK below relies on to stay inside one tenant.
+  primary key (project_id, model_version, id),
   foreign key (project_id, model_version) references system_model (project_id, version) on delete cascade
 );
 
@@ -296,29 +327,54 @@ create trigger trg_flow_tenant
 -- 7. flow_step — Flow.path: list[FlowStep] (model.py:143-152). step_order preserves the
 --    Python list's order, which a SQL table has no notion of on its own.
 -- =====================================================================================
+-- FIX (review 🔴 #2): component_id used to be a bare `uuid` FK straight to component(id).
+-- FK checks bypass RLS (they run with elevated internal privilege), so that let a tenant-A
+-- flow_step point at a tenant-B component: the insert only checked "does this UUID exist
+-- ANYWHERE", never "does it belong to MY tenant/model" — a cross-tenant existence oracle,
+-- and (via the old ON DELETE CASCADE) a way for tenant B deleting their own component to
+-- silently delete tenant A's flow_step. project_id/model_version below (trigger-derived
+-- from the parent flow, same pattern as tenant_id already used) let the FK further down be
+-- scoped to "a component from THIS EXACT model snapshot" instead of "a component that
+-- exists somewhere" — which is impossible to satisfy with another tenant's component,
+-- because tenant_id is itself derived from (project_id, model_version) by construction.
 create table flow_step (
   id            uuid primary key default gen_random_uuid(),
   flow_id       uuid not null references flow(id) on delete cascade,
-  component_id  uuid not null references component(id) on delete cascade,
-  tenant_id     uuid not null references tenant(id),
+  project_id    uuid not null,      -- derived by trigger below, from the parent flow
+  model_version int not null,       -- derived by trigger below, from the parent flow
+  component_id  text not null,      -- matches component.id's Python str slug, not a uuid
+  tenant_id     uuid not null references tenant(id),  -- derived by trigger below
   step_order    int not null,
-  visit_prob    double precision not null default 1.0 check (visit_prob >= 0 and visit_prob <= 1)
+  visit_prob    double precision not null default 1.0 check (visit_prob >= 0 and visit_prob <= 1),
+  -- THE fix: a composite FK, not a single-column one. component_id must belong to a
+  -- component row with the SAME (project_id, model_version) as this flow_step — a
+  -- cross-tenant/cross-model component_id can no longer satisfy this constraint at all,
+  -- so the exploit in the comment above is now structurally impossible, not just
+  -- RLS-checked.
+  foreign key (project_id, model_version, component_id)
+    references component (project_id, model_version, id) on delete cascade
 );
 
-create function keystone_derive_tenant_from_flow()
+-- Extended (review 🔴 #2) to derive project_id/model_version alongside tenant_id, all from
+-- the same parent-flow lookup — one SELECT instead of three separate ones.
+create function keystone_derive_flow_step_scope()
 returns trigger
 language plpgsql
+security invoker
 as $$
 begin
-  select tenant_id into strict new.tenant_id from flow where id = new.flow_id;
+  select tenant_id, project_id, model_version
+    into strict new.tenant_id, new.project_id, new.model_version
+  from flow
+  where id = new.flow_id;
   return new;
 end;
 $$;
 
-create trigger trg_flow_step_tenant
+create trigger trg_flow_step_scope
   before insert or update on flow_step
   for each row
-  execute function keystone_derive_tenant_from_flow();
+  execute function keystone_derive_flow_step_scope();
 
 -- =====================================================================================
 -- 8. assumption — Assumption (model.py:161-167).
@@ -410,6 +466,8 @@ create table simulation_run (
   -- Integer cents (ADR-008) — the ENGINE'S money output, distinct unit from
   -- system_model's micro-USD RATES above (rates are per-unit; this is a rounded total).
   monthly_cost     bigint not null check (monthly_cost >= 0),
+  -- FIX (review 🟡 #6): same ADR-005 §4 pairing, on the engine's own cost output this time.
+  currency         char(3) not null default 'USD',
   spofs            text[] not null default '{}',
   confidence       text not null,
   -- components{} dict, flow_latencies[], caveats[], the computation trace — nested
@@ -424,20 +482,46 @@ create trigger trg_simulation_run_tenant
   for each row
   execute function keystone_derive_tenant_from_system_model();
 
+-- FIX (review 🟡 #5): (auth.jwt() ->> 'tenant_id')::uuid handles a MISSING claim fine (casts
+-- NULL, every policy denies — correct fail-closed). But a PRESENT claim that isn't
+-- UUID-shaped makes the ::uuid cast throw a hard Postgres error (22P02) instead of just
+-- denying — "fail closed" should mean "cleanly no access", not "the query errors out".
+-- This wraps that cast so any malformed claim degrades to NULL the same way a missing one
+-- already does, instead of raising. `stable` (not `immutable`): auth.jwt() reads
+-- session-local request state, so its result can differ between calls/sessions even
+-- though it won't change twice within the same statement.
+create function keystone_current_tenant()
+returns uuid
+language plpgsql
+stable
+as $$
+begin
+  return (auth.jwt() ->> 'tenant_id')::uuid;
+exception
+  when invalid_text_representation then
+    return null;
+end;
+$$;
+
 -- =====================================================================================
 -- 11. Row-Level Security — deny-by-default on every table (ADR-005 §1). ENABLE + FORCE
---     means even the table owner is bound (no privileged-role bypass loophole); no
---     policy at all means zero rows readable or writable until the policy below exists.
---     One shape, repeated, EXCEPT tenant (predicate is its own id, not a tenant_id
---     column) and membership (a user reads their OWN memberships — that's how they
---     discover which tenant_id claim they should even have).
+--     binds the table OWNER to these policies too — but NOT roles carrying the BYPASSRLS
+--     attribute (`postgres`, `service_role`): those skip row security entirely regardless
+--     of FORCE (review nit #7 — my original comment here overstated this as "no
+--     privileged-role bypass loophole", which isn't quite right). That's exactly why §1b's
+--     service-role write path is guarded by an explicit application-layer tenant assertion
+--     in SupabaseModelStore, not by RLS — RLS structurally cannot constrain that role.
+--     No policy at all means zero rows readable or writable until the policy below exists.
+--     One shape, repeated, EXCEPT tenant (predicate is its own id, not a tenant_id column)
+--     and membership (a user reads their OWN memberships — that's how they discover which
+--     tenant_id claim they should even have).
 -- =====================================================================================
 
 alter table tenant enable row level security;
 alter table tenant force row level security;
 create policy tenant_isolation on tenant
-  using      (id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (id = keystone_current_tenant())
+  with check (id = keystone_current_tenant());
 
 alter table membership enable row level security;
 alter table membership force row level security;
@@ -448,50 +532,50 @@ create policy own_memberships on membership
 alter table project enable row level security;
 alter table project force row level security;
 create policy tenant_isolation on project
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table system_model enable row level security;
 alter table system_model force row level security;
 create policy tenant_isolation on system_model
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table component enable row level security;
 alter table component force row level security;
 create policy tenant_isolation on component
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table flow enable row level security;
 alter table flow force row level security;
 create policy tenant_isolation on flow
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table flow_step enable row level security;
 alter table flow_step force row level security;
 create policy tenant_isolation on flow_step
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table assumption enable row level security;
 alter table assumption force row level security;
 create policy tenant_isolation on assumption
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table source_document enable row level security;
 alter table source_document force row level security;
 create policy tenant_isolation on source_document
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 alter table simulation_run enable row level security;
 alter table simulation_run force row level security;
 create policy tenant_isolation on simulation_run
-  using      (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid)
-  with check (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
+  using      (tenant_id = keystone_current_tenant())
+  with check (tenant_id = keystone_current_tenant());
 
 -- =====================================================================================
 -- 12. Grants — RLS decides which ROWS a role can see; grants decide which OPERATIONS a
@@ -509,6 +593,18 @@ create policy tenant_isolation on simulation_run
 --     caller that uses that role, and only after asserting the tenant match itself.
 -- =====================================================================================
 
+-- FIX (review 🔴 #3): the block below used to be GRANT-only. GRANT is purely additive —
+-- it can never take away a privilege a role already has from somewhere else (a Supabase
+-- project's default table privileges vary by project history), so a GRANT-only block can
+-- never actually PROVE the resulting privilege set is minimal. This REVOKE ALL first
+-- forces every role in this migration down to an explicit, guaranteed-zero baseline, so
+-- every GRANT below is provably the ENTIRE privilege set — not just an addition on top of
+-- an unknown starting point.
+revoke all on
+  tenant, membership, project, system_model, component, flow, flow_step,
+  assumption, source_document, simulation_run
+  from anon, authenticated, service_role;
+
 grant select on tenant, membership to authenticated;
 
 grant select, insert, update, delete on project, source_document to authenticated;
@@ -519,5 +615,15 @@ grant select, insert on
 
 grant select on simulation_run to authenticated;
 grant select, insert, update, delete on simulation_run to service_role;
+
+-- FIX (review 🔴 #3, the missing half): trg_simulation_run_tenant runs AS whichever role
+-- performs the insert, and its body SELECTs system_model to look up tenant_id (line ~197).
+-- BYPASSRLS (which service_role carries) only skips ROW-level security — it does NOT skip
+-- ordinary table-level GRANT checks. Without this explicit grant, the REVOKE ALL above
+-- would leave that internal lookup with no privilege to run, breaking the one write path
+-- that's supposed to work at all: the engine's own simulation_run insert. Also grants
+-- SELECT on `project`, since SupabaseModelStore's §1b tenant assertion ("project.tenant_id
+-- == caller.tenant_id", done before every service-role write) needs to read that column.
+grant select on system_model, project to service_role;
 
 commit;
