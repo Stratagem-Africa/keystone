@@ -39,6 +39,13 @@ anyway (`gh pr merge` is a plain git op). For each contributor PR, the reviewer 
 1. **`scripts/review-pr.sh <PR#>`** — checks out the PR, shows the diff vs `origin/main`, runs the gate.
    (Needs `pip install -e ".[dev,api,db]"` once — without it, ruff/mypy are silently skipped and only
    the test suite runs, so a lint/type regression could slip through unnoticed.)
+   **If the PR touches `db/migrations/**` or `db/testing/**`**, also run
+   `scripts/test_tenant_isolation.sh` (needs `pip install -e ".[dbtest]"` and
+   `KEYSTONE_TEST_DATABASE_URL` pointing at a scratch Postgres 17+ instance — see the script's
+   header). This is the ADR-005 §1b harm-floor gate ("signed in as tenant A, zero of tenant
+   B's rows on select/insert/update/delete") and is intentionally **not** part of
+   `scripts/check.sh` (which stays $0/no-DB) — it hard-fails rather than silently passing
+   when no DB is reachable.
 2. **Adversarial Review→Verify** of the diff against the gates below (prime directive, accuracy
    honesty, harm floor, correctness). Trust-critical changes (auth, money, PII, tenant isolation,
    schema, crypto, the prime-directive guard) get an independent, author-recused pass.
