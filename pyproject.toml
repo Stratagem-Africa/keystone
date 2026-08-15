@@ -11,6 +11,14 @@ dependencies = []
 council = ["anthropic>=0.40"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "pyjwt[crypto]>=2.8"]
 db = ["supabase>=2.31", "python-dotenv>=1.0"]
+# Raw Postgres driver for the ADR-005 §1b tenant-isolation test harness ONLY
+# (scripts/test_tenant_isolation.sh, prototype/tests/db_test_*.py) — kept separate from `db`
+# on purpose: `db` is what real application code (the future SupabaseModelStore) depends on
+# at runtime, talking through PostgREST with a user JWT so RLS is always in force. psycopg
+# connects as superuser and deliberately bypasses that path (creates roles, applies raw DDL,
+# SET LOCAL ROLE at will) — separating it keeps "test/ops tooling, never application code" a
+# property of the dependency graph, not just a comment.
+dbtest = ["psycopg[binary]>=3.1"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
 
