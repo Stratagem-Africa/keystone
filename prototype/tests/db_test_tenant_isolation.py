@@ -44,11 +44,11 @@ import unittest
 
 import psycopg
 
-from tests.tenant_isolation_test_helpers import DatabaseTestCase, sign_in_as
+from tenant_isolation_test_helpers import DatabaseTestCase, sign_in_as
 
 
 def setUpModule() -> None:
-    from tests.tenant_isolation_test_helpers import require_database_url
+    from tenant_isolation_test_helpers import require_database_url
     require_database_url()  # fail loudly (RuntimeError) before any class/connection attempt
 
 
