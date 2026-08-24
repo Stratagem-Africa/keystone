@@ -142,6 +142,13 @@ class TestTenantIsolation(DatabaseTestCase):
                 "select project_id from system_model where project_id = %s", (self.tenant_b.project_id,)
             )
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's system_model rows")
+            # Positive control (Bifola's Milestone-2 review): without this, a hypothetical
+            # deny-all regression on this table alone would pass silently — "0 rows for B"
+            # is also what you'd see if A couldn't see ANYTHING, including A's own data.
+            self.cur.execute(
+                "select project_id from system_model where project_id = %s", (self.tenant_a.project_id,)
+            )
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own system_model row")
 
             # system_model has NO tenant-derivation trigger (its tenant_id is app-supplied,
             # not derived) — this is a direct with-check test, unlike the trigger-derived
@@ -168,6 +175,11 @@ class TestTenantIsolation(DatabaseTestCase):
                 "select id from component where project_id = %s", (self.tenant_b.project_id,)
             )
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's component rows")
+            # Positive control — see system_model's identical comment above.
+            self.cur.execute(
+                "select id from component where project_id = %s", (self.tenant_a.project_id,)
+            )
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own component row")
 
             # NoDataFound, not InsufficientPrivilege — see module docstring.
             with self.assertRaises(psycopg.errors.NoDataFound):
@@ -187,6 +199,9 @@ class TestTenantIsolation(DatabaseTestCase):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute("select id from flow where project_id = %s", (self.tenant_b.project_id,))
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's flow rows")
+            # Positive control — see system_model's identical comment above.
+            self.cur.execute("select id from flow where project_id = %s", (self.tenant_a.project_id,))
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own flow row")
 
             # NoDataFound, not InsufficientPrivilege — see module docstring.
             with self.assertRaises(psycopg.errors.NoDataFound):
@@ -207,6 +222,11 @@ class TestTenantIsolation(DatabaseTestCase):
                 "select id from flow_step where flow_id = %s", (self.tenant_b.flow_id,)
             )
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's flow_step rows")
+            # Positive control — see system_model's identical comment above.
+            self.cur.execute(
+                "select id from flow_step where flow_id = %s", (self.tenant_a.flow_id,)
+            )
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own flow_step row")
 
             # NoDataFound, not InsufficientPrivilege: keystone_derive_flow_step_scope's
             # lookup on `flow` (SECURITY INVOKER) can't see B's flow row under A's RLS —
@@ -229,6 +249,11 @@ class TestTenantIsolation(DatabaseTestCase):
                 "select id from assumption where project_id = %s", (self.tenant_b.project_id,)
             )
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's assumption rows")
+            # Positive control — see system_model's identical comment above.
+            self.cur.execute(
+                "select id from assumption where project_id = %s", (self.tenant_a.project_id,)
+            )
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own assumption row")
 
             # NoDataFound, not InsufficientPrivilege — see module docstring.
             with self.assertRaises(psycopg.errors.NoDataFound):
@@ -263,6 +288,11 @@ class TestTenantIsolation(DatabaseTestCase):
                 "select id from simulation_run where project_id = %s", (self.tenant_b.project_id,)
             )
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's simulation_run rows")
+            # Positive control — see system_model's identical comment above.
+            self.cur.execute(
+                "select id from simulation_run where project_id = %s", (self.tenant_a.project_id,)
+            )
+            self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own simulation_run row")
 
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):
                 with self.conn.transaction():
