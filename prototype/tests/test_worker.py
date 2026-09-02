@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 from unittest.mock import patch  # lets us fake a function to simulate failures
 
 from fastapi.testclient import TestClient
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 from api import jobs
 from api.jobs import create_job, get_job, update_job
-from api.worker import run_pipeline
+from api.worker import _make_meter, run_pipeline
 from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
 
 client = TestClient(app)
@@ -81,6 +82,15 @@ class TestWorker(unittest.TestCase):
         failed = get_job(job.job_id)
         self.assertEqual(failed.status, "error")
         self.assertIsNotNone(failed.error)
+
+    def test_make_meter_treats_unparseable_cap_as_uncapped(self):
+        # float("inf") parses fine, but int(inf) raises OverflowError (not ValueError) --
+        # a bare `except ValueError` would let that escape and crash the job. Confirms the
+        # broadened except degrades to uncapped, same as a non-numeric string already does.
+        with mock.patch.dict("os.environ", {"LLM_MAX_SPEND_USD": "inf"}, clear=False):
+            self.assertIsNone(_make_meter())
+        with mock.patch.dict("os.environ", {"LLM_MAX_SPEND_USD": "not-a-number"}, clear=False):
+            self.assertIsNone(_make_meter())
 
     def test_pipeline_error_is_scrubbed(self):
         # error messages from the real ingestor can contain raw LLM output with secrets

@@ -25,7 +25,7 @@ def _make_meter() -> CostMeter | None:
         return None
     try:
         return CostMeter(max_micro_usd=int(float(cap) * 1_000_000))
-    except ValueError:
+    except (ValueError, OverflowError):
         log.warning("LLM_MAX_SPEND_USD=%r is not a number; ignoring (uncapped)", cap)
         return None
 

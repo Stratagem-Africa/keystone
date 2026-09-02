@@ -18,6 +18,12 @@ from keystone.llm import AnthropicLLM, LLMError, OpenAICompatibleLLM, make_llm
 from keystone.report import render
 from keystone.simulation import simulate
 
+try:
+    import anthropic  # noqa: F401 -- only probing availability; AnthropicLLM does its own lazy import
+    HAVE_ANTHROPIC = True
+except ImportError:
+    HAVE_ANTHROPIC = False
+
 
 class _FakeLLM:
     def __init__(self, reply: str):
@@ -186,6 +192,7 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
         with mock.patch.dict("os.environ", {"OLLAMA_TIMEOUT": "900"}, clear=False):
             self.assertEqual(make_llm("ollama", "qwen2.5:7b")._timeout, 900)
 
+    @unittest.skipUnless(HAVE_ANTHROPIC, "anthropic SDK not installed")
     def test_anthropic_uses_an_env_tunable_timeout(self):
         # The SDK's own default (600s) lets one slow/rate-limited call dominate a ~16-call sequential
         # run — default to a tighter, still-generous 120s, overridable via ANTHROPIC_TIMEOUT. No

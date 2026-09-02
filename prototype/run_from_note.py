@@ -40,7 +40,7 @@ def _budget_cap() -> int | None:
         return None
     try:
         return int(float(cap) * 1_000_000)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
 
 
