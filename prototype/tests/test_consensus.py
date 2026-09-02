@@ -14,7 +14,7 @@ from unittest import mock
 from keystone.blueprints import url_shortener
 from keystone.consensus import ConsensusCouncil, Voter, make_consensus_council
 from keystone.council import make_council
-from keystone.llm import LLMError, OpenAICompatibleLLM, make_llm
+from keystone.llm import AnthropicLLM, LLMError, OpenAICompatibleLLM, make_llm
 from keystone.report import render
 from keystone.simulation import simulate
 
@@ -185,6 +185,15 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
             self.assertEqual(make_llm("ollama", "qwen2.5:7b")._timeout, 600)
         with mock.patch.dict("os.environ", {"OLLAMA_TIMEOUT": "900"}, clear=False):
             self.assertEqual(make_llm("ollama", "qwen2.5:7b")._timeout, 900)
+
+    def test_anthropic_uses_an_env_tunable_timeout(self):
+        # The SDK's own default (600s) lets one slow/rate-limited call dominate a ~16-call sequential
+        # run — default to a tighter, still-generous 120s, overridable via ANTHROPIC_TIMEOUT. No
+        # network call happens at construction, so this is a $0 offline check.
+        with mock.patch.dict("os.environ", {}, clear=True):                        # no ANTHROPIC_TIMEOUT
+            self.assertEqual(AnthropicLLM("claude-haiku-4-5-20251001")._client.timeout, 120)
+        with mock.patch.dict("os.environ", {"ANTHROPIC_TIMEOUT": "45"}, clear=False):
+            self.assertEqual(AnthropicLLM("claude-haiku-4-5-20251001")._client.timeout, 45)
 
 
 if __name__ == "__main__":

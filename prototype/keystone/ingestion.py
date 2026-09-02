@@ -441,9 +441,13 @@ class ClaudeIngestor:
         "as your best ASSUMPTION. Reply with ONLY a JSON object, no prose."
     )
 
-    def __init__(self, model: str, *, client: LLM | None = None) -> None:
+    def __init__(self, model: str, *, client: LLM | None = None, meter=None) -> None:
         self._model = model
-        self._llm: LLM = client if client is not None else AnthropicLLM(model)
+        # `meter` (an optional CostMeter) is only applied when we build our own transport —
+        # an injected `client` (real or fake) already owns its own metering choice, same
+        # pattern as ClaudeCouncil (council.py). Previously ingestion calls were never
+        # metered/budget-capped at all; this closes that gap.
+        self._llm: LLM = client if client is not None else AnthropicLLM(model, meter=meter)
 
     def ingest(self, source: Source) -> IngestResult:
         clean, secrets = scan_and_redact_secrets(source.text)
@@ -473,15 +477,18 @@ class ClaudeIngestor:
 
 
 def make_ingestor(provider: str | None = None, model: str | None = None,
-                  *, client: LLM | None = None) -> Ingestor:
+                  *, client: LLM | None = None, meter=None) -> Ingestor:
     """Build the configured ingestor. Defaults to the deterministic stub (no key, $0).
     Reads INGEST_PROVIDER (stub|claude) and INGEST_MODEL from the env when not passed.
-    The claude provider is imported via the shared lazy LLM transport."""
+    The claude provider is imported via the shared lazy LLM transport. `meter` is an
+    optional CostMeter (keystone.cost_meter), threaded through the same way
+    `make_council` does — so ingestion spend is tracked/budget-capped, not just council."""
     provider = (provider or os.getenv("INGEST_PROVIDER", "stub")).strip().lower()
     if provider == "stub":
         return DeterministicStubIngestor()
     if provider == "claude":
-        return ClaudeIngestor(model=model or os.getenv("INGEST_MODEL", DEFAULT_INGEST_MODEL), client=client)
+        return ClaudeIngestor(model=model or os.getenv("INGEST_MODEL", DEFAULT_INGEST_MODEL),
+                              client=client, meter=meter)
     raise ValueError(f"Unknown INGEST_PROVIDER={provider!r}. Use 'stub' or 'claude'.")
 
 

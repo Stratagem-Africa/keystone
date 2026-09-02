@@ -23,6 +23,13 @@ from dataclasses import dataclass, field
 _MICRO = 1_000_000            # 1 USD = 1_000_000 µUSD
 _SNAPSHOT = "2026-07"         # pricing snapshot date (extend rows WITH a cited source)
 
+
+class BudgetExceededError(RuntimeError):
+    """Raised by `CostMeter.check_budget()` when a configured spend cap has been reached.
+
+    A pre-flight guard, not a refund: callers check the budget BEFORE issuing a request,
+    so this stops the *next* call rather than undoing an already-spent one."""
+
 # List price, integer µUSD per 1,000,000 tokens: model id -> (input, output).
 # These are LIST prices for ESTIMATION only — verify against your invoice. Keyed on
 # the exact model id the transport sends (OpenAICompatibleLLM/AnthropicLLM `_model`).
@@ -87,13 +94,34 @@ class CostMeter:
 
     Opt-in: a transport records into it only when one is injected, so an un-metered or
     stub run leaves it empty (`summary()` == "$0, no live calls"). Thread-unaware —
-    build one per run; the council calls are sequential."""
+    build one per run; the council calls are sequential.
+
+    `max_micro_usd` is an optional hard spend cap (None = uncapped, the existing default —
+    fully backward compatible). Callers that want enforcement, not just reporting, call
+    `check_budget()` before each request; it has no effect unless a cap is set."""
     calls: list[_Call] = field(default_factory=list)
+    max_micro_usd: int | None = None
 
     def record(self, provider: str | None, model: str,
                input_tokens: object, output_tokens: object) -> None:
         self.calls.append(_Call(provider, str(model),
                                 _int_or_none(input_tokens), _int_or_none(output_tokens)))
+
+    def check_budget(self) -> None:
+        """Raise `BudgetExceededError` if the running total has already reached the cap.
+
+        Caveat, disclosed rather than hidden: this can only see spend from PRICED calls
+        (`total_micro_usd()` excludes unpriced models by design, see that method's
+        docstring) — a cap is only a real backstop when every model in use has a known
+        price in `_LIST_PRICES`. No-op if `max_micro_usd` is unset."""
+        if self.max_micro_usd is None:
+            return
+        spent = self.total_micro_usd()
+        if spent >= self.max_micro_usd:
+            raise BudgetExceededError(
+                f"spend cap reached: ${spent / _MICRO:.4f} >= "
+                f"${self.max_micro_usd / _MICRO:.4f} configured limit (LLM_MAX_SPEND_USD)"
+            )
 
     def total_micro_usd(self) -> int:
         """Integer µUSD over calls with a KNOWN price and PRESENT usage. Round-half-up,
