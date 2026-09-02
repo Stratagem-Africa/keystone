@@ -32,6 +32,11 @@ export function IntentForm() {
   // importantly — stops it from calling setState on a component that's no longer mounted.
   const cancelledRef = useRef(false);
   useEffect(() => {
+    // Undo React Strict Mode's dev-only synthetic mount -> cleanup -> mount: without
+    // this reset, the cleanup below fires once during that double-invoke and leaves
+    // cancelledRef permanently true, so every real poll silently no-ops forever
+    // (issue #164).
+    cancelledRef.current = false;
     return () => { cancelledRef.current = true; };
   }, []);
 
