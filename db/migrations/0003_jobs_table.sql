@@ -8,24 +8,21 @@
 -- cache" (PostgREST genuinely can't see a table that was never created, not a stale-cache
 -- issue). This migration creates it.
 --
--- Scope, deliberately narrow: this makes the table EXIST and be safely reachable — it does
--- NOT add per-user/tenant ownership. jobs.py itself already carries a
--- `TODO(tenant-isolation, #21)` on its insert, and #87 is the tracked follow-up for real
--- job-state robustness (including who can read/update a given job_id). Building that properly
--- means a user_id/tenant_id column, an RLS policy, AND threading the caller's JWT through the
--- Supabase client jobs.py uses (right now it's one static client built once at import time,
--- not a per-request client carrying the caller's identity) — real scope, not a one-line add,
--- and per CLAUDE.md, auth/tenant-isolation changes get their own adversarial
--- Review -> Verify -> Adjudicate pass, not a rider on a schema-existence fix.
---
--- Safe default in the meantime, same pattern `simulation_run` already uses in
--- 0001_canonical_model_store.sql (engine/pipeline-written data, no direct end-user RLS story
--- yet): enable + FORCE row-level security with NO policy at all (deny-by-default — the same
--- "no policy means zero rows readable or writable" rule 0001 documents), then grant CRUD only
--- to `service_role`. `anon`/`authenticated` get nothing, so no key that could ever reach a
--- browser can read or write any tenant's job data. Consequently jobs.py must use
--- SUPABASE_SERVICE_ROLE_KEY, not SUPABASE_ANON_KEY, to reach this table (companion code change
--- in the same PR).
+-- Ownership design (revised after review — PR #161): a job belongs to whoever submitted it.
+-- An EARLIER version of this migration took the deny-by-default / service_role-only shortcut
+-- `simulation_run` uses in 0001 (no RLS policy, only the service_role key can touch the
+-- table). Reviewer caught the real gap that created: the anon key's RLS lockout was the
+-- ONLY defense, but jobs.py's actual endpoints (GET /jobs/:id, GET /jobs/:id/report) only
+-- ever checked that the caller was SIGNED IN, never that the job was THEIRS. Once the table
+-- was real and durable, switching to service_role (which bypasses RLS entirely) meant any
+-- authenticated user holding another user's job UUID could read their full validated-design
+-- report. This version closes that with REAL per-user RLS instead: `jobs` is scoped to
+-- auth.uid(), the same shape 0001's own `own_memberships` policy uses (a user reads their
+-- OWN rows) — NOT the same pattern as `simulation_run`, which has no policy at all; those
+-- are opposite choices, not the same one. jobs.py goes back to the anon key, but a fresh
+-- per-request client scoped to the caller's own JWT (`client.postgrest.auth(access_token)`
+-- in jobs.py's `_client_for()`), so PostgREST's auth.uid() resolves to THAT user and this
+-- policy only ever returns their rows — never a static, unscoped anon connection.
 
 begin;
 
@@ -34,9 +31,14 @@ begin;
 -- match exactly what jobs.py reads/writes today; nothing speculative added.
 -- =====================================================================================
 create table jobs (
-  -- Supplied by the app (uuid4 generated in Python, jobs.py:44) — no DB-side default,
+  -- Supplied by the app (uuid4 generated in Python, jobs.py) — no DB-side default,
   -- since the caller always provides one.
   job_id         uuid primary key,
+  -- Who submitted it. Derived by the trigger below from auth.uid(), never trusted from
+  -- whatever the app sends — same "derive it, don't trust the caller" rule 0001 uses for
+  -- tenant_id (a denormalised column an app could get wrong once, silently, so the DB
+  -- fills it itself instead).
+  user_id        uuid not null references auth.users(id) on delete cascade,
   status         text not null default 'queued'
                    check (status in ('queued', 'processing', 'done', 'error')),
   intent_text    text not null,
@@ -49,9 +51,28 @@ create table jobs (
   updated_at     timestamptz not null default now()
 );
 
+-- Same pattern as 0001's keystone_derive_tenant_from_* functions: `security invoker` so
+-- the auth.uid() lookup runs as the CALLING role, not whoever owns the function — and
+-- fires on UPDATE too, not just INSERT, so no write path (now or added later) can ever
+-- reassign a job's ownership by including user_id in its payload.
+create function keystone_derive_job_owner()
+returns trigger
+language plpgsql
+security invoker
+as $$
+begin
+  new.user_id = auth.uid();
+  return new;
+end;
+$$;
+
+create trigger trg_jobs_derive_owner
+  before insert or update on jobs
+  for each row
+  execute function keystone_derive_job_owner();
+
 -- Keeps updated_at honest on every UPDATE (status/result/error changes) without relying on
--- the app to remember to set it — same "derive it, don't trust the caller" spirit as 0001's
--- tenant-derivation triggers, just for a timestamp instead of a tenant_id.
+-- the app to remember to set it.
 create function keystone_touch_job_updated_at()
 returns trigger
 language plpgsql
@@ -67,17 +88,22 @@ create trigger trg_jobs_touch_updated_at
   for each row
   execute function keystone_touch_job_updated_at();
 
--- Deny-by-default (0001's own rule: "no policy at all means zero rows readable or writable
--- until the policy below exists") — there IS no policy below, on purpose. Nobody using the
--- anon or authenticated role can read or write this table at all, regardless of grants.
+-- Deny-by-default until the policy below exists (0001's own rule), then the one real
+-- policy: a user can only ever see/write their OWN jobs — mirrors 0001's own_memberships
+-- shape exactly (`using`/`with check` both keyed on the caller's own identity).
 alter table jobs enable row level security;
 alter table jobs force row level security;
 
--- REVOKE ALL first (not just GRANT-additive) for the same reason 0001 does it: a Supabase
--- project's default table privileges vary by project history, so this forces every role down
--- to an explicit, guaranteed-zero baseline before the one intentional grant below.
-revoke all on jobs from anon, authenticated, service_role;
+create policy own_jobs on jobs
+  using      (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
-grant select, insert, update, delete on jobs to service_role;
+-- REVOKE ALL first (not just GRANT-additive) for the same reason 0001 does it: a Supabase
+-- project's default table privileges vary by project history, so this forces every role
+-- down to an explicit, guaranteed-zero baseline before the one intentional grant below.
+-- No DELETE grant: nothing in the app deletes a job today — least privilege, not an
+-- oversight; add it deliberately (with its own review) if a delete feature lands.
+revoke all on jobs from anon, authenticated, service_role;
+grant select, insert, update on jobs to authenticated;
 
 commit;

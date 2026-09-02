@@ -30,16 +30,28 @@ def _make_meter() -> CostMeter | None:
         return None
 
 
-def run_pipeline(job_id: str, intent_text: str) -> None:
+def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
     """Run the full pipeline for one job. Called in the background after /intent responds.
+
+    `access_token` is the submitting user's own JWT, captured at request time and
+    threaded through so every update_job() call below stays scoped to them under RLS
+    (0003_jobs_table.sql) — this background task runs long after the original request
+    finished, so it has no other way to know who it's writing on behalf of.
+
+    Known limitation (Bifola's review, #161): the token's TTL (Supabase default ~1h)
+    is fixed at submit time, so a job that runs longer than that would start failing
+    RLS on its own update_job() writes and fall back to in-memory only -- its durable
+    row could stay stale at "processing". Degrades gracefully (no crash), and jobs
+    finish well within an hour today, so left as a known gap rather than fixed here.
 
     Updates job status at each stage so the frontend can show progress:
     queued → processing → done (or error)
     """
     try:
-        update_job(job_id, status="processing")  # tell the store we've started — inside the
-        # try so a failure here still lands on status="error" below, instead of leaving the job
-        # stuck at its initial status forever with no error ever recorded.
+        update_job(job_id, access_token=access_token, status="processing")  # tell the store
+        # we've started — inside the try so a failure here still lands on status="error"
+        # below, instead of leaving the job stuck at its initial status forever with no
+        # error ever recorded.
         meter = _make_meter()  # shared ingest+council spend cap for this job, if configured
 
         # Step 1: ingest — turn the raw intent text into a structured SystemModel
@@ -60,7 +72,7 @@ def run_pipeline(job_id: str, intent_text: str) -> None:
         # Step 5: render — combine everything into a markdown report
         report = render(model, adrs, sim_result)
 
-        update_job(job_id, status="done", result=report)  # store the finished report
+        update_job(job_id, access_token=access_token, status="done", result=report)  # store the finished report
         log.info("job %s completed successfully", job_id)
 
     except Exception as exc:
@@ -70,4 +82,4 @@ def run_pipeline(job_id: str, intent_text: str) -> None:
         safe_msg, _ = scan_and_redact_secrets(raw_msg)   # redact any secrets in the error text
         safe_msg, _ = _redact_engine_metrics(safe_msg)   # also strip any stray numbers
         log.error("job %s failed: %s", job_id, safe_msg)
-        update_job(job_id, status="error", error=safe_msg)
+        update_job(job_id, access_token=access_token, status="error", error=safe_msg)

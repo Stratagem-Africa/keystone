@@ -61,6 +61,7 @@ SHIM_SQL = REPO_ROOT / "db" / "testing" / "supabase_role_shim.sql"
 MIGRATIONS = [
     REPO_ROOT / "db" / "migrations" / "0001_canonical_model_store.sql",
     REPO_ROOT / "db" / "migrations" / "0002_tenant_id_auth_hook.sql",
+    REPO_ROOT / "db" / "migrations" / "0003_jobs_table.sql",
 ]
 
 

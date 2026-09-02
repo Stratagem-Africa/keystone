@@ -47,6 +47,9 @@ def _get_jwks_client(supabase_url: str) -> jwt.PyJWKClient:
 class AuthUser:
     user_id: str
     email: str | None
+    # The verified raw JWT itself — needed anywhere a Postgres call must run AS this user
+    # (e.g. jobs.py's per-request Supabase client, so RLS's auth.uid() resolves to them).
+    access_token: str
 
 
 def get_current_user(
@@ -95,4 +98,4 @@ def get_current_user(
     if not user_id:
         raise HTTPException(status_code=401, detail="token missing subject")
 
-    return AuthUser(user_id=user_id, email=payload.get("email"))
+    return AuthUser(user_id=user_id, email=payload.get("email"), access_token=credentials.credentials)
