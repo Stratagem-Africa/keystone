@@ -62,6 +62,26 @@ class TestWorker(unittest.TestCase):
         self.assertEqual(failed.status, "error")
         self.assertIsNotNone(failed.error)   # error message was stored
 
+    def test_processing_update_failure_still_marks_job_error(self):
+        # update_job(status="processing") used to sit OUTSIDE run_pipeline's try/except — a failure
+        # there propagated uncaught, leaving the job stuck at its initial status forever with no
+        # error ever recorded. It's now the first statement INSIDE the try, so this must land on
+        # status="error" like any other failure in the pipeline.
+        job = create_job("I am building a URL shortener that handles 50k req/s", [])
+        real_update_job = jobs.update_job
+
+        def flaky(job_id, *, status, result=None, error=None):
+            if status == "processing":
+                raise RuntimeError("simulated store failure")
+            return real_update_job(job_id, status=status, result=result, error=error)
+
+        with patch("api.worker.update_job", side_effect=flaky):
+            run_pipeline(job.job_id, job.intent_text)
+
+        failed = get_job(job.job_id)
+        self.assertEqual(failed.status, "error")
+        self.assertIsNotNone(failed.error)
+
     def test_pipeline_error_is_scrubbed(self):
         # error messages from the real ingestor can contain raw LLM output with secrets
         # — the worker must redact them before storing or logging
