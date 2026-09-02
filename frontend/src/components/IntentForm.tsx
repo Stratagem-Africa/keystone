@@ -16,7 +16,7 @@ type JobStatusResponse = {
 };
 
 const POLL_INTERVAL_MS = 1000;
-const MAX_POLL_ATTEMPTS = 300;   // 5 minutes at 1s/poll — a bound so a stuck job fails loudly instead of spinning forever
+const MAX_POLL_ATTEMPTS = 600;   // 10 minutes at 1s/poll — a bound so a stuck job fails loudly instead of spinning forever
 
 export function IntentForm() {
   const { session, loading: authLoading } = useAuth();
@@ -27,7 +27,7 @@ export function IntentForm() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // A submit -> poll -> fetch-report chain can run for up to 5 minutes. If the user
+  // A submit -> poll -> fetch-report chain can run for up to 10 minutes. If the user
   // navigates away mid-flight, this stops the loop from firing more requests and — more
   // importantly — stops it from calling setState on a component that's no longer mounted.
   const cancelledRef = useRef(false);
@@ -49,7 +49,7 @@ export function IntentForm() {
       if (status.status === "error") throw new Error(status.error ?? "the pipeline failed");
       // still queued/processing — keep polling
     }
-    throw new Error("timed out waiting for the design to finish (5 min) — the job may still be running server-side");
+    throw new Error("timed out waiting for the design to finish (10 min) — the job may still be running server-side");
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
