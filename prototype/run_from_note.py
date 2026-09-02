@@ -5,10 +5,15 @@ Shows the full loop from prose to a validated-design report. Defaults to $0/offl
 (+ ANTHROPIC_API_KEY) to activate the real LLM layers.
 
 Run from prototype/:  python3 run_from_note.py
+  or with your own prompt:  python3 run_from_note.py "a food delivery app for 500 users"
+  (a CLI prompt only changes the model when INGEST_PROVIDER=claude — the default stub
+  ingestor never reads the text, it always returns the same canned placeholder topology)
 """
 from __future__ import annotations
 
+import logging
 import os
+import sys
 
 from _env import load_env, report_path
 from keystone.cost_meter import CostMeter
@@ -29,9 +34,16 @@ OUT = os.path.join(os.path.dirname(__file__), "outputs", "from_note_report.md")
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")   # surfaces council stage-progress logs
     load_env()                              # activate local .env (council/grounding); existing env wins
     # 1. Ingest intent -> partial canonical model (+ assumptions, scan/injection notes).
-    result = make_ingestor().ingest(Source(text=NOTE, name="URL Shortener (from note)"))
+    raw = " ".join(sys.argv[1:]).strip()   # CLI prompt if given, else the built-in note
+    text = raw or NOTE
+    name = "CLI intent" if raw else "URL Shortener (from note)"
+    if raw and os.environ.get("INGEST_PROVIDER", "stub") != "claude":
+        print("NOTE: INGEST_PROVIDER is not 'claude' — your CLI prompt will be ignored; "
+              "the stub ingestor always returns the same placeholder topology.")
+    result = make_ingestor().ingest(Source(text=text, name=name))
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
     meter = CostMeter()                     # OUR council API spend (council only; ingestion spend not yet metered)
