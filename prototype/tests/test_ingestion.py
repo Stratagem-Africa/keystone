@@ -333,6 +333,22 @@ class TestFailClosedValidation(unittest.TestCase):
         self.assertIn("no markdown fences, no prose, no truncation", fake.last_user)
         self.assertNotIn("not json at all, just prose", fake.last_user)
 
+    def test_parse_failure_log_does_not_echo_the_raw_reply(self):
+        # Harm floor: _ParseError's text embeds up to 400 chars of the model's RAW reply
+        # (_first_json_object). A garbled reply can itself contain a credential-shaped string
+        # the input-side secret scan never sees (it only cleans OUR document, not a model
+        # reply) — so the log line for a parse failure must NOT include the raw reply text,
+        # only a short, reply-free message. Uses a secret-shaped token to prove it, not just
+        # a generic garbled string.
+        garbled = "oops here's my key sk-ant-api03-AAABBBCCCDDDEEEFFFGGGHHH { \"components\": [ trunc"
+        fake = FakeLLM(garbled)
+        with self.assertLogs("keystone.ingestion", level="WARNING") as cm:
+            with self.assertRaises(IngestError):
+                make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        joined = "\n".join(cm.output)
+        self.assertNotIn("sk-ant-api03", joined)
+        self.assertNotIn(garbled, joined)
+
     def test_non_ingest_error_bypasses_the_retry(self):
         class _Flaky:
             def __init__(self):

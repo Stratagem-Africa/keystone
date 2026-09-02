@@ -535,11 +535,22 @@ class ClaudeIngestor:
             # component, flow-share-sum drift, ...) quotes the EXACT validation message, so the
             # retry always targets the real defect validate_model found — never a separately
             # computed guess that could misdiagnose it.
-            log.warning("ingestion attempt failed (%s); retrying once with a firmer prompt", e)
             if isinstance(e, _ParseError):
+                # _ParseError's text embeds up to 400 chars of the model's RAW reply
+                # (_first_json_object's "got:\n{text[:400]}") — scan_and_redact_secrets only
+                # cleans the user's INPUT document, never a model reply, so a credential-shaped
+                # string echoed back by the model could otherwise leak into this log line (harm
+                # floor: "never echo a detected secret onward to the LLM or a log"). Log a short,
+                # reply-free message instead.
+                log.warning("ingestion parse failure; retrying once with a clean-JSON reminder")
                 firmer = (f"{user}\n\nIMPORTANT: reply with ONLY one valid, COMPLETE JSON object — "
                          "no markdown fences, no prose, no truncation.")
             else:
+                # Safe to log verbatim: every other IngestError's text is a structural validation
+                # message (unsupported kind, duplicate id, dangling flow reference, orphan
+                # component, flow-share-sum drift, ...) built from OUR OWN component/flow ids, not
+                # from the model's raw reply.
+                log.warning("ingestion attempt failed (%s); retrying once with a firmer prompt", e)
                 firmer = (f"{user}\n\nIMPORTANT: your previous reply was REJECTED for this reason:\n"
                          f"{e}\nFix exactly that problem and reply with ONLY the corrected, "
                          "complete JSON object.")
