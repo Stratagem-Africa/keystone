@@ -35,3 +35,6 @@ prototype/outputs/*.jsonl
 
 # Learning notes — local only, not for review
 learning-notes/
+
+# Browser-automation (Playwright MCP) debug output — local only, regenerated per session
+.playwright-mcp/
