@@ -24,10 +24,11 @@ class TestIntentEndpoint(unittest.TestCase):
 
 
     def test_submit_intent_returns_job_id(self):
-        # send a valid POST request with clean text (no secrets)
+        # /intent is a multipart form endpoint (text field + optional file) so a real
+        # browser upload and a plain text-only prompt share one contract.
         response = client.post(
             "/intent",
-            json={"text": "I am building a URL shortener that handles 50k req/s"},
+            data={"text": "I am building a URL shortener that handles 50k req/s"},
             headers=_auth_headers(),
         )
 
@@ -40,8 +41,8 @@ class TestIntentEndpoint(unittest.TestCase):
 
 
     def test_submit_intent_too_short_is_rejected(self):
-        # Text under 10 characters should be rejected before our code even runs
-        response = client.post("/intent", json={"text": "short"}, headers=_auth_headers())
+        # Text under 10 characters should be rejected
+        response = client.post("/intent", data={"text": "short"}, headers=_auth_headers())
 
         self.assertEqual(response.status_code, 422)  # 422 = Unprocessable Entity (validation failed)
 
@@ -50,7 +51,7 @@ class TestIntentEndpoint(unittest.TestCase):
         # A text that contains what looks like an API key
         text = "My system uses sk-ant-api03-AAABBBCCCDDDEEEFFFGGGHHH to call the AI"
 
-        response = client.post("/intent", json={"text": text}, headers=_auth_headers())
+        response = client.post("/intent", data={"text": text}, headers=_auth_headers())
 
         self.assertEqual(response.status_code, 200)
 
@@ -62,6 +63,76 @@ class TestIntentEndpoint(unittest.TestCase):
         # The stored job text must NOT contain the raw secret
         stored_job = jobs.get_job(data["job_id"])
         self.assertNotIn("sk-ant-api03", stored_job.intent_text)  # secret was redacted
+
+
+    def test_submit_intent_with_txt_file_combines_text_and_file(self):
+        response = client.post(
+            "/intent",
+            data={"text": "A note about the system:"},
+            files={"file": ("notes.txt", b"Users upload photos and browse a feed.", "text/plain")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        stored_job = jobs.get_job(response.json()["job_id"])
+        self.assertIn("A note about the system:", stored_job.intent_text)
+        self.assertIn("Users upload photos and browse a feed.", stored_job.intent_text)
+
+
+    def test_submit_intent_with_only_a_file_no_typed_text(self):
+        response = client.post(
+            "/intent",
+            files={"file": ("notes.md", b"# A food delivery app for 500 users", "text/markdown")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        stored_job = jobs.get_job(response.json()["job_id"])
+        self.assertIn("A food delivery app for 500 users", stored_job.intent_text)
+
+
+    def test_submit_intent_rejects_unsupported_file_type(self):
+        response = client.post(
+            "/intent",
+            data={"text": "some prompt text here"},
+            files={"file": ("doc.pdf", b"%PDF-1.4 fake pdf bytes", "application/pdf")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+    def test_submit_intent_rejects_oversized_file(self):
+        big = b"x" * (2 * 1024 * 1024 + 1)   # one byte over the 2MB cap
+        response = client.post(
+            "/intent",
+            files={"file": ("notes.txt", big, "text/plain")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+    def test_submit_intent_rejects_non_utf8_file(self):
+        response = client.post(
+            "/intent",
+            files={"file": ("notes.txt", b"\xff\xfe\x00\x01 not valid utf-8", "text/plain")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+    def test_submit_intent_combined_text_still_enforces_length_bounds(self):
+        # An empty file + no typed text should still trip the 10-char floor, same as
+        # the plain too-short case above, just reached via the file path.
+        response = client.post(
+            "/intent",
+            files={"file": ("notes.txt", b"hi", "text/plain")},
+            headers=_auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,9 @@ import dataclasses
 import math
 import os
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
+
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -44,6 +46,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Starlette's multipart parser buffers an uploaded file's *entire* body — spooling it to a
+# real temp file on disk past 1MB — before a route's own File()/Form() params are even
+# resolved, let alone before the route body runs. So /intent's own MAX_UPLOAD_BYTES check
+# (below) can only reject an oversized upload AFTER the whole thing has already been
+# received and buffered. This pre-parse check on the advertised Content-Length rejects
+# grossly oversized requests before Starlette starts reading the body at all, bounding the
+# actual resource cost. It's a blunt, request-wide cap (not per-part) — proportionate to
+# this API's current single-tenant-dev-demo threat model, not a substitute for real
+# streaming/part-level limits if this ever takes untrusted internet traffic.
+_MAX_REQUEST_BYTES = 4 * 1024 * 1024   # 4MB — headroom over /intent's 2MB file cap for multipart overhead
+
+
+@app.middleware("http")
+async def _reject_oversized_requests(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None and content_length.isdigit() and int(content_length) > _MAX_REQUEST_BYTES:
+        return Response(status_code=413, content="request body too large")
+    return await call_next(request)
+
 
 def _sanitize(obj):
     """Replace non-finite floats (inf/nan) with None so the result is JSON-serialisable.
@@ -73,9 +94,6 @@ class DesignRequest(BaseModel):
     # clean 422 at the edge and the engine only ever sees a sane value.
     system_rps: float = Field(10_000, gt=0, le=10_000_000)
 
-class IntentRequest(BaseModel):
-    text: str = Field(..., min_length=10, max_length=10_000)
-
 
 @app.post("/design")
 def design(req: DesignRequest, user: AuthUser = Depends(get_current_user)) -> dict:
@@ -95,17 +113,52 @@ def design(req: DesignRequest, user: AuthUser = Depends(get_current_user)) -> di
         "adrs": [dataclasses.asdict(adr) for adr in adrs],
     })
 
+# Uploaded documents are combined with any typed text and run through the harm-floor
+# secret scan before storage — consistent with the no-retention ethos already governing
+# ingestion (ADR-002): nothing here writes the intent text anywhere but the job record.
+# Note the underlying multipart parser (Starlette) may itself spool a large file part to
+# a temp file before this handler ever runs (see `_reject_oversized_requests` above) —
+# this app never does so itself, but that framework-level behavior means "never touches
+# disk" isn't a claim this endpoint can make on its own. Cap kept small since only
+# plain-text formats are supported (no PDF parsing — deliberately deferred, see PR).
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024   # 2MB
+_ALLOWED_UPLOAD_SUFFIXES = (".txt", ".md")
+
+
 @app.post("/intent")
-def submit_intent(
-    req: IntentRequest,
+async def submit_intent(
     background_tasks: BackgroundTasks,
+    text: str = Form(""),
+    file: UploadFile | None = File(None),
     user: AuthUser = Depends(get_current_user),
 ) -> dict:
+    combined_text = text.strip()
+    if file is not None:
+        if not file.filename or not file.filename.lower().endswith(_ALLOWED_UPLOAD_SUFFIXES):
+            raise HTTPException(status_code=400, detail="only .txt and .md files are supported")
+        raw = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="file too large (2MB max)")
+        try:
+            file_text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="file must be UTF-8 text")
+        combined_text = f"{combined_text}\n\n{file_text}".strip() if combined_text else file_text.strip()
+
+    if not (10 <= len(combined_text) <= 10_000):
+        raise HTTPException(
+            status_code=422,
+            detail="combined text (prompt + file, if any) must be between 10 and 10,000 characters",
+        )
+
     # Scan the raw text for secrets BEFORE storing anything (harm floor rule).
-    clean_text, secrets_found = scan_and_redact_secrets(req.text)
-    
-    # Create a job record and get back a job_id straight away.
-    job = create_job(intent_text=clean_text, secrets_found=secrets_found)
+    clean_text, secrets_found = scan_and_redact_secrets(combined_text)
+
+    # Create a job record and get back a job_id straight away. create_job() is a
+    # synchronous Supabase/Postgres call (jobs.py) — run it off the event loop so it
+    # can't stall other requests while waiting on that round-trip (this handler is
+    # `async def` for the file upload, which means it's no longer auto-threadpooled).
+    job = await run_in_threadpool(create_job, intent_text=clean_text, secrets_found=secrets_found)
     
     # Register the pipeline to run AFTER this response is sent - never blocks the caller.
     background_tasks.add_task(run_pipeline, job.job_id, job.intent_text)

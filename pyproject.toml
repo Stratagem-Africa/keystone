@@ -9,7 +9,7 @@ dependencies = []
 [project.optional-dependencies]
 # Added as the backend/council come online. Kept out of the engine.
 council = ["anthropic>=0.40"]
-api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "pyjwt[crypto]>=2.8"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "pyjwt[crypto]>=2.8", "python-multipart>=0.0.9"]
 db = ["supabase>=2.31", "python-dotenv>=1.0"]
 # Raw Postgres driver for the ADR-005 §1b tenant-isolation test harness ONLY
 # (scripts/test_tenant_isolation.sh, prototype/tests/db_test_*.py) — kept separate from `db`

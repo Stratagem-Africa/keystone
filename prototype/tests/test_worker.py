@@ -104,7 +104,7 @@ class TestWorker(unittest.TestCase):
         # the pipeline has already completed
         response = client.post(
             "/intent",
-            json={"text": "I am building a URL shortener that handles 50k req/s"},
+            data={"text": "I am building a URL shortener that handles 50k req/s"},
             headers=_auth_headers(),
         )
 
