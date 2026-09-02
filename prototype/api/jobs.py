@@ -15,7 +15,13 @@ def _get_db():
     if _db_client is not None:
         return _db_client
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_ANON_KEY")
+    # The `jobs` table (0003_jobs_table.sql) has row-level security enabled with NO policy —
+    # deny-by-default — and grants access only to `service_role`. That's because jobs.py has
+    # no per-user ownership story yet (see the TODO on create_job below + issue #21/#87), so
+    # the safe choice is: lock the table so the anon key (the one a browser could ever see)
+    # can't touch it at all, and use the service_role key here instead, which bypasses RLS
+    # and is meant to live only on the server (never sent to a client).
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
         return None
     try:
