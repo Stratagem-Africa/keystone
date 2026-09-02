@@ -19,9 +19,11 @@ def run_pipeline(job_id: str, intent_text: str) -> None:
     Updates job status at each stage so the frontend can show progress:
     queued → processing → done (or error)
     """
-    update_job(job_id, status="processing")  # tell the store we've started
-
     try:
+        update_job(job_id, status="processing")  # tell the store we've started — inside the
+        # try so a failure here still lands on status="error" below, instead of leaving the job
+        # stuck at its initial status forever with no error ever recorded.
+
         # Step 1: ingest — turn the raw intent text into a structured SystemModel
         ingestor = make_ingestor()
         source = Source(text=intent_text, kind="text", name="user-intent")
