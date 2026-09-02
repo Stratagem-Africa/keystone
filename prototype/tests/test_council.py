@@ -54,7 +54,7 @@ class FakeLLM:
                     '"rationale": "boring reliable default", "risk": "write scaling"}]')
         if label.startswith("review:"):
             return '[{"target": "P1", "concern": "cache stampede risk", "severity": "high"}]'
-        if label == "chairman":
+        if label.startswith("chairman"):   # covers both "chairman" and the ":retry" label
             return self._chairman_json
         raise AssertionError(f"unexpected council label: {label}")
 
@@ -135,9 +135,36 @@ class TestClaudeCouncilOrchestration(unittest.TestCase):
             self.assertNotIn("claude", adrs[0].source)
 
     def test_empty_chairman_reply_raises(self):
+        # FakeLLM answers BOTH "chairman" and its ":retry" with the same (empty) fixture, so this
+        # confirms the retry does not rescue a persistently-empty reply — fail-loud is preserved.
         fake = FakeLLM(chairman_json="[]")
         with self.assertRaises(CouncilError):
             make_council("claude", model="m", client=fake).design(self.model)
+
+    def test_empty_chairman_reply_is_rescued_by_one_retry(self):
+        # A syntactically-valid-but-empty reply (`[]`) is the sibling of a JSON parse failure — it
+        # deserves the same one-shot second chance before the whole job fails loud.
+        class _EmptyThenValidChairmanLLM(FakeLLM):
+            def complete(self, *, label, system, user, max_tokens):
+                self.calls.append(label)
+                if label.startswith("design:"):
+                    return ('[{"area": "Datastore", "position": "Postgres primary", '
+                            '"rationale": "boring reliable default", "risk": "write scaling"}]')
+                if label.startswith("review:"):
+                    return '[{"target": "P1", "concern": "cache stampede risk", "severity": "high"}]'
+                if label == "chairman":
+                    return "[]"
+                if label == "chairman:empty-retry":
+                    return self._chairman_json
+                raise AssertionError(f"unexpected council label: {label}")
+
+        flaky = _EmptyThenValidChairmanLLM()
+        adrs = make_council("claude", model="m", client=flaky).design(self.model)
+        self.assertTrue(adrs, "the retry should have rescued the run")
+        self.assertIn("chairman", flaky.calls)
+        self.assertIn("chairman:empty-retry", flaky.calls)
+        # distinct from _complete_json's own internal parse-repair ":retry" suffix — never collide
+        self.assertNotIn("chairman:retry", flaky.calls)
 
 
 class TestPrimeDirectiveGuard(unittest.TestCase):

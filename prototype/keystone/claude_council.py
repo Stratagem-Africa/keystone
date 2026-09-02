@@ -358,6 +358,28 @@ def _bounded_block(lines: list[str], budget: int = _BLOCK_BUDGET) -> str:
     return "\n".join(out)
 
 
+def _items_to_adrs(items: object, *, source: str) -> list[ADR]:
+    """Map the chairman's parsed JSON items into `ADR` objects, skipping any non-dict item.
+    Pure/side-effect-free so the retry in `_stage_chairman_synthesis` can call it twice."""
+    adrs: list[ADR] = []
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        conf = str(it.get("confidence", "med")).lower()
+        if conf not in ("low", "med", "high"):
+            conf = "med"
+        adrs.append(ADR(
+            area=str(it.get("area", "Decision")),
+            decision=str(it.get("decision", "")),
+            rationale=str(it.get("rationale", "")),
+            dissent=[str(d) for d in _as_list(it.get("dissent")) if str(d).strip()],
+            confidence=conf,
+            kill_criteria=[str(k) for k in _as_list(it.get("kill_criteria")) if str(k).strip()],
+            source=source,
+        ))
+    return adrs
+
+
 # --------------------------------------------------------------------------- #
 # The council
 # --------------------------------------------------------------------------- #
@@ -515,22 +537,22 @@ class ClaudeCouncil:
             '"kill_criteria": ["<condition that would force revisiting this>", ...]}'
         )
         items = self._complete_json(label="chairman", system=_CHAIRMAN_SYSTEM, user=user, max_tokens=8192)
-        adrs: list[ADR] = []
-        for it in items if isinstance(items, list) else []:
-            if not isinstance(it, dict):
-                continue
-            conf = str(it.get("confidence", "med")).lower()
-            if conf not in ("low", "med", "high"):
-                conf = "med"
-            adrs.append(ADR(
-                area=str(it.get("area", "Decision")),
-                decision=str(it.get("decision", "")),
-                rationale=str(it.get("rationale", "")),
-                dissent=[str(d) for d in _as_list(it.get("dissent")) if str(d).strip()],
-                confidence=conf,
-                kill_criteria=[str(k) for k in _as_list(it.get("kill_criteria")) if str(k).strip()],
-                source=self._source,
-            ))
+        adrs = _items_to_adrs(items, source=self._source)
         if not adrs:
-            raise CouncilError("chairman synthesis produced no ADRs")
+            # A parse failure already gets a repair retry inside `_complete_json` — this is the
+            # sibling case: the reply parsed FINE but yielded zero usable ADRs (e.g. a live model
+            # under context trimming just replies `[]`). One firmer retry rescues most of these
+            # before we fail the whole job loud (ADR-001 honesty: never invent an ADR to fill the gap).
+            log.warning("chairman synthesis returned zero usable ADRs; retrying once with a firmer prompt")
+            firmer = (f"{user}\n\nIMPORTANT: your previous reply produced no usable ADRs. You MUST "
+                      "return a JSON array with AT LEAST ONE ADR — synthesise your best judgement from "
+                      "the independent proposals alone if the peer review was too sparse to reconcile.")
+            # Distinct label from _complete_json's own internal ":retry" (JSON-parse-repair) suffix —
+            # otherwise both retry causes are indistinguishable in logs, and a parse failure on THIS
+            # call would chain into an even more confusing "chairman:retry:retry".
+            items = self._complete_json(label="chairman:empty-retry", system=_CHAIRMAN_SYSTEM,
+                                        user=firmer, max_tokens=8192)
+            adrs = _items_to_adrs(items, source=self._source)
+        if not adrs:
+            raise CouncilError("chairman synthesis produced no ADRs (after retry)")
         return adrs
