@@ -446,6 +446,7 @@ class ClaudeCouncil:
     def _stage_independent_design(self, brief: str) -> list[dict]:
         proposals: list[dict] = []
         for p in self._personas:
+            log.info("council: %s proposing…", p.title)
             system = (
                 f"You are the {p.title} on an architecture council. Your remit: {p.brief}.\n"
                 f"{_NO_NUMBERS_RULE}"
@@ -469,6 +470,7 @@ class ClaudeCouncil:
     # -- stage 2: blind peer review (anonymised) ---------------------------- #
 
     def _stage_blind_peer_review(self, proposals: list[dict]) -> list[dict]:
+        log.info("council: blind peer review starting (%d proposals)…", len(proposals))
         # Anonymise: identities stripped, proposals labelled P1..Pn to cut herding.
         # Interleave by author so a budget trim keeps one proposal per persona before any second — the
         # anonymised P-labels follow this fair order, so no persona's proposal is systematically unseen.
@@ -507,6 +509,7 @@ class ClaudeCouncil:
 
     def _stage_chairman_synthesis(self, brief: str, proposals: list[dict],
                                   reviews: list[dict]) -> list[ADR]:
+        log.info("council: chairman synthesizing ADRs…")
         # Interleave by author (proposals) / reviewer so a budget trim drops each source's EXTRA items
         # before it drops any source's first — the minority YAGNI/AI voices survive the trim (honesty).
         prop_block = _bounded_block([

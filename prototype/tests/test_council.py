@@ -166,6 +166,16 @@ class TestClaudeCouncilOrchestration(unittest.TestCase):
         # distinct from _complete_json's own internal parse-repair ":retry" suffix — never collide
         self.assertNotIn("chairman:retry", flaky.calls)
 
+    def test_design_logs_stage_progress(self):
+        # A live demo narrates reasoning via these log lines (no other output surfaces
+        # the intermediate stages) — assert they fire so the behavior can't silently regress.
+        with self.assertLogs("keystone.council", level="INFO") as cm:
+            make_council("claude", model="m", client=FakeLLM()).design(self.model)
+        joined = "\n".join(cm.output)
+        self.assertIn("proposing", joined)
+        self.assertIn("blind peer review", joined)
+        self.assertIn("chairman synthesizing", joined)
+
 
 class TestPrimeDirectiveGuard(unittest.TestCase):
     """The LLM must never produce a number; the guard scrubs any that leak."""
