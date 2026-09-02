@@ -16,6 +16,12 @@ def _auth_headers() -> dict:
     return {"Authorization": f"Bearer {make_test_token()}"}
 
 
+# Matches make_test_token()'s default sub claim, so a direct jobs.get_job() call below
+# (bypassing HTTP) passes the same ownership check the real endpoint enforces.
+TEST_USER_ID = "user-123"
+TEST_ACCESS_TOKEN = "test-token"
+
+
 class TestIntentEndpoint(unittest.TestCase):
     def setUp(self):
         jobs._store.clear()
@@ -61,7 +67,7 @@ class TestIntentEndpoint(unittest.TestCase):
         self.assertIn("warnings", data)
 
         # The stored job text must NOT contain the raw secret
-        stored_job = jobs.get_job(data["job_id"])
+        stored_job = jobs.get_job(data["job_id"], user_id=TEST_USER_ID, access_token=TEST_ACCESS_TOKEN)
         self.assertNotIn("sk-ant-api03", stored_job.intent_text)  # secret was redacted
 
 
@@ -74,7 +80,7 @@ class TestIntentEndpoint(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        stored_job = jobs.get_job(response.json()["job_id"])
+        stored_job = jobs.get_job(response.json()["job_id"], user_id=TEST_USER_ID, access_token=TEST_ACCESS_TOKEN)
         self.assertIn("A note about the system:", stored_job.intent_text)
         self.assertIn("Users upload photos and browse a feed.", stored_job.intent_text)
 
@@ -87,7 +93,7 @@ class TestIntentEndpoint(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        stored_job = jobs.get_job(response.json()["job_id"])
+        stored_job = jobs.get_job(response.json()["job_id"], user_id=TEST_USER_ID, access_token=TEST_ACCESS_TOKEN)
         self.assertIn("A food delivery app for 500 users", stored_job.intent_text)
 
 

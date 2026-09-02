@@ -158,10 +158,12 @@ async def submit_intent(
     # synchronous Supabase/Postgres call (jobs.py) — run it off the event loop so it
     # can't stall other requests while waiting on that round-trip (this handler is
     # `async def` for the file upload, which means it's no longer auto-threadpooled).
-    job = await run_in_threadpool(create_job, intent_text=clean_text, secrets_found=secrets_found)
-    
+    job = await run_in_threadpool(create_job, intent_text=clean_text, secrets_found=secrets_found,
+                                  user_id=user.user_id, access_token=user.access_token)
+
+
     # Register the pipeline to run AFTER this response is sent - never blocks the caller.
-    background_tasks.add_task(run_pipeline, job.job_id, job.intent_text)
+    background_tasks.add_task(run_pipeline, job.job_id, job.intent_text, user.access_token)
     
     # Build the response. warnings tells the frontend if any secrets were redacted.
     response: dict = {"job_id": job.job_id, "status": job.status}
@@ -173,7 +175,7 @@ async def submit_intent(
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str, user: AuthUser = Depends(get_current_user)) -> dict:
     # {job_id} in the decorator becomes the job_id argument — FastAPI extracts it from the URL
-    job = get_job(job_id)
+    job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
 
     if job is None:
         # 404 = "Not Found" - correct code when the resource simply doesn't exist
@@ -195,7 +197,7 @@ def get_job_report(
 ):
     # `fmt` is a query param — client passes ?fmt=markdown in the URL
     # `request` gives access to HTTP headers the client sent
-    job = get_job(job_id)
+    job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
 
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
