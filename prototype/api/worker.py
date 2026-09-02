@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging  # for recording what happens during the pipeline run
+import os
 
 from keystone.council import make_council       # reasons about design → ADRs
+from keystone.cost_meter import CostMeter
 from keystone.ingestion import Source, make_ingestor, scan_and_redact_secrets
 from keystone.claude_council import _redact_engine_metrics
 from keystone.report import render              # produces the markdown report
@@ -11,6 +13,21 @@ from keystone.grounding import ground_model
 from api.jobs import update_job  # updates job status as the pipeline progresses
 
 log = logging.getLogger("keystone.worker")
+
+
+def _make_meter() -> CostMeter | None:
+    """One CostMeter shared across this job's ingestion + council calls, so
+    LLM_MAX_SPEND_USD (if set) is a total cap on the whole job, not two separate budgets.
+    Unset -> None, matching CostMeter's own uncapped default (fully backward compatible;
+    a stub-provider job never touches an LLM at all, so this is a no-op either way)."""
+    cap = os.getenv("LLM_MAX_SPEND_USD")
+    if not cap:
+        return None
+    try:
+        return CostMeter(max_micro_usd=int(float(cap) * 1_000_000))
+    except (ValueError, OverflowError):
+        log.warning("LLM_MAX_SPEND_USD=%r is not a number; ignoring (uncapped)", cap)
+        return None
 
 
 def run_pipeline(job_id: str, intent_text: str) -> None:
@@ -23,9 +40,10 @@ def run_pipeline(job_id: str, intent_text: str) -> None:
         update_job(job_id, status="processing")  # tell the store we've started — inside the
         # try so a failure here still lands on status="error" below, instead of leaving the job
         # stuck at its initial status forever with no error ever recorded.
+        meter = _make_meter()  # shared ingest+council spend cap for this job, if configured
 
         # Step 1: ingest — turn the raw intent text into a structured SystemModel
-        ingestor = make_ingestor()
+        ingestor = make_ingestor(meter=meter)
         source = Source(text=intent_text, kind="text", name="user-intent")
         ingest_result = ingestor.ingest(source)
 
@@ -33,7 +51,7 @@ def run_pipeline(job_id: str, intent_text: str) -> None:
         model = ground_model(ingest_result.model)
 
         # Step 3: council — reason about the model, produce Architecture Decision Records
-        council = make_council()
+        council = make_council(meter=meter)
         adrs = council.design(model)
 
         # Step 4: simulate — run the deterministic engine (prime directive: ONLY source of numbers)

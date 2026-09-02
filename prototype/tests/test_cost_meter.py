@@ -9,9 +9,10 @@ import json
 import unittest
 from unittest import mock
 
-from keystone.cost_meter import CostMeter, anthropic_usage, openai_usage
+from keystone.cost_meter import BudgetExceededError, CostMeter, anthropic_usage, openai_usage
 from keystone.council import make_council
 from keystone.llm import OpenAICompatibleLLM, make_llm
+from keystone.rate_limit import RateLimiter
 from keystone.blueprints import url_shortener
 
 
@@ -174,6 +175,63 @@ class TestTransportCapturesUsage(unittest.TestCase):
         self.assertEqual(len(m.calls), 1)
         # 100*3 + 50*15 = 1050 µUSD
         self.assertEqual(m.total_micro_usd(), 1050)
+
+
+class TestBudgetGuard(unittest.TestCase):
+    """check_budget() — the pre-flight spend cap, distinct from record()'s after-the-fact tally."""
+
+    def test_uncapped_meter_never_raises(self):
+        m = CostMeter()   # max_micro_usd unset — the existing, backward-compatible default
+        m.record("openrouter", "moonshotai/kimi-k3", 10_000_000, 10_000_000)  # plenty of $ spent
+        m.check_budget()   # must not raise — no cap configured
+
+    def test_raises_once_total_reaches_cap(self):
+        m = CostMeter(max_micro_usd=3000)
+        m.record("openrouter", "moonshotai/kimi-k3", 1000, 0)   # exactly 3000 µUSD
+        with self.assertRaises(BudgetExceededError):
+            m.check_budget()
+
+    def test_does_not_raise_below_cap(self):
+        m = CostMeter(max_micro_usd=5000)
+        m.record("openrouter", "moonshotai/kimi-k3", 1000, 0)   # 3000 µUSD, under the 5000 cap
+        m.check_budget()   # must not raise
+
+    def test_unpriced_calls_are_invisible_to_the_cap(self):
+        # Documented caveat: check_budget() can only see PRICED spend (total_micro_usd()
+        # excludes unpriced models), so a cap is only a real backstop when the model in use
+        # has a known price — confirmed here rather than just asserted in a comment.
+        m = CostMeter(max_micro_usd=1)
+        m.record("openai", "gpt-4o", 1_000_000, 1_000_000)   # no cited price -> $0 counted
+        m.check_budget()   # does not raise, even though real spend may be nonzero
+
+
+class TestBudgetAndRateLimitWiredIntoTransport(unittest.TestCase):
+    """The guards must actually run inside complete(), not just exist as standalone methods."""
+
+    def test_over_budget_blocks_the_call_before_any_http_request(self):
+        m = CostMeter(max_micro_usd=1)
+        m.record("openrouter", "moonshotai/kimi-k3", 1000, 0)  # already over the 1 µUSD cap
+        llm = OpenAICompatibleLLM("moonshotai/kimi-k3", base_url="https://example.test",
+                                  api_key_env=None, meter=m, provider="openrouter")
+        with mock.patch("urllib.request.urlopen") as fake_urlopen:
+            with self.assertRaises(BudgetExceededError):
+                llm.complete(label="t", system="s", user="u", max_tokens=16)
+        fake_urlopen.assert_not_called()   # the cap must stop the call, not just log after it
+
+    def test_rate_limiter_acquire_is_called_before_the_http_request(self):
+        fake_limiter = mock.Mock(spec=RateLimiter)
+        llm = OpenAICompatibleLLM("moonshotai/kimi-k3", base_url="https://example.test",
+                                  api_key_env=None, rate_limiter=fake_limiter, provider="openrouter")
+        payload = {"choices": [{"message": {"content": "hi"}}], "usage": {}}
+        with mock.patch("urllib.request.urlopen", return_value=_FakeHTTPResponse(payload)):
+            llm.complete(label="t", system="s", user="u", max_tokens=16)
+        fake_limiter.acquire.assert_called_once()
+
+    def test_default_rate_limiter_is_configured_from_env(self):
+        with mock.patch.dict("os.environ", {"LLM_MAX_REQUESTS_PER_MINUTE": "7"}):
+            llm = OpenAICompatibleLLM("moonshotai/kimi-k3", base_url="https://example.test",
+                                      api_key_env=None, provider="openrouter")
+        self.assertEqual(llm._rate_limiter._max_calls, 7)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,17 @@ hot redirects are served from a Redis cache.
 OUT = os.path.join(os.path.dirname(__file__), "outputs", "from_note_report.md")
 
 
+def _budget_cap() -> int | None:
+    """LLM_MAX_SPEND_USD, in micro-USD, or None (uncapped) if unset/invalid."""
+    cap = os.environ.get("LLM_MAX_SPEND_USD")
+    if not cap:
+        return None
+    try:
+        return int(float(cap) * 1_000_000)
+    except (ValueError, OverflowError):
+        return None
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")   # surfaces council stage-progress logs
     load_env()                              # activate local .env (council/grounding); existing env wins
@@ -43,10 +54,10 @@ def main() -> None:
     if raw and os.environ.get("INGEST_PROVIDER", "stub") != "claude":
         print("NOTE: INGEST_PROVIDER is not 'claude' — your CLI prompt will be ignored; "
               "the stub ingestor always returns the same placeholder topology.")
-    result = make_ingestor().ingest(Source(text=text, name=name))
+    meter = CostMeter(max_micro_usd=_budget_cap())  # shared ingest+council spend cap, if configured
+    result = make_ingestor(meter=meter).ingest(Source(text=text, name=name))
     model = ground_model(result.model)   # grounding activated (curated default; KB_PROVIDER=stub disables)
     # 2. Council reasons (stub by default). 3. The deterministic engine produces numbers.
-    meter = CostMeter()                     # OUR council API spend (council only; ingestion spend not yet metered)
     council = make_council(meter=meter)
     adrs = council.design(model)
     sim = simulate_with_confidence(model)   # output ranges from cited input uncertainty (values unchanged)
@@ -62,7 +73,7 @@ def main() -> None:
     print("=" * 70)
     print(f"Council            : {provider}"
           + ("  (deterministic stub)" if provider == "stub" else "  (LIVE LLM — non-deterministic)"))
-    print(f"Council API spend  : {meter.summary()}")   # OUR council inference spend — NOT the user's system cost (excludes ingestion)
+    print(f"Council API spend  : {meter.summary()}")   # OUR ingest+council inference spend — NOT the user's system cost
     for n in result.notes:
         print(f"  note: {n}")
     print(f"Components inferred : {', '.join(model.components)}")

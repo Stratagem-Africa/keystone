@@ -14,8 +14,24 @@ import urllib.request
 from typing import Protocol
 
 from keystone.cost_meter import CostMeter, anthropic_usage, openai_usage
+from keystone.rate_limit import RateLimiter
 
 log = logging.getLogger("keystone.llm")
+
+_DEFAULT_MAX_REQUESTS_PER_MINUTE = 30
+_DEFAULT_ANTHROPIC_TIMEOUT = 120   # seconds — the SDK's own default is 600s, which lets one slow/
+# rate-limited call dominate a ~16-call sequential run; 120s comfortably covers a normal completion
+# (including the chairman's 8192-max-token call) while bounding the worst case. Env-tunable, same
+# pattern as OLLAMA_TIMEOUT below, for anyone who needs more headroom.
+
+
+def _default_rate_limiter() -> RateLimiter:
+    """One rate limiter per transport instance (a single council/ingestion call reuses one
+    instance across all its persona/stage calls). Sized from LLM_MAX_REQUESTS_PER_MINUTE —
+    default 30/min comfortably covers one council run (~15 calls: 7 design + 7 review + 1
+    chairman) while still throttling a runaway loop hard."""
+    max_calls = int(os.getenv("LLM_MAX_REQUESTS_PER_MINUTE", str(_DEFAULT_MAX_REQUESTS_PER_MINUTE)))
+    return RateLimiter(max_calls=max_calls, period_seconds=60.0)
 
 
 class LLMError(RuntimeError):
@@ -38,7 +54,7 @@ class AnthropicLLM:
     never pulls it in. The API key is never logged."""
 
     def __init__(self, model: str, *, meter: CostMeter | None = None,
-                 provider: str = "claude") -> None:
+                 provider: str = "claude", rate_limiter: RateLimiter | None = None) -> None:
         try:
             import anthropic  # optional dep — only needed for a live provider
         except ImportError as e:  # pragma: no cover - exercised only without the extra
@@ -46,13 +62,18 @@ class AnthropicLLM:
                 "A 'claude' provider needs the Anthropic SDK. "
                 "Install it with:  pip install 'keystone[council]'"
             ) from e
-        self._client = anthropic.Anthropic()
+        timeout = int(os.getenv("ANTHROPIC_TIMEOUT", str(_DEFAULT_ANTHROPIC_TIMEOUT)))
+        self._client = anthropic.Anthropic(timeout=timeout)
         self._model = model
         self._meter = meter          # operational spend telemetry, opt-in (never a product number)
         self._provider = provider
+        self._rate_limiter = rate_limiter or _default_rate_limiter()
 
     def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
         log.debug("llm call [%s] model=%s", label, self._model)
+        if self._meter is not None:
+            self._meter.check_budget()   # pre-flight spend cap — no-op unless one is configured
+        self._rate_limiter.acquire()     # blocks if over the per-minute cap; a runaway-loop backstop
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
@@ -74,7 +95,8 @@ class OpenAICompatibleLLM:
     Inject a fake `LLM` for $0 offline tests; this transport only runs when a real provider is selected."""
 
     def __init__(self, model: str, *, base_url: str, api_key_env: str | None = None, timeout: int = 120,
-                 meter: CostMeter | None = None, provider: str | None = None) -> None:
+                 meter: CostMeter | None = None, provider: str | None = None,
+                 rate_limiter: RateLimiter | None = None) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._api_key = os.getenv(api_key_env) if api_key_env else None
@@ -83,9 +105,13 @@ class OpenAICompatibleLLM:
         self._timeout = timeout
         self._meter = meter          # operational spend telemetry, opt-in (never a product number)
         self._provider = provider    # telemetry label so a $0 provider (ollama/github/:free) is priced right
+        self._rate_limiter = rate_limiter or _default_rate_limiter()
 
     def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
         log.debug("llm call [%s] model=%s base=%s", label, self._model, self._base_url)
+        if self._meter is not None:
+            self._meter.check_budget()   # pre-flight spend cap — no-op unless one is configured
+        self._rate_limiter.acquire()     # blocks if over the per-minute cap; a runaway-loop backstop
         body = json.dumps({
             "model": self._model,
             "max_tokens": max_tokens,
