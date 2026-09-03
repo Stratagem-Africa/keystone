@@ -81,6 +81,24 @@ class TestHonestZeroAndUnknown(unittest.TestCase):
         self.assertEqual(m.unpriced_models, set())
         self.assertIn("≈ $3.5000", m.summary())
 
+    def test_qwen_models_are_priced(self):
+        # Qwen (Alibaba) fallback-provider models must price honestly like Kimi's, not
+        # read as "unknown" the moment someone swaps COUNCIL_MODEL to a Qwen slug.
+        m = CostMeter()
+        # qwen3-coder = 300,000 µUSD/M in · 1,000,000 µUSD/M out
+        m.record("openrouter", "qwen/qwen3-coder", 1_000_000, 500_000)
+        self.assertEqual(m.total_micro_usd(), 300_000 + 500_000)
+        self.assertEqual(m.unpriced_models, set())
+
+    def test_qwen_free_slug_would_still_be_honest_zero_if_one_existed(self):
+        # No ':free' Qwen slug exists on OpenRouter as of this snapshot (verified against
+        # the live model list) — but the generic ':free' suffix rule already covers one
+        # the moment it does, same as any other vendor's free tier.
+        m = CostMeter()
+        m.record("openrouter", "qwen/qwen3-30b-a3b:free", 5000, 5000)
+        self.assertEqual(m.total_micro_usd(), 0)
+        self.assertEqual(m.unpriced_models, set())
+
 
 class TestMissingAndBadUsage(unittest.TestCase):
     def test_missing_usage_counted_and_safe(self):

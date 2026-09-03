@@ -44,6 +44,14 @@ _LIST_PRICES: dict[str, tuple[int, int]] = {
     "moonshotai/kimi-k2-thinking": (  600_000,  2_500_000),
     "moonshotai/kimi-k2-0905":     (  600_000,  2_500_000),
     "moonshotai/kimi-k2":          (  570_000,  2_300_000),
+    # Qwen line (Alibaba) — OpenRouter public pricing, snapshot 2026-09
+    # https://openrouter.ai/api/v1/models (no ':free' Qwen slug exists as of this snapshot;
+    # every current Qwen model on OpenRouter is a paid model).
+    "qwen/qwen3.8-max":            (2_000_000,  6_000_000),
+    "qwen/qwen3-max":              (  780_000,  3_900_000),
+    "qwen/qwen3-coder":            (  300_000,  1_000_000),
+    "qwen/qwen-2.5-72b-instruct":  (  360_000,    400_000),
+    "qwen/qwen3-30b-a3b":          (  120_000,    500_000),
     # Anthropic — the DEFAULT council model (.env.example COUNCIL_MODEL / CONSENSUS_PRIMARY),
     # so the common path prices honestly instead of reading a fake $0. Standard API list price
     # $1/M in · $5/M out, snapshot 2026-07 (anthropic.com/pricing; corroborated). Batch/cache
