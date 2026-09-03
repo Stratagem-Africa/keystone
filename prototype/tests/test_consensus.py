@@ -174,6 +174,10 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
             "cerebras": ("CEREBRAS_API_KEY", "llama-3.3-70b"),
             "xai": ("XAI_API_KEY", "grok-3"),
             "github": ("GITHUB_MODELS_TOKEN", "openai/gpt-4.1"),
+            # nvidia is $0-to-start (no card) but a finite trial-credit pool, not an
+            # unlimited-forever tier like the others above — same build/fail-closed
+            # mechanics though, so it belongs in this registry test.
+            "nvidia": ("NVIDIA_API_KEY", "moonshotai/kimi-k3"),
         }
         env = {key_env: "x" for key_env, _ in keyed.values()}
         with mock.patch.dict("os.environ", env, clear=False):

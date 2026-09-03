@@ -189,7 +189,7 @@ def make_council(provider: str | None = None, model: str | None = None,
     if provider not in known_providers():
         raise ValueError(
             f"Unknown COUNCIL_PROVIDER={provider!r}. Use one of: stub | consensus | claude | "
-            "openai | openrouter | gemini | groq | cerebras | xai | github | ollama."
+            "openai | openrouter | gemini | groq | cerebras | xai | github | nvidia | ollama."
         )
     council_model = model or os.getenv("COUNCIL_MODEL")
     if not council_model:
