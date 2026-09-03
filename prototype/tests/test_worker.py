@@ -11,6 +11,7 @@ from api import jobs
 from api.jobs import create_job, get_job, update_job
 from api.worker import _make_meter, run_pipeline
 from auth_test_helpers import make_test_token, patch_jwks, set_test_supabase_url
+from keystone.cost_meter import CostMeter
 
 client = TestClient(app)
 
@@ -99,11 +100,21 @@ class TestWorker(unittest.TestCase):
     def test_make_meter_treats_unparseable_cap_as_uncapped(self):
         # float("inf") parses fine, but int(inf) raises OverflowError (not ValueError) --
         # a bare `except ValueError` would let that escape and crash the job. Confirms the
-        # broadened except degrades to uncapped, same as a non-numeric string already does.
+        # broadened except degrades to an UNCAPPED meter (never None -- see next test),
+        # same as a non-numeric string already does.
         with mock.patch.dict("os.environ", {"LLM_MAX_SPEND_USD": "inf"}, clear=False):
-            self.assertIsNone(_make_meter())
+            self.assertIsNone(_make_meter().max_micro_usd)
         with mock.patch.dict("os.environ", {"LLM_MAX_SPEND_USD": "not-a-number"}, clear=False):
-            self.assertIsNone(_make_meter())
+            self.assertIsNone(_make_meter().max_micro_usd)
+
+    def test_make_meter_always_returns_a_real_meter(self):
+        # _make_meter() must never return None -- run_pipeline logs meter.summary() in
+        # both its success and error paths, so a None meter (the pre-fix behavior when
+        # LLM_MAX_SPEND_USD was unset) would crash every job with an AttributeError.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            meter = _make_meter()
+        self.assertIsInstance(meter, CostMeter)
+        self.assertIsNone(meter.max_micro_usd)   # uncapped, not absent
 
     def test_pipeline_error_is_scrubbed(self):
         # error messages from the real ingestor can contain raw LLM output with secrets
