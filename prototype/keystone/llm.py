@@ -117,7 +117,10 @@ class OpenAICompatibleLLM:
             "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        # Explicit User-Agent: urllib's default ("Python-urllib/X.Y") gets flagged as a bot
+        # signature by Cloudflare (and similar WAFs) fronting some providers — confirmed on
+        # Groq, which 403s ("error code: 1010") the default UA but accepts any custom one.
+        headers = {"Content-Type": "application/json", "User-Agent": "keystone-llm/1.0"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"   # never logged
         req = urllib.request.Request(f"{self._base_url}/chat/completions", data=body,
