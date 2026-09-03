@@ -78,7 +78,7 @@ class TestFactory(unittest.TestCase):
         # keystone.llm.known_providers() builds with an explicit model, via the same
         # (provider-agnostic despite the name) ClaudeIngestor engine class.
         self.assertIsInstance(
-            make_ingestor("openrouter", model="moonshotai/kimi-k2:free", client=FakeLLM()),
+            make_ingestor("groq", model="qwen/qwen3.6-27b", client=FakeLLM()),
             ClaudeIngestor,
         )
 
