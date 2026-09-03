@@ -479,17 +479,36 @@ class ClaudeIngestor:
 def make_ingestor(provider: str | None = None, model: str | None = None,
                   *, client: LLM | None = None, meter=None) -> Ingestor:
     """Build the configured ingestor. Defaults to the deterministic stub (no key, $0).
-    Reads INGEST_PROVIDER (stub|claude) and INGEST_MODEL from the env when not passed.
-    The claude provider is imported via the shared lazy LLM transport. `meter` is an
-    optional CostMeter (keystone.cost_meter), threaded through the same way
-    `make_council` does — so ingestion spend is tracked/budget-capped, not just council."""
+    Reads INGEST_PROVIDER and INGEST_MODEL from the env when not passed.
+
+    Provider-agnostic (ADR-010, mirroring `make_council`): INGEST_PROVIDER may be
+    `stub`, `claude`/`anthropic` (SDK, keeps the built-in default model), or any other
+    provider in `keystone.llm.known_providers()` (openai | openrouter | gemini | groq |
+    cerebras | xai | github | ollama), built via the shared `LLM` transport. Every
+    non-claude provider requires an explicit INGEST_MODEL — there is no sensible
+    cross-vendor default. `meter` is an optional CostMeter (keystone.cost_meter),
+    threaded through the same way `make_council` does — so ingestion spend is
+    tracked/budget-capped, not just council."""
     provider = (provider or os.getenv("INGEST_PROVIDER", "stub")).strip().lower()
     if provider == "stub":
         return DeterministicStubIngestor()
-    if provider == "claude":
+    if provider in ("claude", "anthropic"):
         return ClaudeIngestor(model=model or os.getenv("INGEST_MODEL", DEFAULT_INGEST_MODEL),
                               client=client, meter=meter)
-    raise ValueError(f"Unknown INGEST_PROVIDER={provider!r}. Use 'stub' or 'claude'.")
+    from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
+    if provider not in known_providers():
+        raise ValueError(
+            f"Unknown INGEST_PROVIDER={provider!r}. Use one of: stub | claude | "
+            "openai | openrouter | gemini | groq | cerebras | xai | github | ollama."
+        )
+    ingest_model = model or os.getenv("INGEST_MODEL")
+    if not ingest_model:
+        raise ValueError(
+            f"INGEST_PROVIDER={provider!r} needs an explicit model — set INGEST_MODEL "
+            "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
+        )
+    return ClaudeIngestor(model=ingest_model, meter=meter,
+                          client=client if client is not None else make_llm(provider, ingest_model, meter=meter))
 
 
 def ingest_corpus(sources: list[Source], provider: str | None = None, model: str | None = None,
