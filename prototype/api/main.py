@@ -22,8 +22,8 @@ from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
-from keystone.arch_map import build_arch_map
-from keystone.generate import generate_architecture, reference_catalogue
+from keystone.arch_map import build_arch_map, render_html
+from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
 from api.worker import run_pipeline
@@ -147,28 +147,42 @@ def simulate_topology(req: SimulateRequest) -> dict:
 class GenerateRequest(BaseModel):
     """A one-line intent ("a platform like Twitter") to turn into a deep architecture."""
     intent: str = Field(..., min_length=1, max_length=2000)
-    system_rps: float | None = Field(None, gt=0, le=10_000_000)
+    render: bool = False   # also return a self-contained interactive HTML map (for the frontend studio)
 
 
 @app.post("/generate")
 def generate_from_intent(req: GenerateRequest) -> dict:
     """Intent → a DEEP, layered architecture + the engine's verdict + the interactive map.
 
-    STATELESS pure compute, same posture as /simulate (holds no user data, writes nothing, not
-    auth-gated). Offline default: the intent is matched to the closest deep REFERENCE architecture
-    (the blueprint catalogue), so this works today at $0 with no key. When the LLM ingestion layer is
-    activated (INGEST_PROVIDER, a manual trigger) it DESIGNS the architecture from any intent instead.
+    STATELESS pure compute, same posture as /simulate (holds no user data, writes nothing). This
+    surface is PUBLIC (not auth-gated), so it is pinned to the OFFLINE reference-architecture path
+    (`provider="stub"`): it stays $0 and NEVER reaches a live LLM, even after INGEST_PROVIDER is
+    activated. That closes an otherwise-latent harm-floor hole — an anonymous caller must never be able
+    to drive unmetered LLM spend (the metered/budget-capped LLM *design* path stays behind auth: see
+    /intent, /design). The offline library still returns a deep, layered architecture for common
+    intents; `matched` tells the client which reference was used (null = no match → generic fallback).
+
     Prime directive intact: generation builds INPUTS only; `simulate()` is the sole source of numbers.
-    Fail-closed: a bad/empty intent or an invalid generated model yields a clean 400, never a 500.
+    Fail-closed: any bad intent / invalid model / engine error yields a clean 400, never a 500.
+
+    With `render: true` the response also carries `html` — the SAME self-contained interactive map
+    `render_html` produces (XSS-hardened: the data island is `<>&`-neutralised, the title escaped), so
+    the frontend can embed it verbatim in a sandboxed iframe rather than re-implementing the renderer.
     """
     try:
-        model = generate_architecture(req.intent)
-    except (IngestError, ValueError, KeyError) as e:
+        model = generate_architecture(req.intent, provider="stub")  # public surface: offline, $0, no LLM
+        sim = simulate(model)                                        # simulate() is the sole number source
+        arch = build_arch_map(model, sim)
+        # Render BEFORE attaching catalogue/matched so the embedded JSON island stays the clean arch map
+        # (build the map once — no redundant recompute on the hot path).
+        html = render_html(arch, title=req.intent[:80]) if req.render else None
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
         raise HTTPException(status_code=400, detail=f"could not generate architecture: {e}")
-    sim = simulate(model)
-    arch = build_arch_map(model, sim)
-    # A hint the frontend can show when nothing matched offline and the LLM is not yet activated.
-    arch["catalogue"] = reference_catalogue()
+    ref = match_reference(req.intent)
+    arch["matched"] = ref[1] if ref else None       # which reference architecture (null = generic fallback)
+    arch["catalogue"] = reference_catalogue()        # the offline options, for a "try one of these" hint
+    if html is not None:
+        arch["html"] = html
     return _sanitize(arch)
 
 # Uploaded documents are combined with any typed text and run through the harm-floor

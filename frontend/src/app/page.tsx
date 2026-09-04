@@ -126,13 +126,21 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Primary CTA lockup — AFTER the flaws (docs/09 §11.4: flaws above the CTA). */}
+      {/* Primary CTA lockup — AFTER the flaws (docs/09 §11.4: flaws above the CTA). The studio leads:
+          type an intent, see a deep interactive architecture instantly (no sign-in). The full council
+          design (auth-gated ingestion → ADRs → report) is the deeper, secondary path. */}
       <section className="bg-slate-ink text-paper px-6 py-20 flex flex-col items-center text-center gap-5">
         <Link
-          href="/design"
+          href="/studio"
           className="font-sans text-label font-medium px-6 py-3 rounded-full bg-paper text-slate-ink transition-all ease-settle duration-ui hover:bg-mist active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-ink"
         >
-          Describe what you&apos;re building →
+          Describe it. See it built. →
+        </Link>
+        <Link
+          href="/design"
+          className="font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-ink"
+        >
+          or run the full council design →
         </Link>
         <p className="font-mono text-provenance text-ink-muted">
           We&apos;ll tell you when we&apos;re guessing.
