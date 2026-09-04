@@ -1,13 +1,14 @@
 """Phase-1 demo: intent (a concept note) -> ingest -> council -> simulate -> report.
 
 Shows the full loop from prose to a validated-design report. Defaults to $0/offline
-(stub ingestor + stub council); set INGEST_PROVIDER=claude and/or COUNCIL_PROVIDER=claude
-(+ ANTHROPIC_API_KEY) to activate the real LLM layers.
+(stub ingestor + stub council); set INGEST_PROVIDER and/or COUNCIL_PROVIDER to any
+provider keystone.llm knows about (claude, nvidia, groq, ...) + the matching API key
+to activate the real LLM layers.
 
 Run from prototype/:  python3 run_from_note.py
   or with your own prompt:  python3 run_from_note.py "a food delivery app for 500 users"
-  (a CLI prompt only changes the model when INGEST_PROVIDER=claude — the default stub
-  ingestor never reads the text, it always returns the same canned placeholder topology)
+  (a CLI prompt only changes the model when INGEST_PROVIDER is non-stub — the default
+  stub ingestor never reads the text, it always returns the same canned placeholder topology)
 """
 from __future__ import annotations
 
@@ -51,8 +52,8 @@ def main() -> None:
     raw = " ".join(sys.argv[1:]).strip()   # CLI prompt if given, else the built-in note
     text = raw or NOTE
     name = "CLI intent" if raw else "URL Shortener (from note)"
-    if raw and os.environ.get("INGEST_PROVIDER", "stub") != "claude":
-        print("NOTE: INGEST_PROVIDER is not 'claude' — your CLI prompt will be ignored; "
+    if raw and os.environ.get("INGEST_PROVIDER", "stub") == "stub":
+        print("NOTE: INGEST_PROVIDER is 'stub' — your CLI prompt will be ignored; "
               "the stub ingestor always returns the same placeholder topology.")
     meter = CostMeter(max_micro_usd=_budget_cap())  # shared ingest+council spend cap, if configured
     result = make_ingestor(meter=meter).ingest(Source(text=text, name=name))
