@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Keystone — Interactive Canvas (prototype)</title>
+<style>
+  :root{
+    --paper:#070a16; --panel:rgba(16,22,46,.72); --ink:#e8ecff; --muted:#95a0c8;
+    --line:rgba(122,142,222,.18); --steel:rgba(150,170,235,.42); --blue:#7dd3fc; --acc:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  #stage{position:fixed;inset:0;cursor:grab;overflow:hidden;
+    background:
+      radial-gradient(1200px 800px at 12% -12%,#16204a 0%,transparent 55%),
+      radial-gradient(1000px 700px at 100% 0%,#241a48 0%,transparent 50%),
+      linear-gradient(180deg,#0b1024,#070a16)}
+  #stage.grabbing{cursor:grabbing}
+  #grid{position:absolute;inset:-3000px;pointer-events:none;
+    background-image:linear-gradient(rgba(120,140,220,.05) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(120,140,220,.05) 1px,transparent 1px);background-size:44px 44px}
+  #viewport{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+  svg#wires{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+  .glass{background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+
+  #head{position:fixed;left:16px;top:14px;z-index:20;padding:12px 16px;max-width:min(560px,54vw)}
+  #head h1{margin:0;font-size:18px;font-weight:750;letter-spacing:.2px;
+    background:linear-gradient(90deg,#a5b4fc,#7dd3fc,#6ee7b7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #head .sub{color:var(--muted);font-size:12px;margin-top:4px;line-height:1.45}
+
+  /* palette */
+  #palette{position:fixed;right:16px;top:14px;bottom:14px;z-index:20;width:212px;padding:13px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+  #palette .lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7683ac;font-weight:800;margin:2px 0 4px}
+  .pal{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;cursor:grab;
+    border:1px solid var(--line);background:rgba(255,255,255,.03);transition:.13s;user-select:none}
+  .pal:hover{border-color:var(--steel);background:rgba(90,120,255,.14);transform:translateX(-2px)}
+  .pal .ic{font-size:15px;width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:8px;
+    background:rgba(125,211,252,.1);box-shadow:inset 0 0 0 1px rgba(125,211,252,.18)}
+  .pal .nm{font-size:12px;font-weight:600}
+  .pal .rl{font-size:9.5px;color:var(--muted)}
+
+  /* nodes */
+  .node{position:absolute;width:172px;border-radius:12px;padding:9px 11px;cursor:grab;
+    background:linear-gradient(180deg,rgba(26,34,66,.96),rgba(14,20,44,.96));
+    border:1px solid rgba(150,170,240,.16);box-shadow:0 6px 18px rgba(0,0,0,.42);transition:box-shadow .13s,border-color .13s}
+  .node:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--acc);border-radius:12px 0 0 12px}
+  .node.dragging{cursor:grabbing;box-shadow:0 14px 40px rgba(0,0,0,.6),0 0 0 1px var(--blue)}
+  .node.sel{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue),0 10px 30px rgba(0,0,0,.5)}
+  .node.linksrc{box-shadow:0 0 0 2px var(--acc),0 0 26px -4px var(--acc)}
+  .node .top{display:flex;align-items:center;gap:8px}
+  .node .ic{font-size:14px;width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:8px;
+    background:rgba(125,211,252,.1);box-shadow:inset 0 0 0 1px rgba(125,211,252,.18)}
+  .node .nm{font-size:12.5px;font-weight:700;line-height:1.15;outline:none}
+  .node .nm[contenteditable]:focus{border-bottom:1px dashed var(--steel)}
+  .node .rl{font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.3}
+  .node .port{position:absolute;right:-7px;top:50%;transform:translateY(-50%);width:14px;height:14px;border-radius:50%;
+    background:var(--blue);border:2px solid #0b1024;cursor:crosshair;opacity:.85}
+  .node .port:hover{transform:translateY(-50%) scale(1.25);opacity:1}
+  .node .del{position:absolute;right:6px;top:5px;font-size:12px;color:var(--muted);cursor:pointer;width:18px;height:18px;
+    display:grid;place-items:center;border-radius:6px;opacity:0;transition:.12s}
+  .node:hover .del{opacity:1}
+  .node .del:hover{background:rgba(248,113,113,.2);color:#fca5a5}
+  path.wire{fill:none;stroke:var(--steel);stroke-width:2;stroke-linecap:round;transition:stroke .12s}
+  path.wire.hot{stroke:var(--blue);stroke-width:2.6}
+
+  /* toolbar */
+  #tools{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;display:flex;gap:6px;padding:8px}
+  .tb{font-size:12px;font-weight:600;padding:8px 13px;border-radius:9px;cursor:pointer;color:var(--ink);
+    border:1px solid var(--line);background:rgba(255,255,255,.04);transition:.13s}
+  .tb:hover{border-color:var(--steel);background:rgba(90,120,255,.16)}
+  .tb.primary{background:linear-gradient(90deg,rgba(80,120,255,.34),rgba(110,80,255,.28));border-color:rgba(150,170,255,.6)}
+  #result{position:fixed;left:16px;top:118px;z-index:20;width:300px;padding:13px 15px}
+  #result .rtitle{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--blue);font-weight:800;margin-bottom:8px}
+  #result .rrow{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--line)}
+  #result .rrow b{font-variant-numeric:tabular-nums;text-align:right}
+  #result .rnote{font-size:10px;color:var(--muted);margin-top:8px;line-height:1.45}
+  #hint{position:fixed;left:16px;bottom:16px;z-index:8;color:#6b76a0;font-size:11px;max-width:40vw;line-height:1.5}
+  .credit{position:fixed;right:238px;bottom:16px;z-index:8;color:#5f6b93;font-size:10.5px}
+</style>
+</head>
+<body>
+<div id="stage"><div id="grid"></div><div id="viewport"><svg id="wires"></svg></div></div>
+
+<div id="head" class="glass">
+  <h1>Interactive Canvas <span style="font-size:11px;color:#7683ac;font-weight:600">· prototype</span></h1>
+  <div class="sub">Drag to move · drag the blue port to connect · drag a palette item onto the canvas to add · double-click a name to rename · ✕ to delete. Seeded with a URL-shortener design.</div>
+</div>
+
+<div id="palette" class="glass">
+  <div class="lbl">Add a component</div>
+  <div id="palList"></div>
+</div>
+
+<div id="tools" class="glass">
+  <button class="tb" id="tFit">Fit</button>
+  <button class="tb" id="tIn">＋</button>
+  <button class="tb" id="tOut">－</button>
+  <span style="align-self:center;font-size:11px;color:var(--muted);padding:0 2px 0 8px">Load</span>
+  <button class="tb" id="rpsDown">−</button>
+  <button class="tb" id="rps" style="min-width:70px">10k rps</button>
+  <button class="tb" id="rpsUp">＋</button>
+  <button class="tb primary" id="tSim" title="POSTs the topology to Keystone's deterministic engine">▶ Simulate</button>
+</div>
+<div id="result" class="glass" style="display:none"></div>
+<div id="hint">Build a topology, then hit <b>Simulate</b> — it POSTs to Keystone's engine (<code>/simulate</code>) and lands the real verdict here; node colour = utilisation.</div>
+<div class="credit">Keystone · canvas prototype · engine-connected</div>
+
+<script>
+const KINDS = [
+  {kind:'client', icon:'👤', name:'Users', role:'Your users & browsers'},
+  {kind:'cdn', icon:'🌐', name:'CDN', role:'Edge static content'},
+  {kind:'load_balancer', icon:'⚖️', name:'Load Balancer', role:'Spreads traffic'},
+  {kind:'api_gateway', icon:'🚪', name:'API Gateway', role:'Front door / routing'},
+  {kind:'app_server', icon:'⚙️', name:'App Server', role:'Runs your app logic'},
+  {kind:'cache', icon:'⚡', name:'Cache', role:'Fast in-memory reads'},
+  {kind:'sql_db', icon:'🗄️', name:'Database', role:'Durable system of record'},
+  {kind:'replica', icon:'📑', name:'Read Replica', role:'Shares read load'},
+  {kind:'queue', icon:'📨', name:'Queue', role:'Background work'},
+  {kind:'object_store', icon:'🪣', name:'Object Store', role:'Files & blobs'},
+  {kind:'external_api', icon:'🔌', name:'External API', role:'Third-party dependency'},
+];
+const KI = Object.fromEntries(KINDS.map(k=>[k.kind,k]));
+let nodes = [
+  {id:'client', kind:'client', name:'Users', x:80,  y:260},
+  {id:'lb',     kind:'load_balancer', name:'Load Balancer', x:320, y:260},
+  {id:'app',    kind:'app_server', name:'App Server ×12', instances:12, x:560, y:260},
+  {id:'cache',  kind:'cache', name:'Redis Cache', x:820, y:150},
+  {id:'db',     kind:'sql_db', name:'PostgreSQL', x:820, y:370},
+];
+let edges = [['client','lb'],['lb','app'],['app','cache'],['app','db']];
+let seq = 1;
+
+const $=s=>document.querySelector(s);
+const stage=$('#stage'), viewport=$('#viewport'), wires=$('#wires');
+const nodeEls={};
+let sel=null, linkSrc=null;
+
+// ---- palette (drag to add) ----
+const palList=$('#palList');
+KINDS.forEach(k=>{
+  const d=document.createElement('div'); d.className='pal'; d.draggable=true;
+  d.innerHTML=`<span class="ic">${k.icon}</span><span><div class="nm">${k.name}</div><div class="rl">${k.role}</div></span>`;
+  d.addEventListener('dragstart',e=>e.dataTransfer.setData('kind',k.kind));
+  d.addEventListener('click',()=>addNode(k.kind, (-tx+stage.clientWidth/2-260)/sc, (-ty+stage.clientHeight/2-40)/sc));
+  palList.appendChild(d);
+});
+stage.addEventListener('dragover',e=>e.preventDefault());
+stage.addEventListener('drop',e=>{e.preventDefault();const k=e.dataTransfer.getData('kind');if(k){const r=stage.getBoundingClientRect();addNode(k,(e.clientX-r.left-tx)/sc-86,(e.clientY-r.top-ty)/sc-30);}});
+
+function addNode(kind,x,y){const k=KI[kind];const id=kind+'_'+(seq++);nodes.push({id,kind,name:k.name,x:Math.round(x),y:Math.round(y)});render();}
+function removeNode(id){nodes=nodes.filter(n=>n.id!==id);edges=edges.filter(([a,b])=>a!==id&&b!==id);if(sel===id)sel=null;render();}
+
+// ---- render ----
+function render(){
+  // nodes
+  const seen=new Set();
+  nodes.forEach(n=>{seen.add(n.id);let d=nodeEls[n.id];
+    if(!d){d=document.createElement('div');d.className='node';d.dataset.id=n.id;
+      const k=KI[n.kind];
+      d.innerHTML=`<div class="del" title="delete">✕</div>
+        <div class="top"><span class="ic">${k.icon}</span><div class="nm" title="double-click to rename"></div></div>
+        <div class="rl">${k.role}</div><div class="port" title="drag to connect"></div>`;
+      d.querySelector('.nm').textContent=n.name;
+      viewport.appendChild(d);nodeEls[n.id]=d;wireNode(d,n);}
+    d.style.left=n.x+'px';d.style.top=n.y+'px';
+    d.classList.toggle('sel',sel===n.id);d.classList.toggle('linksrc',linkSrc===n.id);
+  });
+  Object.keys(nodeEls).forEach(id=>{if(!seen.has(id)){nodeEls[id].remove();delete nodeEls[id];}});
+  renderWires();rebuildParticles();
+}
+function nodeCenter(n){return {x:n.x+86,y:n.y+34};}
+// ---- live animated traffic: coloured packets flowing along every wire ----
+let health={};                              // node id -> 'ok'|'hot'|'saturated' after a Simulate
+let parts=[];                               // {a,b,c(circle),ph}
+const HCOL={ok:'#4ade80',hot:'#fb923c',saturated:'#f87171'};
+function rebuildParticles(){
+  parts.forEach(p=>p.c.remove()); parts=[];
+  edges.forEach(([a,b])=>{ if(!nodes.find(n=>n.id===a)||!nodes.find(n=>n.id===b))return;
+    for(let k=0;k<2;k++){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('r','3.4');c.setAttribute('class','flow');wires.appendChild(c);
+      parts.push({a,b,c,ph:k*0.5});}});
+}
+function bezPt(p1,p2,t){const dx=Math.max(40,Math.abs(p2.x-p1.x)*.5);const u=1-t;
+  const c1={x:p1.x+dx,y:p1.y},c2={x:p2.x-dx,y:p2.y};
+  return {x:u*u*u*p1.x+3*u*u*t*c1.x+3*u*t*t*c2.x+t*t*t*p2.x,
+          y:u*u*u*p1.y+3*u*u*t*c1.y+3*u*t*t*c2.y+t*t*t*p2.y};}
+let _t0=null;
+function traffic(ts){ if(_t0==null)_t0=ts; const dt=(ts-_t0)/1000;
+  parts.forEach(p=>{const na=nodes.find(n=>n.id===p.a),nb=nodes.find(n=>n.id===p.b);if(!na||!nb){p.c.style.opacity=0;return;}
+    const t=((dt*0.45)+p.ph)%1; const pt=bezPt(nodeCenter(na),nodeCenter(nb),t);
+    p.c.setAttribute('cx',pt.x);p.c.setAttribute('cy',pt.y);
+    p.c.style.fill=HCOL[health[p.b]]||HCOL[health[p.a]]||'#7dd3fc';p.c.style.opacity=.95;});
+  requestAnimationFrame(traffic); }
+requestAnimationFrame(traffic);
+function renderWires(){
+  wires.querySelectorAll('path.wire').forEach(p=>p.remove());   // keep flow particles alive across drags
+  edges.forEach(([a,b])=>{const na=nodes.find(n=>n.id===a),nb=nodes.find(n=>n.id===b);if(!na||!nb)return;
+    const p1=nodeCenter(na),p2=nodeCenter(nb);const dx=Math.max(40,Math.abs(p2.x-p1.x)*.5);
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',`M ${p1.x} ${p1.y} C ${p1.x+dx} ${p1.y}, ${p2.x-dx} ${p2.y}, ${p2.x} ${p2.y}`);
+    path.setAttribute('class','wire');
+    path.addEventListener('dblclick',()=>{edges=edges.filter(e=>!(e[0]===a&&e[1]===b));renderWires();});
+    wires.appendChild(path);});
+}
+
+// ---- per-node interactions: drag, rename, delete, connect ----
+function wireNode(d,n){
+  const nm=d.querySelector('.nm');
+  d.querySelector('.del').addEventListener('mousedown',e=>{e.stopPropagation();});
+  d.querySelector('.del').addEventListener('click',e=>{e.stopPropagation();removeNode(n.id);});
+  nm.addEventListener('dblclick',e=>{e.stopPropagation();nm.contentEditable=true;nm.focus();document.execCommand&&document.getSelection().selectAllChildren(nm);});
+  nm.addEventListener('blur',()=>{nm.contentEditable=false;n.name=nm.textContent.trim()||KI[n.kind].name;nm.textContent=n.name;});
+  nm.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();nm.blur();}});
+  // connect: drag from the port
+  d.querySelector('.port').addEventListener('mousedown',e=>{e.stopPropagation();e.preventDefault();startLink(n.id,e);});
+  // drag the node
+  d.addEventListener('mousedown',e=>{if(e.target.classList.contains('port')||e.target.classList.contains('del')||nm.isContentEditable)return;
+    e.stopPropagation();sel=n.id;render();
+    const sx=e.clientX,sy=e.clientY,ox=n.x,oy=n.y;d.classList.add('dragging');
+    function mv(ev){n.x=ox+(ev.clientX-sx)/sc;n.y=oy+(ev.clientY-sy)/sc;d.style.left=n.x+'px';d.style.top=n.y+'px';renderWires();}
+    function up(){d.classList.remove('dragging');window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);}
+    window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);});
+}
+// linking with a temporary wire that follows the cursor
+let tmpWire=null;
+function startLink(srcId,e){linkSrc=srcId;render();
+  tmpWire=document.createElementNS('http://www.w3.org/2000/svg','path');tmpWire.setAttribute('class','wire hot');wires.appendChild(tmpWire);
+  const src=nodes.find(n=>n.id===srcId);
+  function mv(ev){const r=stage.getBoundingClientRect();const p1=nodeCenter(src);const x=(ev.clientX-r.left-tx)/sc,y=(ev.clientY-r.top-ty)/sc;
+    tmpWire.setAttribute('d',`M ${p1.x} ${p1.y} C ${p1.x+60} ${p1.y}, ${x-60} ${y}, ${x} ${y}`);}
+  function up(ev){window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);
+    const tgt=ev.target.closest('.node');if(tgt&&tgt.dataset.id!==srcId){const t=tgt.dataset.id;
+      if(!edges.some(([a,b])=>a===srcId&&b===t))edges.push([srcId,t]);}
+    linkSrc=null;if(tmpWire){tmpWire.remove();tmpWire=null;}render();}
+  window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);}
+
+// ---- delete key ----
+window.addEventListener('keydown',e=>{if((e.key==='Delete'||e.key==='Backspace')&&sel&&!document.activeElement.isContentEditable){removeNode(sel);}});
+
+// ---- pan / zoom ----
+let sc=1,tx=40,ty=40,drag=null;
+function apply(){viewport.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`;}
+stage.addEventListener('mousedown',e=>{if(e.target.closest('.node,#palette,#tools,#head'))return;sel=null;render();drag={x:e.clientX-tx,y:e.clientY-ty};stage.classList.add('grabbing');});
+window.addEventListener('mousemove',e=>{if(!drag)return;tx=e.clientX-drag.x;ty=e.clientY-drag.y;apply();});
+window.addEventListener('mouseup',()=>{drag=null;stage.classList.remove('grabbing');});
+stage.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:1/1.1;const r=stage.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;tx=mx-(mx-tx)*f;ty=my-(my-ty)*f;sc=Math.max(.35,Math.min(2.4,sc*f));apply();},{passive:false});
+$('#tIn').onclick=()=>{sc=Math.min(2.4,sc*1.15);apply();};
+$('#tOut').onclick=()=>{sc=Math.max(.35,sc/1.15);apply();};
+$('#tFit').onclick=()=>{sc=1;tx=40;ty=40;apply();};
+let sysRps=10000;
+const API='http://localhost:8000';
+function fmtRps(v){return v>=1000?(v/1000).toFixed(v%1000?1:0)+'k':(''+v);}
+function setRps(v){sysRps=Math.max(100,Math.min(2000000,Math.round(v)));$('#rps').textContent=fmtRps(sysRps)+' rps';if($('#result').style.display==='block')runSim();}
+async function runSim(){const t=$('#tSim');t.textContent='▶ Simulating…';
+  const topo={name:'Canvas design',system_rps:sysRps,
+    nodes:nodes.map(n=>({id:n.id,kind:n.kind,name:n.name,instances:n.instances||1})),
+    edges:edges.map(([a,b])=>[a,b])};
+  try{
+    const r=await fetch(API+'/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(topo)});
+    if(!r.ok){const e=await r.json().catch(()=>({detail:'HTTP '+r.status}));throw new Error(e.detail||('HTTP '+r.status));}
+    renderVerdict(await r.json());
+  }catch(err){const R=$('#result');R.style.display='block';R.innerHTML='<div class="rtitle" style="color:#fca5a5">Could not simulate</div><div class="rrow">'+err.message+'</div>';}
+  t.textContent='▶ Simulate';}
+$('#tSim').onclick=runSim;
+$('#rpsUp').onclick=()=>setRps(sysRps*1.5);
+$('#rpsDown').onclick=()=>setRps(sysRps/1.5);
+function row(k,val){return '<div class="rrow"><span>'+k+'</span><b>'+val+'</b></div>';}
+function renderVerdict(d){const v=d.verdict||{};const byId={};health={};(d.nodes||[]).forEach(n=>{byId[n.id]=n;health[n.id]=n.status;});
+  nodes.forEach(n=>{const el2=nodeEls[n.id];if(!el2)return;const rn=byId[n.id];const u=rn?rn.utilization:null;
+    el2.style.setProperty('--acc', u==null?'#a78bfa':(u>=1?'#f87171':u>=.85?'#fb923c':'#4ade80'));});
+  const R=$('#result');R.style.display='block';
+  R.innerHTML='<div class="rtitle">Engine verdict</div>'
+    +row('Bottleneck',(v.bottleneck_name||'—')+' ('+Math.round((v.bottleneck_utilization||0)*100)+'%)')
+    +row('Max safe load','~'+Math.round(v.breakpoint_rps_safe||0).toLocaleString()+' req/s')
+    +row('Est. monthly cost','$'+((v.monthly_cost_cents||0)/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}))
+    +row('Single points of failure',(v.spofs&&v.spofs.length)?v.spofs.join(', '):'none')
+    +'<div class="rnote">Every number from Keystone’s deterministic engine · '+((d.meta&&d.meta.accuracy_level)||'L0')+' · node colour = utilisation</div>';}
+
+render();apply();
+</script>
+</body>
+</html>
