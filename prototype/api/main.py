@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
 from keystone.simulation import simulate
-from keystone.ingestion import scan_and_redact_secrets
+from keystone.ingestion import scan_and_redact_secrets, IngestError
+from keystone.topology import build_model_from_topology
+from keystone.arch_map import build_arch_map
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
 from api.worker import run_pipeline
@@ -112,6 +114,33 @@ def design(req: DesignRequest, user: AuthUser = Depends(get_current_user)) -> di
         "simulation": dataclasses.asdict(sim_result),
         "adrs": [dataclasses.asdict(adr) for adr in adrs],
     })
+
+
+class SimulateRequest(BaseModel):
+    """A canvas topology: typed nodes + edges. Capacities default (grounded/seed) unless a node overrides."""
+    name: str = "Canvas design"
+    system_rps: float = Field(10_000, gt=0, le=10_000_000)
+    nodes: list[dict] = Field(default_factory=list)
+    edges: list[list[str]] = Field(default_factory=list)
+
+
+@app.post("/simulate")
+def simulate_topology(req: SimulateRequest) -> dict:
+    """Simulate an interactive-canvas topology → the engine's verdict + architecture map.
+
+    STATELESS pure compute: a topology in, engine numbers out. It holds NO per-user data, writes
+    nothing, and touches no secret — so, unlike /design, it is deliberately NOT auth-gated (there is
+    nothing to protect; it's a calculator). Add auth if it ever persists or reads user data.
+    Prime directive intact: `build_model_from_topology` only builds INPUTS; `simulate()` is the sole
+    source of every number. Fail-closed: an invalid topology yields a clean 400, never a 500/crash.
+    """
+    try:
+        model = build_model_from_topology(
+            {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
+    except (IngestError, ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
+    sim = simulate(model)
+    return _sanitize(build_arch_map(model, sim))
 
 # Uploaded documents are combined with any typed text and run through the harm-floor
 # secret scan before storage — consistent with the no-retention ethos already governing
