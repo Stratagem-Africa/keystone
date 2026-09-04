@@ -30,6 +30,14 @@ export function Nav() {
       </Link>
 
       <div className="flex items-center gap-4">
+        {/* Studio — the interactive generation surface (public, no sign-in needed). */}
+        <Link
+          href="/studio"
+          className={`font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
+        >
+          Studio
+        </Link>
+
         {/* Accuracy-ladder badge — climbable, honest status, not a trust-me seal (docs/09 §3.6).
             A native <details> disclosure: keyboard-accessible, no framework state. Neutral hues
             ONLY — green here would read as "certified" and break §11.4. */}
