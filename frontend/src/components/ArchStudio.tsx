@@ -63,9 +63,13 @@ export function ArchStudio() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Stop an in-flight request (and its setState) if the user navigates away mid-generation.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // When the full-screen map opens, move focus to its exit control so keyboard/AT users land in it.
+  useEffect(() => { if (state === "done") closeBtnRef.current?.focus(); }, [state]);
 
   async function generate(text: string) {
     const brief = text.trim();
@@ -195,74 +199,53 @@ export function ArchStudio() {
         </div>
       )}
 
-      {/* Result */}
+      {/* Result — a full-screen takeover so the map is immersive (covers the viewport, not boxed in a
+          panel). A slim Keystone strip on top carries the intent + at-a-glance engine verdict + exit;
+          the map fills everything below and frames itself to the full viewport (renderer fit-on-load). */}
       {state === "done" && result && (
-        <div className="flex flex-col gap-4">
-          {/* Honest no-match notice: nothing matched offline, so this is a generic starting point. */}
-          {result.matched == null && (
-            <div className="border-l-4 border-assumption-amber pl-4 py-1 flex flex-col gap-1">
-              <p className="font-serif text-body text-paper max-w-[62ch]">
-                No exact match for that intent yet — here&apos;s a generic starting point you can refine.
-              </p>
-              {result.catalogue && result.catalogue.length > 0 && (
-                <p className="font-mono text-provenance text-ink-muted">
-                  Keystone designs these in depth today: {result.catalogue.join(" · ")}
-                </p>
-              )}
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-ink">
+          <div className="flex items-center justify-between gap-4 px-4 py-2 border-b border-steel bg-slate-ink">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="font-sans font-semibold text-paper shrink-0">keystone</span>
+              <span className="font-mono text-provenance text-ink-muted truncate">
+                {intent}
+                {result.matched == null && (
+                  <span className="text-assumption-amber"> · generic starting point</span>
+                )}
+              </span>
             </div>
-          )}
-          {result.matched != null && (
-            <p className="font-mono text-provenance text-ink-muted">
-              Matched reference architecture: <span className="text-paper">{result.matched}</span>
-            </p>
-          )}
 
-          {/* Verdict strip — every number here is engine-computed (verdict.*), never derived in the UI. */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Stat label="Bottleneck" value={result.verdict.bottleneck_name ?? "—"}
-                  sub={`${fmtPct(result.verdict.bottleneck_utilization)} utilised`} accent />
-            <Stat label="Safe capacity" value={`${fmtInt(result.verdict.breakpoint_rps_safe)} req/s`}
-                  sub="safe ceiling (85% util)" />
-            <Stat label="Est. cost" value={`${fmtUsd(result.verdict.monthly_cost_cents)}/mo`}
-                  sub="modelled, not billed" />
-            <Stat label="Single points of failure" value={String(result.verdict.spofs?.length ?? 0)}
-                  sub={result.verdict.spofs?.slice(0, 2).join(", ") || "none found"} />
-          </div>
+            {/* Compact engine verdict — the same verdict.* numbers, at a glance (hidden on small screens). */}
+            <div className="hidden lg:flex items-center gap-4 font-mono text-provenance shrink-0">
+              <span className="text-ink-muted">
+                <span className="text-signal-red">◉</span> {result.verdict.bottleneck_name ?? "—"}{" "}
+                {fmtPct(result.verdict.bottleneck_utilization)}
+              </span>
+              <span className="text-ink-muted">{fmtInt(result.verdict.breakpoint_rps_safe)} req/s safe</span>
+              <span className="text-ink-muted">{fmtUsd(result.verdict.monthly_cost_cents)}/mo</span>
+              <span className="text-ink-muted">{result.verdict.spofs?.length ?? 0} SPOF</span>
+              <span className="text-assumption-amber">L0</span>
+            </div>
 
-          <p className="font-mono text-provenance text-ink-muted">
-            {result.nodes.length} components · {result.flows.length} request journeys · engine-computed ·{" "}
-            <span className="text-assumption-amber">L0 · Directional</span> — inputs are assumptions until grounded
-          </p>
-
-          {/* The interactive map — the EXACT self-contained renderer, isolated in a sandboxed iframe
-              (allow-scripts only: the renderer needs no same-origin, no storage, no network). */}
-          <iframe
-            title="Interactive architecture map"
-            srcDoc={result.html}
-            sandbox="allow-scripts"
-            className="w-full h-[80vh] min-h-[560px] rounded-xl border border-steel bg-slate-ink"
-          />
-
-          <div className="flex items-center gap-4">
             <button
+              ref={closeBtnRef}
               onClick={reset}
-              className="font-sans text-label text-ink-muted underline underline-offset-2 rounded-sm hover:text-paper transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
+              className="shrink-0 font-sans text-label font-medium px-4 py-1.5 rounded-full bg-paper text-slate-ink transition-all ease-settle duration-ui hover:bg-mist active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-ink"
             >
-              Try another intent
+              ✕ New design
             </button>
           </div>
+
+          {/* The interactive map — the EXACT self-contained renderer, isolated in a sandboxed iframe
+              (allow-scripts only: no same-origin / storage / network needed). Fills the viewport. */}
+          <iframe
+            title={`Interactive architecture map for: ${intent}`}
+            srcDoc={result.html}
+            sandbox="allow-scripts"
+            className="flex-1 w-full border-0 bg-slate-ink"
+          />
         </div>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
-  return (
-    <div className={`rounded-lg border p-4 flex flex-col gap-1 ${accent ? "border-signal-red/50" : "border-steel"}`}>
-      <span className="font-sans text-provenance uppercase tracking-widest text-ink-muted">{label}</span>
-      <span className="font-mono text-mono-data text-paper leading-tight">{value}</span>
-      {sub && <span className="font-mono text-provenance text-ink-muted">{sub}</span>}
     </div>
   );
 }
