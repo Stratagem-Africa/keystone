@@ -62,9 +62,51 @@ class TestFactory(unittest.TestCase):
     def test_claude_with_injected_client(self):
         self.assertIsInstance(make_ingestor("claude", model="m", client=FakeLLM()), ClaudeIngestor)
 
+    def test_anthropic_alias_with_injected_client(self):
+        self.assertIsInstance(make_ingestor("anthropic", model="m", client=FakeLLM()), ClaudeIngestor)
+
     def test_unknown_provider_raises(self):
+        # An unknown/blank provider fails loudly with a clear ValueError — validated BEFORE the
+        # model check, so it's the same error with or without a model (mirrors make_council).
         with self.assertRaises(ValueError):
-            make_ingestor("openrouter")
+            make_ingestor("bogus", model="m")
+        with self.assertRaises(ValueError):
+            make_ingestor("bogus")   # no model -> still "unknown provider", not "needs a model"
+
+    def test_other_known_provider_with_injected_client_and_model(self):
+        # Provider-agnostic (ADR-010), mirroring make_council: any provider in
+        # keystone.llm.known_providers() builds with an explicit model, via the same
+        # (provider-agnostic despite the name) ClaudeIngestor engine class.
+        self.assertIsInstance(
+            make_ingestor("groq", model="qwen/qwen3.6-27b", client=FakeLLM()),
+            ClaudeIngestor,
+        )
+
+    def test_provider_agnostic_ingestion_with_injected_client(self):
+        # ANY provider drives real ingestion when a client is injected (ADR-010 vendor-neutrality):
+        # gemini/groq/openrouter/ollama all run the same extraction+validation path end-to-end.
+        source = Source(kind="note", name="Test", text="A URL shortener handling 5k rps.")
+        for prov in ("gemini", "groq", "cerebras", "xai", "github", "openrouter", "ollama"):
+            ingestor = make_ingestor(prov, model="some-model", client=FakeLLM())
+            self.assertIsInstance(ingestor, ClaudeIngestor)
+            result = ingestor.ingest(source)
+            self.assertTrue(result.model.components, f"{prov}: no components extracted")
+
+    def test_other_known_provider_without_model_raises(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                make_ingestor("openrouter")   # no cross-vendor default model
+
+    def test_other_known_provider_builds_real_transport_without_injected_client(self):
+        import os
+        from unittest import mock
+        from keystone.llm import OpenAICompatibleLLM
+        with mock.patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://localhost:11434"}, clear=True):
+            ingestor = make_ingestor("ollama", model="qwen2.5:7b")
+        self.assertIsInstance(ingestor, ClaudeIngestor)
+        self.assertIsInstance(ingestor._llm, OpenAICompatibleLLM)
 
 
 class TestStubIngestor(unittest.TestCase):

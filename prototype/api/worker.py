@@ -15,19 +15,22 @@ from api.jobs import update_job  # updates job status as the pipeline progresses
 log = logging.getLogger("keystone.worker")
 
 
-def _make_meter() -> CostMeter | None:
+def _make_meter() -> CostMeter:
     """One CostMeter shared across this job's ingestion + council calls, so
     LLM_MAX_SPEND_USD (if set) is a total cap on the whole job, not two separate budgets.
-    Unset -> None, matching CostMeter's own uncapped default (fully backward compatible;
-    a stub-provider job never touches an LLM at all, so this is a no-op either way)."""
+    Always returns a real (possibly uncapped) meter -- never None -- so usage is tracked
+    (and loggable via .summary()) whether or not a spend cap is configured, matching
+    run_from_note.py's _budget_cap() pattern. A stub-provider job never touches an LLM
+    at all, so an uncapped meter here is still a no-op cost-wise, just not usage-wise
+    (its summary() correctly reports "no live LLM calls")."""
     cap = os.getenv("LLM_MAX_SPEND_USD")
     if not cap:
-        return None
+        return CostMeter()
     try:
         return CostMeter(max_micro_usd=int(float(cap) * 1_000_000))
     except (ValueError, OverflowError):
         log.warning("LLM_MAX_SPEND_USD=%r is not a number; ignoring (uncapped)", cap)
-        return None
+        return CostMeter()
 
 
 def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
@@ -47,12 +50,14 @@ def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
     Updates job status at each stage so the frontend can show progress:
     queued → processing → done (or error)
     """
+    meter = _make_meter()  # shared ingest+council spend cap for this job, if configured --
+    # built before the try so its summary() is always available in the except branch too,
+    # even if a failure happens before this point is otherwise reached.
     try:
         update_job(job_id, access_token=access_token, status="processing")  # tell the store
         # we've started — inside the try so a failure here still lands on status="error"
         # below, instead of leaving the job stuck at its initial status forever with no
         # error ever recorded.
-        meter = _make_meter()  # shared ingest+council spend cap for this job, if configured
 
         # Step 1: ingest — turn the raw intent text into a structured SystemModel
         ingestor = make_ingestor(meter=meter)
@@ -74,6 +79,7 @@ def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
 
         update_job(job_id, access_token=access_token, status="done", result=report)  # store the finished report
         log.info("job %s completed successfully", job_id)
+        log.info("job %s: %s", job_id, meter.summary())
 
     except Exception as exc:
         # cap + scrub the error before storing or logging — IngestError can carry up to 400 chars
@@ -82,4 +88,5 @@ def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
         safe_msg, _ = scan_and_redact_secrets(raw_msg)   # redact any secrets in the error text
         safe_msg, _ = _redact_engine_metrics(safe_msg)   # also strip any stray numbers
         log.error("job %s failed: %s", job_id, safe_msg)
+        log.info("job %s: %s", job_id, meter.summary())
         update_job(job_id, access_token=access_token, status="error", error=safe_msg)

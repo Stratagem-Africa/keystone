@@ -133,6 +133,10 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
         def _fake_urlopen(req, timeout=0):
             captured["url"] = req.full_url
             captured["body"] = json.loads(req.data)
+            # urllib.request.Request normalizes header keys via str.capitalize() on storage
+            # (so "User-Agent" -> "User-agent"); get_header() does NOT re-normalize the
+            # lookup key, so it must match that exact stored form.
+            captured["user_agent"] = req.headers.get("User-agent")
             return _Resp()
 
         with mock.patch("keystone.llm.urllib.request.urlopen", _fake_urlopen):
@@ -142,6 +146,10 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
         self.assertEqual(captured["body"]["model"], "gpt-x")
         self.assertEqual(captured["body"]["messages"][0], {"role": "system", "content": "sys"})
         self.assertEqual(captured["body"]["messages"][1], {"role": "user", "content": "usr"})
+        # A non-default User-Agent — urllib's own default ("Python-urllib/X.Y") gets flagged
+        # and blocked as a bot signature by Cloudflare (confirmed on Groq, error code 1010).
+        self.assertIsNotNone(captured["user_agent"])
+        self.assertNotIn("python", captured["user_agent"].lower())
 
     def test_bad_response_shape_fails_loud(self):
         llm = OpenAICompatibleLLM("m", base_url="http://x/v1", api_key_env=None)
@@ -174,6 +182,10 @@ class TestOpenAICompatibleTransport(unittest.TestCase):
             "cerebras": ("CEREBRAS_API_KEY", "llama-3.3-70b"),
             "xai": ("XAI_API_KEY", "grok-3"),
             "github": ("GITHUB_MODELS_TOKEN", "openai/gpt-4.1"),
+            # nvidia is $0-to-start (no card) but a finite trial-credit pool, not an
+            # unlimited-forever tier like the others above — same build/fail-closed
+            # mechanics though, so it belongs in this registry test.
+            "nvidia": ("NVIDIA_API_KEY", "moonshotai/kimi-k3"),
         }
         env = {key_env: "x" for key_env, _ in keyed.values()}
         with mock.patch.dict("os.environ", env, clear=False):

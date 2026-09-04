@@ -117,7 +117,10 @@ class OpenAICompatibleLLM:
             "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        # Explicit User-Agent: urllib's default ("Python-urllib/X.Y") gets flagged as a bot
+        # signature by Cloudflare (and similar WAFs) fronting some providers — confirmed on
+        # Groq, which 403s ("error code: 1010") the default UA but accepts any custom one.
+        headers = {"Content-Type": "application/json", "User-Agent": "keystone-llm/1.0"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"   # never logged
         req = urllib.request.Request(f"{self._base_url}/chat/completions", data=body,
@@ -151,6 +154,11 @@ _OPENAI_COMPATIBLE = {
     "cerebras":   ("https://api.cerebras.ai/v1",  "CEREBRAS_API_KEY"),
     "xai":        ("https://api.x.ai/v1",         "XAI_API_KEY"),
     "github":     ("https://models.github.ai/inference", "GITHUB_MODELS_TOKEN"),
+    # NVIDIA NIM (build.nvidia.com): free developer sign-up, no card, ~1000 trial
+    # credits (up to ~5000 with a business email) — not unlimited-forever like a
+    # rate-limited free tier, but $0 to start. Hosts both moonshotai/kimi-* and
+    # qwen/* model ids on this one endpoint (verified 2026-09 against build.nvidia.com).
+    "nvidia":     ("https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY"),
     "ollama":     (None,                           None),
 }
 
@@ -164,7 +172,7 @@ def known_providers() -> frozenset:
 def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LLM:
     """Build an `LLM` transport by provider name (lazy; the engine never imports any of these):
     `claude`/`anthropic` → `AnthropicLLM` (SDK); every other registered provider (openai | openrouter |
-    gemini | groq | cerebras | xai | github | ollama) → `OpenAICompatibleLLM` (stdlib HTTP). Used by the
+    gemini | groq | cerebras | xai | github | nvidia | ollama) → `OpenAICompatibleLLM` (stdlib HTTP). Used by the
     council factory + the multi-model consensus layer. An optional `meter` records this transport's
     token-usage as Keystone's own API spend (opt-in telemetry — never a product number)."""
     p = provider.strip().lower()
@@ -184,4 +192,4 @@ def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LL
         base, key_env = _OPENAI_COMPATIBLE[p]
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env, meter=meter, provider=p)
     raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | "
-                   "gemini | groq | cerebras | xai | github | ollama)")
+                   "gemini | groq | cerebras | xai | github | nvidia | ollama)")
