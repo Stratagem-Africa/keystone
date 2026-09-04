@@ -88,6 +88,32 @@
 }
 .sim-glow-red { background: radial-gradient(circle at center, rgba(229,72,77,0.28), transparent 72%); }
 
+/* ─── Canvas dark-glass palette (issue #186) — scoped to .canvas-glass only, not @theme,
+   so the site-wide (light) theme is untouched. Mirrors prototype/keystone/arch_map.py's
+   render_html() _CSS vars so the React canvas visually matches the Python-rendered map. ── */
+.canvas-glass {
+  --cv-paper: #070a16;
+  --cv-panel: rgba(16, 22, 46, 0.72);
+  --cv-ink: #e8ecff;
+  --cv-muted: #95a0c8;
+  --cv-line: rgba(122, 142, 222, 0.18);
+  --cv-steel: rgba(150, 170, 235, 0.42);
+  --cv-blue: #7dd3fc;
+  --cv-green: #4ade80;
+  --cv-amber: #fbbf24;
+  --cv-red: #f87171;
+  background-color: var(--cv-paper);
+  background-image: radial-gradient(ellipse at top, rgba(125, 211, 252, 0.08), transparent 60%);
+  color: var(--cv-ink);
+}
+.canvas-glass .cv-panel {
+  background: var(--cv-panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--cv-line);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
 /* ─── Reduced-motion — a COMPLETE, equal path (docs/09 §11.9 FIXED) ────────
    Every settle/transition/animation goes still; bands snap straight to their
    final width. The static state is already the resting state, so nothing is

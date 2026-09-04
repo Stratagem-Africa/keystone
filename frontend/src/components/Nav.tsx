@@ -38,6 +38,14 @@ export function Nav() {
           Studio
         </Link>
 
+        {/* Canvas — the interactive editable canvas (issue #186, public, no sign-in needed). */}
+        <Link
+          href="/canvas"
+          className={`font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
+        >
+          Canvas
+        </Link>
+
         {/* Accuracy-ladder badge — climbable, honest status, not a trust-me seal (docs/09 §3.6).
             A native <details> disclosure: keyboard-accessible, no framework state. Neutral hues
             ONLY — green here would read as "certified" and break §11.4. */}
