@@ -23,6 +23,7 @@ from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
 from keystone.arch_map import build_arch_map
+from keystone.generate import generate_architecture, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
 from api.worker import run_pipeline
@@ -141,6 +142,34 @@ def simulate_topology(req: SimulateRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
     sim = simulate(model)
     return _sanitize(build_arch_map(model, sim))
+
+
+class GenerateRequest(BaseModel):
+    """A one-line intent ("a platform like Twitter") to turn into a deep architecture."""
+    intent: str = Field(..., min_length=1, max_length=2000)
+    system_rps: float | None = Field(None, gt=0, le=10_000_000)
+
+
+@app.post("/generate")
+def generate_from_intent(req: GenerateRequest) -> dict:
+    """Intent → a DEEP, layered architecture + the engine's verdict + the interactive map.
+
+    STATELESS pure compute, same posture as /simulate (holds no user data, writes nothing, not
+    auth-gated). Offline default: the intent is matched to the closest deep REFERENCE architecture
+    (the blueprint catalogue), so this works today at $0 with no key. When the LLM ingestion layer is
+    activated (INGEST_PROVIDER, a manual trigger) it DESIGNS the architecture from any intent instead.
+    Prime directive intact: generation builds INPUTS only; `simulate()` is the sole source of numbers.
+    Fail-closed: a bad/empty intent or an invalid generated model yields a clean 400, never a 500.
+    """
+    try:
+        model = generate_architecture(req.intent)
+    except (IngestError, ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=f"could not generate architecture: {e}")
+    sim = simulate(model)
+    arch = build_arch_map(model, sim)
+    # A hint the frontend can show when nothing matched offline and the LLM is not yet activated.
+    arch["catalogue"] = reference_catalogue()
+    return _sanitize(arch)
 
 # Uploaded documents are combined with any typed text and run through the harm-floor
 # secret scan before storage — consistent with the no-retention ethos already governing
