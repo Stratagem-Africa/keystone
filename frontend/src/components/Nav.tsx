@@ -30,20 +30,12 @@ export function Nav() {
       </Link>
 
       <div className="flex items-center gap-4">
-        {/* Studio — the interactive generation surface (public, no sign-in needed). */}
+        {/* The one architecture surface: describe → editable canvas → verdict (public, no sign-in). */}
         <Link
           href="/studio"
           className={`font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
         >
           Studio
-        </Link>
-
-        {/* Canvas — the interactive editable canvas (issue #186, public, no sign-in needed). */}
-        <Link
-          href="/canvas"
-          className={`font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
-        >
-          Canvas
         </Link>
 
         {/* Accuracy-ladder badge — climbable, honest status, not a trust-me seal (docs/09 §3.6).

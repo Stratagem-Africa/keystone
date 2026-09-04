@@ -171,3 +171,53 @@ export interface ArchMap {
 export interface ApiErrorBody {
   detail?: string;
 }
+
+// ─── Seeding the editable canvas from a generated design ──────────────────────
+// The studio flow is: describe → /generate returns an ArchMap → seed the editable canvas with it so
+// the user lands on the *generated* architecture (never a blank/starter grid), then edits + re-simulates.
+export interface SeedNode {
+  id: string;
+  kind: ComponentKind;
+  name: string;
+  per_instance_rps?: number;
+  instances?: number;
+  x: number;
+  y: number;
+}
+
+/** Derive an editable topology (positioned nodes + edges) from an engine-produced ArchMap.
+ *  Layout mirrors the arch-map's layered bands: each layer is a horizontal row (y = layer_order),
+ *  nodes spread left-to-right within it. Edges come from the flow steps (consecutive component pairs,
+ *  deduped) — the same graph the engine simulated. Every number stays the engine's; this only
+ *  reconstructs the editable *shape*. */
+export function seedFromArchMap(arch: ArchMap): { nodes: SeedNode[]; edges: [string, string][] } {
+  const kinds = COMPONENT_KINDS as readonly string[];
+  const rowInLayer: Record<number, number> = {};
+  const nodes: SeedNode[] = arch.nodes.map((n) => {
+    const col = rowInLayer[n.layer_order] ?? 0;
+    rowInLayer[n.layer_order] = col + 1;
+    return {
+      id: n.id,
+      kind: (kinds.includes(n.kind) ? n.kind : "app_server") as ComponentKind,
+      name: n.name,
+      per_instance_rps: n.per_instance_rps,
+      instances: n.instances,
+      x: col * 220,
+      y: n.layer_order * 150,
+    };
+  });
+  const seen = new Set<string>();
+  const edges: [string, string][] = [];
+  for (const f of arch.flows) {
+    for (let i = 0; i + 1 < f.steps.length; i++) {
+      const a = f.steps[i].component_id;
+      const b = f.steps[i + 1].component_id;
+      const key = `${a}->${b}`;
+      if (a !== b && !seen.has(key)) {
+        seen.add(key);
+        edges.push([a, b]);
+      }
+    }
+  }
+  return { nodes, edges };
+}

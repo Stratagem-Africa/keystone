@@ -29,6 +29,7 @@ import {
   type Provenance,
   type SimulateRequest,
   type ApiErrorBody,
+  type SeedNode,
 } from "@/lib/archMap";
 
 // The engine (POST /simulate -> build_arch_map) is the ONLY source of every number shown
@@ -208,14 +209,59 @@ const initialEdges: Edge[] = STARTER_EDGES.map(([source, target]) => ({
   target,
 }));
 
+// The studio seeds the canvas from a generated design (see `seedFromArchMap`), so it opens on the
+// generated architecture with the engine's verdict already populated — never a blank/starter grid.
+export interface CanvasSeed {
+  nodes: SeedNode[];
+  edges: [string, string][];
+  systemRps?: number;
+  archMap?: ArchMap | null;
+}
+
+function seedToFlowNodes(seed: SeedNode[]): Node<ComponentNodeData>[] {
+  return seed.map((n) => ({
+    id: n.id,
+    type: "component",
+    position: { x: n.x, y: n.y },
+    data: {
+      kind: n.kind,
+      name: n.name,
+      ...(n.per_instance_rps ? { per_instance_rps: n.per_instance_rps } : {}),
+      ...(n.instances ? { instances: n.instances } : {}),
+    },
+  }));
+}
+function seedToFlowEdges(edges: [string, string][]): Edge[] {
+  return edges.map(([source, target]) => ({ id: `${source}->${target}`, source, target }));
+}
+
+// The signature of a drawn topology — a verdict is only honest while this is unchanged (see below).
+// Module-level so the seed's initial "already-simulated" signature can be computed the same way.
+function signatureOf(systemRps: number, nodes: Node<ComponentNodeData>[], edges: Edge[]): string {
+  return JSON.stringify({
+    systemRps,
+    nodes: nodes.map((n) => [
+      n.id, n.data.kind, n.data.name,
+      n.data.per_instance_rps ?? null, n.data.instances ?? null,
+      n.data.base_latency_ms ?? null, n.data.monthly_cost_cents ?? null,
+    ]),
+    edges: edges.map((e) => [e.source, e.target]),
+  });
+}
+
 const DRAG_KIND_TYPE = "application/keystone-kind";
 
-function CanvasInner() {
+function CanvasInner({ seed }: { seed?: CanvasSeed }) {
   const { screenToFlowPosition } = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<ComponentNodeData>>(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
-  const [systemRps, setSystemRps] = useState(10_000);
-  const [archMap, setArchMap] = useState<ArchMap | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<ComponentNodeData>>(
+    seed ? seedToFlowNodes(seed.nodes) : initialNodes,
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
+    seed ? seedToFlowEdges(seed.edges) : initialEdges,
+  );
+  const [systemRps, setSystemRps] = useState(seed?.systemRps ?? 10_000);
+  // Seeded with a generated design → open with its engine verdict already shown (not stale, not blank).
+  const [archMap, setArchMap] = useState<ArchMap | null>(seed?.archMap ?? null);
   const [simLoading, setSimLoading] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
   const [mode, setMode] = useState<"simple" | "technical">("simple");
@@ -276,23 +322,15 @@ function CanvasInner() {
   // load) makes the last verdict stale — dragging a node's position, panning, or selecting
   // does not. Compared against the signature captured at the moment Simulate was last run.
   const topologySignature = useMemo(
-    () =>
-      JSON.stringify({
-        systemRps,
-        nodes: nodes.map((n) => [
-          n.id,
-          n.data.kind,
-          n.data.name,
-          n.data.per_instance_rps ?? null,
-          n.data.instances ?? null,
-          n.data.base_latency_ms ?? null,
-          n.data.monthly_cost_cents ?? null,
-        ]),
-        edges: edges.map((e) => [e.source, e.target]),
-      }),
+    () => signatureOf(systemRps, nodes, edges),
     [nodes, edges, systemRps],
   );
-  const [simulatedSignature, setSimulatedSignature] = useState<string | null>(null);
+  // If seeded with a generated design, its verdict already matches the drawn topology → not stale.
+  const [simulatedSignature, setSimulatedSignature] = useState<string | null>(() =>
+    seed?.archMap
+      ? signatureOf(seed.systemRps ?? 10_000, seedToFlowNodes(seed.nodes), seedToFlowEdges(seed.edges))
+      : null,
+  );
   const isStale = archMap !== null && simulatedSignature !== topologySignature;
 
   async function handleSimulate() {
@@ -379,7 +417,7 @@ function CanvasInner() {
   );
 
   return (
-    <div className="canvas-glass flex flex-col h-[calc(100vh-73px)]">
+    <div className="canvas-glass flex flex-col h-full min-h-0">
       <div className="cv-panel m-3 px-4 py-3 flex flex-wrap items-center gap-4">
         <span className="font-sans text-[10px] uppercase tracking-widest text-[var(--cv-muted)]">Palette</span>
         <div className="flex flex-wrap gap-1.5">
@@ -560,11 +598,13 @@ function CanvasInner() {
 }
 
 // screenToFlowPosition (for drag-to-add) only works inside a <ReactFlowProvider>, so the
-// provider wraps the whole editor, not just the <ReactFlow> element.
-export function CanvasEditor() {
+// provider wraps the whole editor, not just the <ReactFlow> element. `seed` opens the canvas on a
+// generated design (the studio passes it + a `key` so a new generation remounts fresh); omitted, it
+// opens on the starter fixture.
+export function CanvasEditor({ seed }: { seed?: CanvasSeed } = {}) {
   return (
     <ReactFlowProvider>
-      <CanvasInner />
+      <CanvasInner seed={seed} />
     </ReactFlowProvider>
   );
 }
