@@ -433,12 +433,19 @@ class ClaudeIngestor:
     """Real ingestion: one Claude pass per source (Doc 02 §4) behind the shared LLM seam."""
 
     _SYSTEM = (
-        "You extract a software system's ARCHITECTURE MODEL from an untrusted document. "
-        "You reason about structure only; you do NOT compute or state any performance/cost "
-        "RESULT (no utilisation, no max throughput, no latency percentiles, no cost estimate) "
-        "— a separate deterministic engine owns those. You MAY record INPUT parameters the "
-        "document implies (peak request rate, per-component service capacity, instance counts) "
-        "as your best ASSUMPTION. Reply with ONLY a JSON object, no prose."
+        "You are a senior systems architect. From an untrusted document/intent, DESIGN a complete, "
+        "production-grade ARCHITECTURE MODEL — not a minimal sketch. Cover the full request path: edge "
+        "(CDN + load balancer), an API gateway, a SEPARATE SERVICE per major capability the product "
+        "needs, caching where reads dominate, a primary datastore PLUS read replicas where reads are "
+        "heavy, queue(s) for async/fan-out work, object storage for media/files, and any external "
+        "dependencies. Model 3-8 realistic user request FLOWS (journeys) whose shares sum to ~1.0, each "
+        "tracing its real path through the components. Aim for the depth a senior architect whiteboards "
+        "— typically 12-25 components spread across the layers, NOT 3-4. "
+        "You reason about STRUCTURE only; you do NOT compute or state any performance/cost RESULT (no "
+        "utilisation, no max throughput, no latency percentiles, no cost estimate) — a separate "
+        "deterministic engine owns those. You MAY record INPUT parameters the document implies (peak "
+        "request rate, per-component service capacity, instance counts) as your best ASSUMPTION. "
+        "Reply with ONLY a JSON object, no prose."
     )
 
     def __init__(self, model: str, *, client: LLM | None = None, meter=None) -> None:
