@@ -42,8 +42,9 @@ class Job:
     intent_text: str
     user_id: str   # who submitted it — the ownership boundary for get_job below
     secrets_found: list[str] = field(default_factory=list)
-    result: str | None = None   # markdown report, filled in when status = "done"
-    error: str | None = None    # error message, filled in when status = "error"
+    result: str | None = None      # markdown report, filled in when status = "done"
+    arch_map: dict | None = None   # engine-driven architecture map (keystone.arch_map.build_arch_map), same timing as result
+    error: str | None = None       # error message, filled in when status = "error"
 
 # In-memory fallback store — used when Postgres is not configured.
 _store: dict[str, Job] = {}
@@ -91,6 +92,7 @@ def get_job(job_id: str, *, user_id: str, access_token: str) -> Job | None:
                     user_id=r["user_id"],
                     secrets_found=r.get("secrets_found") or [],
                     result=r.get("result"),
+                    arch_map=r.get("arch_map"),
                     error=r.get("error"),
                 )
         except Exception as exc:
@@ -103,8 +105,9 @@ def get_job(job_id: str, *, user_id: str, access_token: str) -> Job | None:
 
 
 def update_job(job_id: str, *, access_token: str, status: str,
-               result: str | None = None, error: str | None = None) -> None:
-    """Update a job's status and optionally its result or error message.
+               result: str | None = None, arch_map: dict | None = None,
+               error: str | None = None) -> None:
+    """Update a job's status and optionally its result, architecture map, or error message.
 
     Called only by the pipeline that owns this exact job_id (worker.run_pipeline),
     never with an attacker-supplied job_id, so no separate ownership check is needed
@@ -113,9 +116,11 @@ def update_job(job_id: str, *, access_token: str, status: str,
     job = _store.get(job_id)
     if job:
         job.status = status
-        if result is not None:   # only overwrite when caller passes a value
+        if result is not None:     # only overwrite when caller passes a value
             job.result = result
-        if error is not None:    # same — a status-only update won't wipe the stored result
+        if arch_map is not None:   # same — a status-only update won't wipe the stored map
+            job.arch_map = arch_map
+        if error is not None:      # same — a status-only update won't wipe the stored result
             job.error = error
 
     db = _client_for(access_token)
@@ -124,6 +129,8 @@ def update_job(job_id: str, *, access_token: str, status: str,
             data: dict = {"status": status}
             if result is not None:
                 data["result"] = result
+            if arch_map is not None:
+                data["arch_map"] = arch_map
             if error is not None:
                 data["error"] = error
             db.table("jobs").update(data).eq("job_id", job_id).execute()
