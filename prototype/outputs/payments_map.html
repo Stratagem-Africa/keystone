@@ -548,14 +548,22 @@ applyMode();
 // ---- pan / zoom -----------------------------------------------------------
 let sc=1,tx=40,ty=20,drag=null;const stage=$('#stage');
 function apply(){viewport.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`;}
-function fit(){const r=stage.getBoundingClientRect();sc=Math.min(1,Math.min((r.width-360)/W,(r.height-220)/H));sc=Math.max(.35,sc);tx=40;ty=90;apply();}
+// Frame the whole graph in the clear area (left of the 250px dock, below the header, above the
+// legend) and CENTRE it — earlier this pinned top-left at a fixed offset and capped scale at 1, so a
+// wide graph in a short viewport shrank to an illegible corner. Modest upscale (≤1.4) lets a small
+// graph fill the space; the zero-size guard handles a not-yet-laid-out iframe.
+function fit(){const r=stage.getBoundingClientRect();if(!r.width||!r.height)return;const padL=40,padR=300,padT=130,padB=120;const aw=Math.max(200,r.width-padL-padR),ah=Math.max(200,r.height-padT-padB);sc=Math.max(.4,Math.min(1.4,Math.min(aw/W,ah/H)));tx=padL+Math.max(0,(aw-W*sc)/2);ty=padT+Math.max(0,(ah-H*sc)/2);apply();}
 stage.addEventListener('mousedown',e=>{if(e.target.closest('.node,#panel,#dock,#drawer,#head,.jbtn'))return;drag={x:e.clientX-tx,y:e.clientY-ty};stage.classList.add('grabbing');});
 window.addEventListener('mousemove',e=>{if(!drag)return;tx=e.clientX-drag.x;ty=e.clientY-drag.y;apply();});
 window.addEventListener('mouseup',()=>{drag=null;stage.classList.remove('grabbing');});
 stage.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:1/1.1;const r=stage.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;tx=mx-(mx-tx)*f;ty=my-(my-ty)*f;sc=Math.max(.3,Math.min(2.2,sc*f));apply();},{passive:false});
-$('#vFit').onclick=fit;$('#vIn').onclick=()=>{sc=Math.min(2.2,sc*1.15);apply();};$('#vOut').onclick=()=>{sc=Math.max(.3,sc/1.15);apply();};$('#vReset').onclick=()=>{sc=1;tx=40;ty=20;apply();};
+$('#vFit').onclick=fit;$('#vIn').onclick=()=>{sc=Math.min(2.2,sc*1.15);apply();};$('#vOut').onclick=()=>{sc=Math.max(.3,sc/1.15);apply();};$('#vReset').onclick=fit;
 stage.addEventListener('click',e=>{if(!e.target.closest('.node,#panel,#dock,#drawer')){clearFlow();closePanel();}});
 fit();
+// Re-fit once the iframe/window has actually laid out, and whenever it resizes, so the map always
+// frames itself to the current viewport (it's commonly embedded full-screen in an iframe).
+window.addEventListener('load',fit);
+window.addEventListener('resize',fit);
 </script>
 </body>
 </html>
