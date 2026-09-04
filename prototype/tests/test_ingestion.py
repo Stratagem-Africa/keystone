@@ -22,6 +22,7 @@ from keystone.ingestion import (
     ClaudeIngestor, DeterministicStubIngestor, IngestError, Source,
     build_envelope, detect_high_stakes, make_ingestor, orphan_components,
     scan_and_redact_secrets, validate_model, _FENCE, _FENCE_END, _MAX_DOC_CHARS,
+    _capacity_reference_block,
 )
 
 _CLEAN = json.dumps({
@@ -38,17 +39,23 @@ _CLEAN = json.dumps({
 
 
 class FakeLLM:
-    """Records the prompt it received and returns canned JSON."""
+    """Records the prompt it received and returns canned JSON. If `retry_reply` is set, a
+    label ending in ':retry' (the orphan-component retry) gets that reply instead — otherwise
+    every call (including a retry) gets the same `reply`, so a persistent bad extraction stays
+    persistent through the retry."""
 
-    def __init__(self, reply: str = _CLEAN) -> None:
+    def __init__(self, reply: str = _CLEAN, *, retry_reply: str | None = None) -> None:
         self.calls: list[str] = []
         self.last_user: str | None = None
         self.last_system: str | None = None
         self._reply = reply
+        self._retry_reply = retry_reply
 
     def complete(self, *, label, system, user, max_tokens):
         self.calls.append(label)
         self.last_user, self.last_system = user, system
+        if label.endswith(":retry") and self._retry_reply is not None:
+            return self._retry_reply
         return self._reply
 
 
@@ -228,6 +235,25 @@ class TestClaudeIngestion(unittest.TestCase):
         self.assertNotIn("AKIAIOSFODNN7EXAMPLE", fake.last_user)
         self.assertTrue(any("redacted" in n for n in res.notes))
 
+    def test_capacity_reference_block_has_realistic_kind_data(self):
+        # Pins the anchor content itself: real kinds, with plausible LARGE per-instance numbers
+        # (thousands+), not the tiny single-digit guesses this fix exists to prevent.
+        block = _capacity_reference_block()
+        self.assertIn("sql_db", block)
+        self.assertIn("cache", block)
+        self.assertIn("load_balancer", block)
+        for kind_rps in ("8,133 rps", "110,000 rps", "350,000 rps"):
+            self.assertIn(kind_rps, block)
+
+    def test_capacity_reference_reaches_the_live_system_prompt(self):
+        # Pins that the anchor is actually wired into the call, not just built and discarded.
+        fake = FakeLLM()
+        make_ingestor("claude", model="m", client=fake).ingest(Source(text="a food delivery app"))
+        self.assertIsNotNone(fake.last_system)
+        self.assertIn("REAL-WORLD CAPACITY REFERENCE", fake.last_system)
+        self.assertIn("sql_db", fake.last_system)
+        self.assertIn("does NOT shrink because the app has few users", fake.last_system)
+
     def test_prime_directive_engine_not_llm_produces_derived_numbers(self):
         # An LLM that tries to emit DERIVED metrics: they have no model field, so they
         # are ignored; the engine still computes its own numbers.
@@ -261,6 +287,124 @@ class TestFailClosedValidation(unittest.TestCase):
             self._ingest({"components": [{"id": "app", "kind": "app_server"}],
                           "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "ghost"}]}]})
 
+    def test_dangling_flow_reference_is_now_retried_and_rescuable(self):
+        # The general retry wrapper is driven by whatever validate_model actually raised, not a
+        # separately-computed orphan guess — so a dangling reference (a typo'd flow-step id) now
+        # gets a correctly-targeted retry (quoting the REAL "references unknown component" error)
+        # instead of being excluded from any retry at all.
+        dangling = {
+            "components": [{"id": "db", "kind": "sql_db"}],
+            "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "usr_db"}]}],
+        }
+        fixed = json.loads(json.dumps(dangling))
+        fixed["flows"][0]["path"][0]["component_id"] = "db"   # fix the typo
+        fake = FakeLLM(json.dumps(dangling), retry_reply=json.dumps(fixed))
+        res = make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertEqual(set(res.model.components), {"db"})
+        self.assertTrue(any(c.endswith(":retry") for c in fake.calls), "the retry should have fired")
+
+    def test_dangling_flow_reference_still_fails_loud_if_persistent(self):
+        payload = json.dumps({
+            "components": [{"id": "db", "kind": "sql_db"}],
+            "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "usr_db"}]}],
+        })
+        with self.assertRaises(IngestError):
+            make_ingestor("claude", model="m", client=FakeLLM(payload)).ingest(Source(text="x"))
+
+    def test_flow_share_sum_drift_is_rescued_by_one_retry(self):
+        # A cheap model has no calculator: three flows sharing 0.3 each sums to 0.9 — inside the
+        # band actually, so use a clearly-drifted set to trip validate_model's ~1.0 check.
+        drifted = {
+            "components": [{"id": "app", "kind": "app_server"}],
+            "flows": [
+                {"name": "a", "share": 0.3, "path": [{"component_id": "app"}]},
+                {"name": "b", "share": 0.3, "path": [{"component_id": "app"}]},
+            ],
+        }
+        fixed = json.loads(json.dumps(drifted))
+        fixed["flows"][0]["share"] = 0.5
+        fixed["flows"][1]["share"] = 0.5
+        fake = FakeLLM(json.dumps(drifted), retry_reply=json.dumps(fixed))
+        res = make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertAlmostEqual(sum(f.share for f in res.model.flows), 1.0)
+        self.assertTrue(any(c.endswith(":retry") for c in fake.calls), "the retry should have fired")
+
+    def test_flow_share_sum_drift_still_fails_loud_if_persistent(self):
+        payload = json.dumps({
+            "components": [{"id": "app", "kind": "app_server"}],
+            "flows": [
+                {"name": "a", "share": 0.3, "path": [{"component_id": "app"}]},
+                {"name": "b", "share": 0.3, "path": [{"component_id": "app"}]},
+            ],
+        })
+        with self.assertRaises(IngestError):
+            make_ingestor("claude", model="m", client=FakeLLM(payload)).ingest(Source(text="x"))
+
+    def test_retry_prompt_quotes_the_exact_validation_error(self):
+        # Pins the "quote the real error back" requirement concretely, not just behaviourally.
+        payload = json.dumps({
+            "components": [{"id": "app", "kind": "app_server"}],
+            "flows": [
+                {"name": "a", "share": 0.3, "path": [{"component_id": "app"}]},
+                {"name": "b", "share": 0.3, "path": [{"component_id": "app"}]},
+            ],
+        })
+        fake = FakeLLM(payload)
+        with self.assertRaises(IngestError):
+            make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertIn("expected ~1.0", fake.last_user)
+
+    def test_json_parse_failure_is_rescued_by_one_retry(self):
+        fake = FakeLLM("sure, here's the JSON: { \"components\": [ trunc", retry_reply=_CLEAN)
+        res = make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertEqual(set(res.model.components), {"app", "db"})
+        self.assertTrue(any(c.endswith(":retry") for c in fake.calls), "the retry should have fired")
+
+    def test_json_parse_failure_still_fails_loud_if_persistent(self):
+        with self.assertRaises(IngestError):
+            make_ingestor("claude", model="m",
+                         client=FakeLLM("no JSON here, just an apology.")).ingest(Source(text="x"))
+
+    def test_json_parse_retry_sends_a_generic_reminder_not_the_garbled_reply(self):
+        # A parse failure gets a generic "send clean JSON" instruction, never an echo of its own
+        # garbled prior output — distinct from the "quote the exact error" treatment other
+        # IngestErrors get (test_retry_prompt_quotes_the_exact_validation_error above).
+        fake = FakeLLM("not json at all, just prose")
+        with self.assertRaises(IngestError):
+            make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertIn("no markdown fences, no prose, no truncation", fake.last_user)
+        self.assertNotIn("not json at all, just prose", fake.last_user)
+
+    def test_parse_failure_log_does_not_echo_the_raw_reply(self):
+        # Harm floor: _ParseError's text embeds up to 400 chars of the model's RAW reply
+        # (_first_json_object). A garbled reply can itself contain a credential-shaped string
+        # the input-side secret scan never sees (it only cleans OUR document, not a model
+        # reply) — so the log line for a parse failure must NOT include the raw reply text,
+        # only a short, reply-free message. Uses a secret-shaped token to prove it, not just
+        # a generic garbled string.
+        garbled = "oops here's my key sk-ant-api03-AAABBBCCCDDDEEEFFFGGGHHH { \"components\": [ trunc"
+        fake = FakeLLM(garbled)
+        with self.assertLogs("keystone.ingestion", level="WARNING") as cm:
+            with self.assertRaises(IngestError):
+                make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        joined = "\n".join(cm.output)
+        self.assertNotIn("sk-ant-api03", joined)
+        self.assertNotIn(garbled, joined)
+
+    def test_non_ingest_error_bypasses_the_retry(self):
+        class _Flaky:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            def complete(self, *, label, system, user, max_tokens):
+                self.calls.append(label)
+                raise RuntimeError("transport is down")
+
+        flaky = _Flaky()
+        with self.assertRaises(RuntimeError):
+            make_ingestor("claude", model="m", client=flaky).ingest(Source(text="x"))
+        self.assertEqual(len(flaky.calls), 1, "a non-IngestError must not trigger a retry")
+
     def test_no_components_raises(self):
         with self.assertRaises(IngestError):
             self._ingest({"components": [], "flows": []})
@@ -271,6 +415,8 @@ class TestFailClosedValidation(unittest.TestCase):
         # synthesize a catch-all flow, so the unwired component is a fatal orphan: the single-model
         # contract fails closed rather than hand the engine a model that would show it at a
         # misleading 0% utilisation. (Pins the real-path behaviour change; see docs/13 ADOPT-NOW.)
+        # FakeLLM repeats the same broken payload on the retry too, so this also confirms the
+        # one-shot orphan retry does not paper over a PERSISTENTLY broken extraction.
         with self.assertRaises(IngestError):
             self._ingest({
                 "name": "x",
@@ -281,6 +427,26 @@ class TestFailClosedValidation(unittest.TestCase):
                 ],
                 "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "app"}]}],
             })
+
+    def test_orphan_component_is_rescued_by_one_retry(self):
+        # The sibling of the council's JSON-repair retry: a live model can still forget to wire a
+        # component into a flow despite the prompt instruction. One firm retry (naming the exact
+        # orphan) gives it a real second chance before the fail-closed gate fires.
+        orphaned = {
+            "name": "x",
+            "workload": {"system_rps": 1000, "description": "x"},
+            "components": [
+                {"id": "app", "kind": "app_server", "per_instance_rps": 1000},
+                {"id": "monitoring", "kind": "external_api", "per_instance_rps": 1000},
+            ],
+            "flows": [{"name": "f", "share": 1.0, "path": [{"component_id": "app"}]}],
+        }
+        fixed = json.loads(json.dumps(orphaned))
+        fixed["flows"][0]["path"].append({"component_id": "monitoring", "visit_prob": 0.1})
+        fake = FakeLLM(json.dumps(orphaned), retry_reply=json.dumps(fixed))
+        res = make_ingestor("claude", model="m", client=fake).ingest(Source(text="x"))
+        self.assertEqual(orphan_components(res.model), [])
+        self.assertTrue(any(c.endswith(":retry") for c in fake.calls), "the retry should have fired")
 
     def test_no_json_object_raises(self):
         with self.assertRaises(IngestError):

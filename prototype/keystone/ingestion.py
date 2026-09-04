@@ -10,7 +10,9 @@ Turns a builder's intent (a concept note / pasted text / Mermaid block) into a p
   (workload, service capacities, instance counts) — each tagged with provenance. The
   model has NO field for a DERIVED metric (utilisation/breakpoint/latency-percentiles/
   cost-estimate), so an LLM that emits one has nowhere to put it: those come only from
-  the engine. Nothing is tagged GROUNDED until a benchmark KB lands (documented GAP).
+  the engine. Everything ingestion produces is tagged ASSUMPTION; the benchmark KB
+  (ADR-006, `grounding.py`) attaches GROUNDED evidence to the model afterwards — it never
+  changes the value, only annotates it.
 - **Fail closed.** A malformed/out-of-scope model raises `IngestError`; never hand the
   engine a bad model.
 
@@ -19,6 +21,7 @@ extraction. Tests inject any `LLM` (keystone.llm) for $0 offline runs.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
@@ -43,6 +46,12 @@ DEFAULT_INGEST_MODEL = "claude-haiku-4-5-20251001"   # cheap dev default (CLAUDE
 
 class IngestError(RuntimeError):
     """Raised when ingestion cannot produce a usable, valid model (parse/validation)."""
+
+
+class _ParseError(IngestError):
+    """The reply wasn't parseable as JSON at all (fences/prose/truncation) — still an `IngestError`
+    (every existing catcher is unaffected), but distinct so the one-shot retry can send a generic
+    "send clean JSON" reminder instead of echoing the model's own garbled prior output back to it."""
 
 
 @dataclass
@@ -176,7 +185,7 @@ def _first_json_object(text: str) -> dict:
         except json.JSONDecodeError:
             pass
         idx = text.find("{", idx + 1)
-    raise IngestError(f"expected a JSON object in the extraction reply; got:\n{text[:400]}")
+    raise _ParseError(f"expected a JSON object in the extraction reply; got:\n{text[:400]}")
 
 
 def _num(v: object, default: float) -> float:
@@ -215,6 +224,38 @@ def _clean_text(s: object) -> str:
     out = "".join(ch for ch in out if ch >= " " or ch == "\t")
     out, _ = _redact_engine_metrics(out)
     return out.strip()
+
+
+@functools.lru_cache(maxsize=1)
+def _capacity_reference_block() -> str:
+    """One line per component kind with real, cited capacity data from the curated benchmark
+    corpus (ADR-006) — so the ingestor's LLM stops conflating a small APP with weak SERVERS: a
+    real server's raw capacity doesn't shrink because the described app has few users. Built
+    lazily and cached (not at module import) so a stub-only run (the default, no API key) never
+    pays the corpus-parse cost. Failure-safe: this is a prompt nicety, not a correctness gate, so
+    a missing/malformed corpus silently drops the anchor (returns "") rather than crashing
+    ingestion — the model just guesses unanchored, same as before this fix."""
+    try:
+        from keystone.benchmarks.benchmark_corpus import CuratedKnowledgeBase
+        kb = CuratedKnowledgeBase.from_default_corpus()
+    except Exception:
+        log.warning("could not load the benchmark corpus for capacity anchoring; prompting unanchored")
+        return ""
+    lines = []
+    for kind in ComponentKind:
+        if kind is ComponentKind.CLIENT:
+            continue   # a traffic source, not a sized server node
+        rps = kb.ground(kind, "per_instance_rps")
+        lat = kb.ground(kind, "base_latency_ms")
+        if rps is None and lat is None:
+            continue   # no corpus coverage for this kind (e.g. cdn) — still guessed, just unanchored
+        bits = []
+        if rps is not None:
+            bits.append(f"~{rps.value:,.0f} rps/instance")
+        if lat is not None:
+            bits.append(f"~{lat.value:g}ms latency")
+        lines.append(f"{kind.value}: {', '.join(bits)}")
+    return "; ".join(lines)
 
 
 _KIND_ALIAS = {
@@ -474,13 +515,71 @@ class ClaudeIngestor:
             '"path": [{"component_id": "<id>", "visit_prob": <0-1>}]}], '
             '"assumptions": [{"subject": "<what>", "statement": "<the gap you filled>", "confidence": "low|med|high"}], '
             '"domain_flags": ["high_stakes:<domain> if this is payments/elections/health/safety"]}\n'
-            "Use ONLY the listed component kinds. Every number is your assumption, not a measurement."
+            "Use ONLY the listed component kinds. Every number is your assumption, not a measurement. "
+            "Every component you declare MUST appear in at least one flow's path — never declare a "
+            "component that isn't on any request path."
         )
-        raw = self._llm.complete(label=f"ingest:{source.kind}", system=self._SYSTEM, user=user, max_tokens=4096)
+        system = self._SYSTEM
+        reference = _capacity_reference_block()
+        if reference:
+            # Anchors per_instance_rps/base_latency_ms to real, cited hardware capacity (ADR-006's
+            # corpus) so the model stops scaling a component's own capacity down just because the
+            # described app is small — a real server doesn't get weaker because your app has few
+            # users; only system_rps and instance COUNT should track the app's scale.
+            system += (
+                "\n\nREAL-WORLD CAPACITY REFERENCE (one typical instance of that kind; use as your "
+                "starting point unless the document specifies particular hardware): " + reference + ". "
+                "Per-instance capacity/latency is a property of the INFRASTRUCTURE you would deploy — "
+                "it does NOT shrink because the app has few users or low overall traffic. Only "
+                "system_rps and instance COUNT should reflect the app's scale."
+            )
+        label = f"ingest:{source.kind}"
+        try:
+            model = self._attempt(label=label, system=system, user=user, source=source, clean=clean)
+        except IngestError as e:
+            # One firm second chance for ANY fixable ingestion failure — mirrors the council's
+            # JSON-repair retry idiom (claude_council.py `_complete_json`): a second chance for a
+            # fixable mistake, never a bypass of the fail-closed gate itself (docs/13 ADOPT-NOW). A
+            # parse failure (reply wasn't valid JSON at all) gets a generic "send clean JSON"
+            # reminder rather than echoing the model's own garbled prior output back to it; every
+            # other IngestError (unsupported kind, duplicate id, dangling flow reference, orphan
+            # component, flow-share-sum drift, ...) quotes the EXACT validation message, so the
+            # retry always targets the real defect validate_model found — never a separately
+            # computed guess that could misdiagnose it.
+            if isinstance(e, _ParseError):
+                # _ParseError's text embeds up to 400 chars of the model's RAW reply
+                # (_first_json_object's "got:\n{text[:400]}") — scan_and_redact_secrets only
+                # cleans the user's INPUT document, never a model reply, so a credential-shaped
+                # string echoed back by the model could otherwise leak into this log line (harm
+                # floor: "never echo a detected secret onward to the LLM or a log"). Log a short,
+                # reply-free message instead.
+                log.warning("ingestion parse failure; retrying once with a clean-JSON reminder")
+                firmer = (f"{user}\n\nIMPORTANT: reply with ONLY one valid, COMPLETE JSON object — "
+                         "no markdown fences, no prose, no truncation.")
+            else:
+                # Safe to log verbatim: every other IngestError's text is a structural validation
+                # message (unsupported kind, duplicate id, dangling flow reference, orphan
+                # component, flow-share-sum drift, ...) built from OUR OWN component/flow ids, not
+                # from the model's raw reply.
+                log.warning("ingestion attempt failed (%s); retrying once with a firmer prompt", e)
+                firmer = (f"{user}\n\nIMPORTANT: your previous reply was REJECTED for this reason:\n"
+                         f"{e}\nFix exactly that problem and reply with ONLY the corrected, "
+                         "complete JSON object.")
+            model = self._attempt(label=f"{label}:retry", system=system, user=firmer,
+                                  source=source, clean=clean)
+            # a second IngestError here propagates unchanged — fail-closed preserved
+        return IngestResult(model=model, assumptions=model.assumptions, notes=notes)
+
+    def _attempt(self, *, label: str, system: str, user: str, source: Source, clean: str) -> SystemModel:
+        """One call→parse→build→validate pass. `validate_model` is fail-closed (docs/13 ADOPT-NOW):
+        an invalid model (orphan component, dangling flow reference, unsupported kind, duplicate id,
+        flow-share-sum drift, ...) never reaches the engine — the caller decides whether a failure
+        here gets a retry."""
+        raw = self._llm.complete(label=label, system=system, user=user, max_tokens=4096)
         data = _first_json_object(raw)
         model = _build_model(data, source, clean)
-        validate_model(model)   # fail closed
-        return IngestResult(model=model, assumptions=model.assumptions, notes=notes)
+        validate_model(model)
+        return model
 
 
 def make_ingestor(provider: str | None = None, model: str | None = None,
