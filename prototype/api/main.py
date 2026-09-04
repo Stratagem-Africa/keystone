@@ -22,7 +22,7 @@ from keystone.council import make_council
 from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
-from keystone.arch_map import build_arch_map
+from keystone.arch_map import build_arch_map, render_html
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
 from api.worker import run_pipeline
@@ -251,6 +251,42 @@ def get_job_report(
 
     # Default: return JSON — FastAPI serialises the dict automatically
     return {"job_id": job.job_id, "status": job.status, "report": job.result}
+
+
+@app.get("/jobs/{job_id}/archmap", response_model=None)
+def get_job_archmap(
+    job_id: str,
+    request: Request,
+    fmt: str = "json",
+    user: AuthUser = Depends(get_current_user),
+):
+    """The engine-driven interactive architecture map for a finished job (issue #183).
+
+    Same auth + ownership + status gating as /jobs/{id}/report. Default is the structured
+    JSON data map (`build_arch_map`'s output, computed once in worker.py and persisted on the
+    job — never recomputed here). `?fmt=html` (or `Accept: text/html`) returns the same data
+    rendered via `render_html` as a self-contained HTML page, for the frontend to embed directly
+    (e.g. `<iframe srcDoc=...>`) without porting any rendering logic to the client.
+    """
+    job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    if job.status != "done":
+        raise HTTPException(status_code=404, detail=f"architecture map not ready — job is '{job.status}'")
+
+    if job.arch_map is None:
+        # Should never happen — done jobs always have an arch_map — but guard defensively
+        raise HTTPException(status_code=500, detail="architecture map missing — this is a server bug")
+
+    accept_header = request.headers.get("accept", "")
+    want_html = fmt == "html" or "text/html" in accept_header
+
+    if want_html:
+        return Response(content=render_html(job.arch_map), media_type="text/html")
+
+    return {"job_id": job.job_id, "status": job.status, "arch_map": _sanitize(job.arch_map)}
 
 if __name__ == "__main__":
     import uvicorn

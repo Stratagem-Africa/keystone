@@ -24,6 +24,8 @@ export function IntentForm() {
   const [file, setFile] = useState<File | null>(null);
   const [formState, setFormState] = useState<FormState>("idle");
   const [report, setReport] = useState<string | null>(null);
+  const [archMapHtml, setArchMapHtml] = useState<string | null>(null);
+  const [view, setView] = useState<"map" | "raw">("map");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,14 +87,21 @@ export function IntentForm() {
       await pollUntilDone(job_id, token);
       if (cancelledRef.current) return;   // unmounted while polling — nothing left to update
 
-      const reportRes = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/report?fmt=markdown`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const [reportRes, archMapRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/report?fmt=markdown`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/archmap?fmt=html`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
       if (!reportRes.ok) throw new Error(`fetching the report returned ${reportRes.status}`);
-      const text = await reportRes.text();
+      if (!archMapRes.ok) throw new Error(`fetching the architecture map returned ${archMapRes.status}`);
+      const [text, mapHtml] = await Promise.all([reportRes.text(), archMapRes.text()]);
       if (cancelledRef.current) return;
       setReport(text);
+      setArchMapHtml(mapHtml);
+      setView("map");
       setFormState("done");
     } catch (err) {
       if (cancelledRef.current) return;   // unmounted mid-request — don't touch state on the way out
@@ -105,6 +114,8 @@ export function IntentForm() {
     setBrief("");
     setFile(null);
     setReport(null);
+    setArchMapHtml(null);
+    setView("map");
     setErrorMsg(null);
     setFormState("idle");
     if (fileInputRef.current) fileInputRef.current.value = "";   // else re-selecting the same filename won't fire onChange
@@ -135,16 +146,48 @@ export function IntentForm() {
     );
   }
 
-  if (formState === "done" && report !== null) {
+  if (formState === "done" && report !== null && archMapHtml !== null) {
     return (
       <div className="flex flex-col gap-4">
         <p className="font-mono text-provenance text-ink-muted-strong">
           Brief: &ldquo;{brief || "(no text — file upload only)"}&rdquo;
           {file && ` · File: ${file.name}`}
         </p>
-        <pre className="w-full max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg border border-mist bg-paper p-4 font-mono text-mono-data text-slate-ink">
-          {report}
-        </pre>
+
+        <div className="flex gap-4">
+          <button
+            onClick={() => setView("map")}
+            aria-pressed={view === "map"}
+            className={`font-sans text-label underline-offset-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${
+              view === "map" ? "text-slate-ink underline" : "text-ink-muted-strong hover:text-slate-ink"
+            }`}
+          >
+            Architecture Map
+          </button>
+          <button
+            onClick={() => setView("raw")}
+            aria-pressed={view === "raw"}
+            className={`font-sans text-label underline-offset-2 rounded-sm transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue ${
+              view === "raw" ? "text-slate-ink underline" : "text-ink-muted-strong hover:text-slate-ink"
+            }`}
+          >
+            Raw Report
+          </button>
+        </div>
+
+        {view === "map" ? (
+          <iframe
+            srcDoc={archMapHtml}
+            sandbox="allow-scripts"
+            title="Architecture map"
+            className="w-full h-[70vh] rounded-lg border border-mist"
+          />
+        ) : (
+          <pre className="w-full max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg border border-mist bg-paper p-4 font-mono text-mono-data text-slate-ink">
+            {report}
+          </pre>
+        )}
+
         <button
           onClick={reset}
           className="self-start font-sans text-label text-ink-muted-strong underline underline-offset-2 rounded-sm hover:text-slate-ink transition-colors ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
