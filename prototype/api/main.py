@@ -123,6 +123,7 @@ class SimulateRequest(BaseModel):
     system_rps: float = Field(10_000, gt=0, le=10_000_000)
     nodes: list[dict] = Field(default_factory=list)
     edges: list[list[str]] = Field(default_factory=list)
+    render: bool = False   # also return the self-contained interactive HTML map (so an edit re-renders it)
 
 
 @app.post("/simulate")
@@ -134,14 +135,22 @@ def simulate_topology(req: SimulateRequest) -> dict:
     nothing to protect; it's a calculator). Add auth if it ever persists or reads user data.
     Prime directive intact: `build_model_from_topology` only builds INPUTS; `simulate()` is the sole
     source of every number. Fail-closed: an invalid topology yields a clean 400, never a 500/crash.
+
+    With `render: true` the response also carries `html` — the same self-contained interactive map
+    `render_html` produces (same XSS-hardening as /generate), so an edited topology re-renders the
+    beautiful animated map, not just the JSON verdict.
     """
     try:
         model = build_model_from_topology(
             {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
-    except (IngestError, ValueError, KeyError) as e:
+        sim = simulate(model)
+        arch = build_arch_map(model, sim)
+        html = render_html(arch, title=req.name) if req.render else None
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
-    sim = simulate(model)
-    return _sanitize(build_arch_map(model, sim))
+    if html is not None:
+        arch["html"] = html
+    return _sanitize(arch)
 
 
 class GenerateRequest(BaseModel):

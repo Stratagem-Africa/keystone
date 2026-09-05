@@ -251,7 +251,7 @@ function signatureOf(systemRps: number, nodes: Node<ComponentNodeData>[], edges:
 
 const DRAG_KIND_TYPE = "application/keystone-kind";
 
-function CanvasInner({ seed }: { seed?: CanvasSeed }) {
+function CanvasInner({ seed, onSimulated }: { seed?: CanvasSeed; onSimulated?: (arch: ArchMap) => void }) {
   const { screenToFlowPosition } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<ComponentNodeData>>(
     seed ? seedToFlowNodes(seed.nodes) : initialNodes,
@@ -351,6 +351,7 @@ function CanvasInner({ seed }: { seed?: CanvasSeed }) {
           ...(n.data.monthly_cost_cents ? { monthly_cost_cents: n.data.monthly_cost_cents } : {}),
         })),
         edges: edges.map((e) => [e.source, e.target] as [string, string]),
+        render: true, // get the self-contained map HTML back too, so the studio can re-render the pretty view
       };
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/simulate`, {
         method: "POST",
@@ -364,6 +365,7 @@ function CanvasInner({ seed }: { seed?: CanvasSeed }) {
       const data: ArchMap = await res.json();
       setSimulatedSignature(topologySignature);
       setArchMap(data);
+      onSimulated?.(data); // hand the fresh verdict + rendered map up to the studio (map view reflects the edit)
     } catch (err) {
       setArchMap(null);
       setSimError(err instanceof Error ? err.message : "couldn't reach the simulate endpoint");
@@ -601,10 +603,12 @@ function CanvasInner({ seed }: { seed?: CanvasSeed }) {
 // provider wraps the whole editor, not just the <ReactFlow> element. `seed` opens the canvas on a
 // generated design (the studio passes it + a `key` so a new generation remounts fresh); omitted, it
 // opens on the starter fixture.
-export function CanvasEditor({ seed }: { seed?: CanvasSeed } = {}) {
+export function CanvasEditor(
+  { seed, onSimulated }: { seed?: CanvasSeed; onSimulated?: (arch: ArchMap) => void } = {},
+) {
   return (
     <ReactFlowProvider>
-      <CanvasInner seed={seed} />
+      <CanvasInner seed={seed} onSimulated={onSimulated} />
     </ReactFlowProvider>
   );
 }

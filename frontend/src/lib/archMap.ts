@@ -50,6 +50,7 @@ export interface SimulateRequest {
   system_rps?: number;
   nodes: TopologyNode[];
   edges: [string, string][];
+  render?: boolean; // also return the self-contained interactive HTML map (so an edit re-renders it)
 }
 
 export type Provenance = "GROUNDED" | "RECONCILE" | "ASSUMPTION" | "GAP";
@@ -166,6 +167,7 @@ export interface ArchMap {
   caveats: string[];
   derivation: string[];
   assumptions: ArchMapAssumption[];
+  html?: string; // present when the endpoint was asked to render (the self-contained interactive map)
 }
 
 export interface ApiErrorBody {

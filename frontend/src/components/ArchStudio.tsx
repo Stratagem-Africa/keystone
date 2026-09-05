@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { CanvasEditor, type CanvasSeed } from "@/components/CanvasEditor";
 import { seedFromArchMap, type ArchMap } from "@/lib/archMap";
 
-// The one architecture surface. Type an intent → the engine designs + simulates a DEEP architecture
-// (POST /generate) → it opens on the editable canvas, already showing the engine's verdict, where you
-// refine any node and re-simulate. One flow: describe → living, editable design. No separate map /
-// canvas / report pages — this is all of them.
+// The one architecture surface. Describe an intent → the engine designs + simulates a DEEP architecture
+// (POST /generate) → it opens on the beautiful, animated map (the self-contained renderer, journeys +
+// flow particles + drill-down). One clear "Edit" toggle swaps to the editable canvas (same design,
+// seeded) where you refine + re-simulate; the map re-renders to reflect the edit. One door:
+// describe → see → (edit) → verdict.
 //
 // Prime directive: every number comes from the engine (/generate, then /simulate on edits). This
-// component computes none. The endpoint is public + pinned to the offline $0 path (never a live LLM),
-// so no sign-in is needed and it can't drive metered spend.
+// component computes none. Public + offline-pinned (never a live LLM), so no sign-in is needed.
 
 type GenerateResponse = ArchMap & {
   matched?: string | null; // which reference architecture (null = no offline match → generic fallback)
@@ -19,8 +19,8 @@ type GenerateResponse = ArchMap & {
 };
 
 type State = "idle" | "generating" | "done" | "error";
+type Mode = "map" | "edit";
 
-// Example intents — mirror the offline reference catalogue so they work today at $0 with no key.
 const EXAMPLES = [
   "A platform like Twitter",
   "An online store checkout with payments",
@@ -33,8 +33,9 @@ const API = process.env.NEXT_PUBLIC_API_URL;
 export function ArchStudio() {
   const [intent, setIntent] = useState("");
   const [state, setState] = useState<State>("idle");
+  const [mode, setMode] = useState<Mode>("map");
   const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [genId, setGenId] = useState(0); // bumps each generation → remounts the canvas with the new seed
+  const [genId, setGenId] = useState(0); // bumps each generation → remounts the canvas with a fresh seed
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -61,7 +62,7 @@ export function ArchStudio() {
       const res = await fetch(`${API}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent: brief }),
+        body: JSON.stringify({ intent: brief, render: true }), // render:true → the animated map HTML
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -72,6 +73,7 @@ export function ArchStudio() {
       if (controller.signal.aborted) return;
       setResult(data);
       setGenId((n) => n + 1);
+      setMode("map");
       setState("done");
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -94,14 +96,18 @@ export function ArchStudio() {
     state === "generating"
       ? "Designing a layered architecture and simulating it on the engine…"
       : state === "done" && result
-        ? `Ready. ${result.nodes.length} components on the canvas — edit any node and re-simulate.`
+        ? `Ready. ${result.nodes.length} components, ${result.flows.length} request journeys.`
         : "";
 
-  // Seed the editable canvas from the generated design (positioned nodes + edges + the engine verdict),
-  // so it opens on the architecture, not a blank grid.
+  // Seed the editable canvas from the current design (positioned nodes + edges + engine verdict).
   const seed: CanvasSeed | null = result
     ? { ...seedFromArchMap(result), systemRps: Math.round(result.meta.offered_load_rps), archMap: result }
     : null;
+
+  const tabBtn = (active: boolean) =>
+    `font-sans text-label px-3 py-1 rounded-full transition-colors duration-ui ${
+      active ? "bg-[var(--cv-blue)] text-[var(--cv-paper)]" : "text-[var(--cv-muted)] hover:text-[var(--cv-ink)]"
+    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]`;
 
   return (
     <div className="flex flex-col gap-8">
@@ -161,7 +167,7 @@ export function ArchStudio() {
         </div>
       )}
 
-      {/* Result — the editable canvas, full-screen, seeded with the generated design + its verdict. */}
+      {/* Result — full-screen. Default = the beautiful animated map; one "Edit" toggle to refine. */}
       {state === "done" && result && seed && (
         <div className="canvas-glass fixed inset-0 z-50 flex flex-col">
           <div className="flex items-center justify-between gap-4 px-4 py-2 border-b border-[var(--cv-line)]">
@@ -170,19 +176,42 @@ export function ArchStudio() {
               <span className="font-mono text-[11px] text-[var(--cv-muted)] truncate">
                 {intent}
                 {result.matched == null && (
-                  <span className="text-[var(--cv-amber)]"> · generic starting point — edit it to fit</span>
+                  <span className="text-[var(--cv-amber)]"> · generic starting point — Edit to fit</span>
                 )}
               </span>
             </div>
-            <button
-              onClick={reset}
-              className="shrink-0 font-sans text-label font-medium px-4 py-1.5 rounded-full bg-[var(--cv-ink)] text-[var(--cv-paper)] transition-transform duration-ui active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
-            >
-              ✕ New design
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-1 rounded-full border border-[var(--cv-line)] p-0.5">
+                <button className={tabBtn(mode === "map")} onClick={() => setMode("map")}>Map</button>
+                <button className={tabBtn(mode === "edit")} onClick={() => setMode("edit")}>✎ Edit</button>
+              </div>
+              <button
+                onClick={reset}
+                className="font-sans text-label font-medium px-4 py-1.5 rounded-full bg-[var(--cv-ink)] text-[var(--cv-paper)] transition-transform duration-ui active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
+              >
+                ✕ New design
+              </button>
+            </div>
           </div>
+
           <div className="flex-1 min-h-0">
-            <CanvasEditor key={genId} seed={seed} />
+            {/* Map (default): the exact self-contained animated renderer, isolated in a sandboxed iframe. */}
+            <iframe
+              title={`Architecture map for: ${intent}`}
+              srcDoc={result.html ?? ""}
+              sandbox="allow-scripts"
+              className={`w-full h-full border-0 bg-[var(--cv-paper)] ${mode === "map" ? "block" : "hidden"}`}
+            />
+            {/* Edit: the editable canvas, seeded from the design. On re-simulate it updates the map too. */}
+            {mode === "edit" && (
+              <CanvasEditor
+                key={genId}
+                seed={seed}
+                onSimulated={(arch) =>
+                  setResult((prev) => (prev ? { ...arch, matched: prev.matched, catalogue: prev.catalogue } : prev))
+                }
+              />
+            )}
           </div>
         </div>
       )}
