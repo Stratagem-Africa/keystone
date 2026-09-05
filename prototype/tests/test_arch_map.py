@@ -12,7 +12,7 @@ import re
 import unittest
 
 from keystone import __version__ as ENGINE_VERSION
-from keystone.arch_map import _json_safe, _round_floats, _status, build_arch_map, render_html
+from keystone.arch_map import _json_safe, _round_floats, _status, build_arch_map, build_load_sweep, render_html
 from keystone.blueprints import payments, url_shortener
 from keystone.model import (Assumption, Component, ComponentKind, Flow, FlowStep,
                             SystemModel, Workload)
@@ -75,6 +75,33 @@ class TestArchMapNumbers(unittest.TestCase):
         import keystone.arch_map as am
         with open(am.__file__, encoding="utf-8") as f:
             self.assertNotIn("Metric(", f.read())
+
+
+class TestLoadSweep(unittest.TestCase):
+    def test_sweep_is_opt_in_and_engine_computed(self):
+        m, s = _us()
+        self.assertNotIn("sweep", build_arch_map(m, s))              # lean by default
+        arch = build_arch_map(m, s, sweep=True)
+        self.assertIn("sweep", arch)
+        frames = arch["sweep"]
+        self.assertGreaterEqual(len(frames), 5)
+        # utilisation rises monotonically with load — proving each frame is a real run at that load,
+        # and the map only DISPLAYS these (prime directive: the engine authors every number, per load).
+        base = next(f for f in frames if abs(f["multiple"] - 1.0) < 1e-9)
+        hi = max(frames, key=lambda f: f["multiple"])
+        self.assertGreater(hi["bottleneck_utilization"], base["bottleneck_utilization"])
+        # the breakpoint is a property of the DESIGN, not the offered load → constant across the sweep.
+        self.assertEqual(len({round(f["breakpoint_rps_safe"] or 0) for f in frames}), 1)
+
+    def test_sweep_matches_a_direct_simulate_at_that_load(self):
+        import dataclasses
+        m, s = _us()
+        frames = build_load_sweep(m)
+        hi = max(frames, key=lambda f: f["multiple"])
+        scaled = dataclasses.replace(m, workload=dataclasses.replace(m.workload, system_rps=hi["load_rps"]))
+        direct = simulate(scaled)
+        self.assertEqual(hi["bottleneck_id"], direct.bottleneck_id)          # same engine result, no client math
+        self.assertAlmostEqual(hi["bottleneck_utilization"], direct.bottleneck_utilization, places=6)
 
 
 class TestDeterminismAndValidity(unittest.TestCase):

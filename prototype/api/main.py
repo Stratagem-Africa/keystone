@@ -144,7 +144,7 @@ def simulate_topology(req: SimulateRequest) -> dict:
         model = build_model_from_topology(
             {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
         sim = simulate(model)
-        arch = build_arch_map(model, sim)
+        arch = build_arch_map(model, sim, sweep=req.render)   # sweep powers the interactive load simulator
         html = render_html(arch, title=req.name) if req.render else None
     except (IngestError, ValueError, KeyError, ArithmeticError) as e:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
@@ -181,7 +181,7 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     try:
         model = generate_architecture(req.intent, provider="stub")  # public surface: offline, $0, no LLM
         sim = simulate(model)                                        # simulate() is the sole number source
-        arch = build_arch_map(model, sim)
+        arch = build_arch_map(model, sim, sweep=req.render)          # sweep powers the interactive load simulator
         # Render BEFORE attaching catalogue/matched so the embedded JSON island stays the clean arch map
         # (build the map once — no redundant recompute on the hot path).
         html = render_html(arch, title=req.intent[:80]) if req.render else None
