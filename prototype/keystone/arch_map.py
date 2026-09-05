@@ -16,6 +16,7 @@ same (model, sim) yields byte-identical output — a committed golden, exactly l
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 
@@ -23,7 +24,7 @@ from keystone import __version__ as _ENGINE_VERSION
 from keystone.council import is_high_stakes
 from keystone.model import ComponentKind, SystemModel
 from keystone.provenance import GROUNDABLE_METRICS
-from keystone.simulation import SimulationResult
+from keystone.simulation import SimulationResult, simulate
 
 # Canonical left→right layer bands for layout. Every ComponentKind maps to exactly one band, so any
 # model lays out deterministically. This is a DISPLAY grouping only — not an engine concept.
@@ -44,9 +45,9 @@ _KIND_LAYER: dict[ComponentKind, tuple[str, str, int]] = {
 # stays self-contained (no icon-font/asset dependency, stdlib-first). `role` is a one-line, non-technical
 # description of what the component DOES, so a non-engineer can read the map without knowing the kind.
 _KIND_ICON: dict[ComponentKind, str] = {
-    ComponentKind.CLIENT: "👤", ComponentKind.CDN: "🌐", ComponentKind.LOAD_BALANCER: "⚖️",
-    ComponentKind.API_GATEWAY: "🚪", ComponentKind.APP_SERVER: "⚙️", ComponentKind.CACHE: "⚡",
-    ComponentKind.SQL_DB: "🗄️", ComponentKind.REPLICA: "📑", ComponentKind.QUEUE: "📨",
+    ComponentKind.CLIENT: "🧑‍💻", ComponentKind.CDN: "🛰️", ComponentKind.LOAD_BALANCER: "🔀",
+    ComponentKind.API_GATEWAY: "🛡️", ComponentKind.APP_SERVER: "⚙️", ComponentKind.CACHE: "⚡",
+    ComponentKind.SQL_DB: "🗄️", ComponentKind.REPLICA: "🗂️", ComponentKind.QUEUE: "📥",
     ComponentKind.OBJECT_STORE: "🪣", ComponentKind.EXTERNAL_API: "🔌",
 }
 _KIND_ROLE: dict[ComponentKind, str] = {
@@ -155,9 +156,47 @@ def _round_floats(obj, ndigits: int = 6):
     return obj
 
 
-def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
+# Offered-load multiples the interactive simulator can scrub through (× the design load).
+_SWEEP_MULTIPLES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0)
+
+
+def build_load_sweep(model: SystemModel) -> list[dict]:
+    """Run the ENGINE at a range of offered loads (multiples of the design load) so the interactive map
+    can *play* the system straining under traffic. Every frame is a real `simulate()` run — the map only
+    displays these engine-computed values and never scales a number itself (prime directive holds: the
+    engine is the sole author of every utilisation / breakpoint / cost shown, at every load)."""
+    base = model.workload.system_rps or 0.0
+    frames: list[dict] = []
+    for mult in _SWEEP_MULTIPLES:
+        load = base * mult
+        scaled = dataclasses.replace(
+            model, workload=dataclasses.replace(model.workload, system_rps=load))
+        sim = simulate(scaled)
+        frames.append({
+            "load_rps": load,
+            "multiple": mult,
+            "bottleneck_id": sim.bottleneck_id,
+            "bottleneck_utilization": sim.bottleneck_utilization,
+            "breakpoint_rps_safe": sim.breakpoint_rps_safe,
+            "monthly_cost_cents": sim.monthly_cost,
+            "nodes": {
+                cid: {
+                    "utilization": cr.utilization,
+                    "arrival_rps": cr.arrival_rps,
+                    "saturated": bool(cr.saturated),
+                    "status": _status(cr.utilization, cr.saturated),
+                }
+                for cid, cr in sim.components.items()
+            },
+        })
+    return frames
+
+
+def build_arch_map(model: SystemModel, sim: SimulationResult, *, sweep: bool = False) -> dict:
     """The deterministic engine→map serialisation. Numbers come from `sim` (engine results) and the
-    model's declared inputs; provenance/evidence come from the model. Nothing here computes a metric."""
+    model's declared inputs; provenance/evidence come from the model. Nothing here computes a metric.
+    With `sweep=True`, also attaches an engine-computed load sweep (see `build_load_sweep`) so the
+    interactive map can animate the design straining under rising traffic."""
     # Nodes, sorted by (layer order, id) for a stable, layered layout.
     nodes: list[dict] = []
     for cid in sorted(model.components):
@@ -246,6 +285,8 @@ def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
                          "confidence": a.confidence, "provenance": a.provenance}
                         for a in model.assumptions],
     }
+    if sweep:
+        arch["sweep"] = build_load_sweep(model)
     return _json_safe(arch)
 
 
@@ -340,9 +381,11 @@ body.simple .node .simplestat{display:block}
 .jc:hover{border-color:var(--steel);background:rgba(90,120,255,.16)}
 .node.cur{box-shadow:0 0 0 2px var(--blue),0 10px 30px rgba(0,0,0,.55),0 0 34px -4px var(--blue)!important;opacity:1!important}
 circle.flow{opacity:.95;pointer-events:none}
+circle.req{opacity:.9;pointer-events:none}
+circle.resp{opacity:.42;fill:var(--muted);pointer-events:none}
 
 /* nodes */
-.node{position:absolute;width:190px;border-radius:12px;padding:9px 11px 10px;cursor:pointer;
+.node{position:absolute;width:200px;border-radius:12px;padding:9px 11px 10px;cursor:pointer;
   background:linear-gradient(180deg,rgba(26,34,66,.94),rgba(14,20,44,.94));
   border:1px solid rgba(150,170,240,.16);box-shadow:0 6px 18px rgba(0,0,0,.42);
   transition:transform .15s ease,box-shadow .15s ease,opacity .18s ease;overflow:hidden}
@@ -352,7 +395,7 @@ circle.flow{opacity:.95;pointer-events:none}
   background:rgba(125,211,252,.1);box-shadow:inset 0 0 0 1px rgba(125,211,252,.18),0 0 14px rgba(125,211,252,.1)}
 .node .nm{font-size:12.5px;font-weight:700;line-height:1.15;padding-right:4px}
 .node .kd{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em;margin-top:2px}
-.node .role{font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+.node .role{font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .node .util{margin-top:7px;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
 .node .util > i{display:block;height:100%;border-radius:3px;background:var(--sc,var(--ok))}
 .node .meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10.5px;color:var(--muted)}
@@ -418,6 +461,11 @@ table.k td.n{text-align:right;font-variant-numeric:tabular-nums}
 .legend .ln{width:20px;height:0;border-top:3px solid;border-radius:2px}
 #hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:8;color:#6b76a0;font-size:11px;pointer-events:none}
 .credit{position:fixed;right:16px;bottom:12px;z-index:8;color:#5f6b93;font-size:10.5px}
+#loadbar{position:fixed;left:50%;bottom:46px;transform:translateX(-50%);z-index:22;display:flex;align-items:center;gap:12px;padding:9px 16px;max-width:min(780px,94vw)}
+#loadbar button{background:var(--blue);color:#04121f;border:none;border-radius:20px;padding:6px 14px;font-weight:800;font-size:12px;cursor:pointer;white-space:nowrap}
+#loadbar input[type=range]{width:220px;accent-color:var(--blue);cursor:pointer}
+#loadbar #loadReadout{font-size:12px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;min-width:210px}
+#loadbar .loadhint{font-size:10px;color:#6b76a0;max-width:180px;line-height:1.25}
 """
 
 
@@ -442,7 +490,9 @@ const divBadge={matched:'✓ matched',soft:'⚠ soft',hard:'⛔ HARD',not_compar
 const gapStr=g=>g==null?'':(g>=0?'+':'')+Math.round(g*100)+'%';
 
 // ---- layout ---------------------------------------------------------------
-const COLW=250,ROWH=140,PADX=70,PADY=90,NW=190,NH=94;
+// Row pitch (ROWH) is comfortably taller than a full card (icon+name+2-line role+bar+stat) so cards
+// never overlap; the role itself is clamped to 2 lines in CSS to bound card height.
+const COLW=280,ROWH=176,PADX=70,PADY=96,NW=200,NH=132;
 const nodeById={};DATA.nodes.forEach(n=>nodeById[n.id]=n);
 // dense-rank the layers actually present, so empty bands leave no gap
 const presentOrders=[...new Set(DATA.nodes.map(n=>n.layer_order))].sort((a,b)=>a-b);
@@ -733,6 +783,65 @@ window.addEventListener('mouseup',()=>{drag=null;stage.classList.remove('grabbin
 stage.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:1/1.1;const r=stage.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;tx=mx-(mx-tx)*f;ty=my-(my-ty)*f;sc=Math.max(.3,Math.min(2.2,sc*f));apply();},{passive:false});
 $('#vFit').onclick=fit;$('#vIn').onclick=()=>{sc=Math.min(2.2,sc*1.15);apply();};$('#vOut').onclick=()=>{sc=Math.max(.3,sc/1.15);apply();};$('#vReset').onclick=fit;
 stage.addEventListener('click',e=>{if(!e.target.closest('.node,#panel,#dock,#drawer')){clearFlow();closePanel();}});
+
+// ---- ambient flow: requests stream forward + responses return, always, on every wire -----------
+// Speed rises with the offered load (LOADI) so you can SEE the system get busier under traffic.
+let LOADI=1, ambRAF=null, ambT0=null; const ambient=[];
+const flowColor={}; DATA.flows.forEach(f=>flowColor[f.name]=f.color);
+function buildAmbient(){
+  edgeEls.forEach((e,i)=>{
+    const len=e.path.getTotalLength()||1, col=flowColor[e.flow]||'var(--blue)';
+    const share=(DATA.flows.find(f=>f.name===e.flow)?.share)||0.3;
+    const reqN=1+Math.round(share*2);
+    for(let k=0;k<reqN;k++){
+      const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('r','2.6');c.setAttribute('class','req');c.style.fill=col;svg.appendChild(c);
+      ambient.push({c,p:e.path,len,ph:((i*0.37+k/reqN)%1),dir:1});
+    }
+    const r=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    r.setAttribute('r','2');r.setAttribute('class','resp');svg.appendChild(r);
+    ambient.push({c:r,p:e.path,len,ph:((i*0.37+0.5)%1),dir:-1});
+  });
+}
+function ambientTick(ts){
+  if(ambT0==null)ambT0=ts; const dt=(ts-ambT0)/1000;
+  const spd=0.11*Math.min(3.2,Math.max(0.35,LOADI));
+  ambient.forEach(q=>{ let u=((dt*spd*(q.dir<0?0.6:1))+q.ph)%1; if(q.dir<0)u=1-u;
+    const pt=q.p.getPointAtLength(u*q.len); q.c.setAttribute('cx',pt.x); q.c.setAttribute('cy',pt.y); });
+  ambRAF=requestAnimationFrame(ambientTick);
+}
+
+// ---- load simulator: scrub / play the engine-computed sweep; wires + nodes respond live ---------
+// Every frame is a real engine run (see build_load_sweep) — the map only DISPLAYS these values and
+// computes nothing itself (prime directive).
+const SW=DATA.sweep||[];
+const SSTAT={ok:'✓ plenty of headroom',hot:'⚠ running near its limit',saturated:'✕ over its limit'};
+let frameI=SW.findIndex(f=>Math.abs((f.multiple||0)-1)<1e-6); if(frameI<0)frameI=0;
+function applyFrame(i){
+  if(!SW.length)return; frameI=Math.max(0,Math.min(SW.length-1,i)); const fr=SW[frameI]; LOADI=fr.multiple||1;
+  DATA.nodes.forEach(n=>{ const nf=fr.nodes[n.id], d=nodeEls[n.id]; if(!nf||!d)return;
+    d.style.setProperty('--sc',statusColor[nf.status]||'var(--muted)');
+    d.classList.toggle('hot',nf.status==='hot'||nf.status==='saturated');
+    const fill=d.querySelector('.util i'); if(fill)fill.style.width=Math.min(100,(nf.utilization||0)*100)+'%';
+    const ub=d.querySelector('.meta b'); if(ub)ub.textContent=pct(nf.utilization);
+    const ss=d.querySelector('.simplestat'); if(ss){ss.className='simplestat s-'+nf.status; ss.textContent=SSTAT[nf.status]||'';}
+  });
+  const over=(fr.bottleneck_utilization||0)>1, ro=$('#loadReadout');
+  if(ro){ro.textContent=Math.round(fr.load_rps).toLocaleString()+' rps · '+fr.multiple+'× · peak '+pct(fr.bottleneck_utilization)+(over?'  ✕ OVER CAPACITY':''); ro.style.color=over?'var(--sat)':'var(--muted)';}
+  const sl=$('#loadSlider'); if(sl&&+sl.value!==frameI)sl.value=frameI;
+}
+let playRAF=null,playT0=null;
+function stopPlay(){if(playRAF)cancelAnimationFrame(playRAF);playRAF=null;const b=$('#loadPlay');if(b)b.textContent='▶ Push to '+(SW.length?SW[SW.length-1].multiple:10)+'×';}
+function playLoad(){ if(playRAF){stopPlay();return;} if(!SW.length)return; playT0=null; const dur=4200, b=$('#loadPlay'); if(b)b.textContent='⏸ Running…';
+  (function step(ts){ if(playT0==null)playT0=ts; const p=Math.min(1,(ts-playT0)/dur); applyFrame(Math.round(p*(SW.length-1))); if(p<1){playRAF=requestAnimationFrame(step);} else {stopPlay();} })(performance.now());
+}
+if(SW.length){
+  const sl=$('#loadSlider'); if(sl){sl.max=SW.length-1; sl.value=frameI; sl.oninput=()=>{stopPlay();applyFrame(+sl.value);};}
+  const pb=$('#loadPlay'); if(pb)pb.onclick=playLoad;
+  applyFrame(frameI);
+} else { const lb=$('#loadbar'); if(lb)lb.style.display='none'; }
+buildAmbient(); ambRAF=requestAnimationFrame(ambientTick);
+
 fit();
 // Re-fit once the iframe/window has actually laid out, and whenever it resizes, so the map always
 // frames itself to the current viewport (it's commonly embedded full-screen in an iframe).
@@ -835,6 +944,12 @@ def render_html(arch: dict, *, title: str | None = None) -> str:
     <div class="r"><span class="chip" style="background:#a5342a"></span>saturated</div></div>
 </div>
 
+<div id="loadbar" class="glass">
+  <button id="loadPlay">▶ Push to 10×</button>
+  <input id="loadSlider" type="range" min="0" max="0" value="0" aria-label="offered load"/>
+  <span id="loadReadout"></span>
+  <span class="loadhint">traffic simulator — drag or Push; every number is the engine's, at that load</span>
+</div>
 <div id="hint">drag to pan · scroll to zoom · hover a node to trace its flows · click for detail + provenance</div>
 <div class="credit">Keystone · deterministic engine · self-contained</div>
 
