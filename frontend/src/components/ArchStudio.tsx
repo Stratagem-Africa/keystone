@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasEditor, type CanvasSeed } from "@/components/CanvasEditor";
 import { ArchCanvas, type SweepFrame } from "@/components/ArchCanvas";
 import { ChaosPanel } from "@/components/ChaosPanel";
+import { DesignPanel } from "@/components/DesignPanel";
 import { LoadTransport } from "@/components/LoadTransport";
-import { seedFromArchMap, type ArchMap } from "@/lib/archMap";
+import { seedFromArchMap, type ArchMap, type ArchMapNode } from "@/lib/archMap";
 import {
   runScenario, type ScenarioOption, type ScenarioRun, type Unmodelled,
 } from "@/lib/scenarios";
@@ -46,7 +47,8 @@ export function ArchStudio() {
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [genId, setGenId] = useState(0); // bumps each generation → remounts the canvas with a fresh seed
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [loadIndex, setLoadIndex] = useState(0);
+  // -1 = "not chosen yet"; resolved to the design-load stop once the sweep arrives.
+  const [loadIndex, setLoadIndex] = useState(-1);
   const [chaos, setChaos] = useState<ScenarioRun | null>(null);
   const [chaosRunning, setChaosRunning] = useState<string | null>(null);
   const [chaosError, setChaosError] = useState<string | null>(null);
@@ -54,6 +56,9 @@ export function ArchStudio() {
   // A generated design must be perturbed via its intent (the topology cannot carry flow branch
   // probabilities). Once the user edits on the canvas, the topology IS the design, so we switch.
   const [edited, setEdited] = useState(false);
+  const [rail, setRail] = useState<"verdict" | "chaos">("verdict");
+  const [activeFlowIndex, setActiveFlowIndex] = useState<number | null>(null);
+  const [selectedNode, setSelectedNode] = useState<ArchMapNode | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -91,8 +96,10 @@ export function ArchStudio() {
       const data: GenerateResponse = await res.json();
       if (controller.signal.aborted) return;
       setResult(data);
-      setLoadIndex(0);
+      setLoadIndex(-1);
       setEdited(false);
+      setActiveFlowIndex(null);
+      setSelectedNode(null);
       setChaos(null);
       setChaosError(null);
       setGenId((n) => n + 1);
@@ -112,8 +119,10 @@ export function ArchStudio() {
     setResult(null);
     setChaos(null);
     setChaosError(null);
-    setLoadIndex(0);
+    setLoadIndex(-1);
     setEdited(false);
+    setActiveFlowIndex(null);
+    setSelectedNode(null);
     setIntent("");
     setErrorMsg(null);
     textareaRef.current?.focus();
@@ -163,7 +172,8 @@ export function ArchStudio() {
       );
       if (controller.signal.aborted) return;
       setChaos(run);
-      setLoadIndex(0); // a scenario answers at the design load; the load axis restarts from there
+      setLoadIndex(-1);  // a scenario answers at the design load; the load axis restarts from there
+      setSelectedNode(null);
     } catch (err) {
       if (controller.signal.aborted) return;
       setChaosError(err instanceof Error ? err.message : "the scenario could not be run");
@@ -178,7 +188,19 @@ export function ArchStudio() {
     () => (chaos ? [] : ((result?.sweep as SweepFrame[] | undefined) ?? [])),
     [chaos, result],
   );
-  const frame = frames.length > 0 ? frames[Math.min(loadIndex, frames.length - 1)] : null;
+  // The sweep brackets the design load (0.25x … 10x), so stop 0 is NOT the design. Open on the
+  // stop the user actually asked for, and make that where "back to design load" returns.
+  const baseIndex = useMemo(() => {
+    const i = frames.findIndex((f) => f.multiple === 1);
+    return i >= 0 ? i : 0;
+  }, [frames]);
+  const effectiveIndex = loadIndex < 0 ? baseIndex : Math.min(loadIndex, frames.length - 1);
+  const frame = frames.length > 0 ? frames[effectiveIndex] : null;
+
+  const railBtn = (active: boolean) =>
+    `flex-1 rounded-md px-2 py-1.5 font-sans text-[11.5px] font-semibold transition-colors ${
+      active ? "bg-[var(--cv-blue)] text-[var(--cv-paper)]" : "text-[var(--cv-muted)] hover:text-[var(--cv-ink)]"
+    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]`;
 
   const tabBtn = (active: boolean) =>
     `font-sans text-label px-3 py-1 rounded-full transition-colors duration-ui ${
@@ -287,10 +309,18 @@ export function ArchStudio() {
                       arch={shown}
                       frame={frame}
                       targetId={chaos?.scenario.target_id ?? null}
+                      activeFlowIndex={activeFlowIndex}
+                      selectedId={selectedNode?.id ?? null}
+                      onSelectNode={(n) => { setSelectedNode(n); setRail("verdict"); }}
                     />
                   </div>
                   {frames.length > 0 && (
-                    <LoadTransport frames={frames} index={loadIndex} onIndex={setLoadIndex} />
+                    <LoadTransport
+                      frames={frames}
+                      index={effectiveIndex}
+                      baseIndex={baseIndex}
+                      onIndex={setLoadIndex}
+                    />
                   )}
                   {chaos && (
                     <p
@@ -303,19 +333,39 @@ export function ArchStudio() {
                   )}
                 </div>
                 <aside
-                  className="w-[290px] shrink-0 overflow-hidden"
+                  className="flex w-[320px] shrink-0 flex-col overflow-hidden"
                   style={{ borderLeft: "1px solid var(--cv-line)", background: "var(--cv-paper)" }}
-                  aria-label="Chaos scenarios"
+                  aria-label="Design verdict and chaos scenarios"
                 >
-                  <ChaosPanel
-                    scenarios={result.scenarios ?? []}
-                    unmodelled={result.unmodelled ?? {}}
-                    active={chaos}
-                    runningKey={chaosRunning}
-                    error={chaosError}
-                    onRun={(o) => void launchScenario(o)}
-                    onClear={() => { setChaos(null); setChaosError(null); }}
-                  />
+                  <div className="flex shrink-0 gap-1 p-2" style={{ borderBottom: "1px solid var(--cv-line)" }}>
+                    <button onClick={() => setRail("verdict")} className={railBtn(rail === "verdict")}>
+                      Verdict
+                    </button>
+                    <button onClick={() => setRail("chaos")} className={railBtn(rail === "chaos")}>
+                      Break it{result.scenarios ? ` (${result.scenarios.length})` : ""}
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    {rail === "verdict" ? (
+                      <DesignPanel
+                        arch={shown}
+                        selected={selectedNode}
+                        activeFlowIndex={activeFlowIndex}
+                        onFlow={setActiveFlowIndex}
+                        onClearSelection={() => setSelectedNode(null)}
+                      />
+                    ) : (
+                      <ChaosPanel
+                        scenarios={result.scenarios ?? []}
+                        unmodelled={result.unmodelled ?? {}}
+                        active={chaos}
+                        runningKey={chaosRunning}
+                        error={chaosError}
+                        onRun={(o) => void launchScenario(o)}
+                        onClear={() => { setChaos(null); setChaosError(null); }}
+                      />
+                    )}
+                  </div>
                 </aside>
               </>
             )}

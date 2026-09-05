@@ -10,6 +10,8 @@ import type { SweepFrame } from "./ArchCanvas";
 interface LoadTransportProps {
   frames: SweepFrame[];
   index: number;
+  /** The stop that IS the design load (multiple 1) — where "back" returns to. */
+  baseIndex: number;
   onIndex: (i: number) => void;
   disabled?: boolean;
 }
@@ -20,7 +22,7 @@ function fmt(n: number): string {
   return n.toFixed(0);
 }
 
-export function LoadTransport({ frames, index, onIndex, disabled = false }: LoadTransportProps) {
+export function LoadTransport({ frames, index, baseIndex, onIndex, disabled = false }: LoadTransportProps) {
   if (frames.length === 0) return null;
   const frame = frames[Math.min(index, frames.length - 1)];
   const peak = frame.bottleneck_utilization;
@@ -36,6 +38,7 @@ export function LoadTransport({ frames, index, onIndex, disabled = false }: Load
   // The first stop at or beyond saturation — "push to where it breaks" in one click.
   const breakIdx = frames.findIndex((f) => (f.bottleneck_utilization ?? 0) > 1);
   const target = breakIdx >= 0 ? breakIdx : frames.length - 1;
+  const atTarget = index === target;
 
   return (
     <div
@@ -43,12 +46,12 @@ export function LoadTransport({ frames, index, onIndex, disabled = false }: Load
       style={{ borderTop: "1px solid var(--cv-line)", background: "var(--cv-panel)" }}
     >
       <button
-        onClick={() => onIndex(index === target ? 0 : target)}
+        onClick={() => onIndex(atTarget ? baseIndex : target)}
         disabled={disabled}
         className="shrink-0 rounded-full px-3.5 py-1.5 text-[11.5px] font-semibold transition-transform active:scale-[0.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{ background: "var(--cv-blue)", color: "var(--cv-paper)", outlineColor: "var(--cv-blue)" }}
       >
-        {index === target ? "↺ Back to design load" : `▶ Push to ${fmt(frames[target].load_rps)} rps`}
+        {atTarget ? "↺ Back to design load" : `▶ Push to ${fmt(frames[target].load_rps)} rps`}
       </button>
 
       <input

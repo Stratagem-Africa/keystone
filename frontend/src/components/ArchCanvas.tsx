@@ -19,7 +19,7 @@ import { useReducedMotion } from "@/lib/useReducedMotion";
 
 // ─── layout (deterministic; mirrors the layered bands the engine already assigns) ──────────────
 const NODE_W = 268;
-const NODE_H = 138;
+const NODE_H = 152;
 const GAP_X = 104;
 const GAP_Y = 26;
 const PAD = 56;
@@ -88,9 +88,15 @@ export interface ArchCanvasProps {
   targetId?: string | null;
   /** Flow to spotlight; other wires recede. */
   activeFlowIndex?: number | null;
+  /** Component currently open in the inspector. */
+  selectedId?: string | null;
+  onSelectNode?: (node: ArchMapNode) => void;
 }
 
-export function ArchCanvas({ arch, frame = null, targetId = null, activeFlowIndex = null }: ArchCanvasProps) {
+export function ArchCanvas({
+  arch, frame = null, targetId = null, activeFlowIndex = null,
+  selectedId = null, onSelectNode,
+}: ArchCanvasProps) {
   const reduced = useReducedMotion();
   const shellRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -283,45 +289,51 @@ export function ArchCanvas({ arch, frame = null, targetId = null, activeFlowInde
             ? 0
             : Math.max(2, Math.min(100, p.utilization * 100));
           return (
-            <div
+            <button
               key={p.node.id}
-              className="cv-panel absolute overflow-hidden"
+              type="button"
+              onClick={() => onSelectNode?.(p.node)}
+              aria-pressed={selectedId === p.node.id}
+              className="cv-panel absolute overflow-hidden text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{
                 left: p.x,
                 top: p.y,
                 width: NODE_W,
                 height: NODE_H,
                 borderLeft: `3px solid ${hue}`,
-                boxShadow: p.isBottleneck
-                  ? `0 0 0 1px ${hue}, 0 12px 40px rgba(0,0,0,.5)`
-                  : isTarget
-                    ? "0 0 0 1px var(--cv-blue), 0 12px 40px rgba(0,0,0,.5)"
-                    : undefined,
+                outlineColor: "var(--cv-blue)",
+                boxShadow: selectedId === p.node.id
+                  ? "0 0 0 2px var(--cv-blue), 0 12px 40px rgba(0,0,0,.5)"
+                  : p.isBottleneck
+                    ? `0 0 0 1px ${hue}, 0 12px 40px rgba(0,0,0,.5)`
+                    : isTarget
+                      ? "0 0 0 1px var(--cv-blue), 0 12px 40px rgba(0,0,0,.5)"
+                      : undefined,
                 transition: reduced ? "none" : "box-shadow 200ms ease",
               }}
             >
-              <div className="flex items-start gap-2 px-3 pt-3">
-                <span aria-hidden className="text-[15px] leading-none">{p.node.icon}</span>
-                <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
-                  {p.node.name}
-                </span>
-                {p.node.is_spof && (
-                  <span
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
-                    style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}
-                    title="Single point of failure — one instance, no redundancy"
-                  >
-                    SPOF
+              <div className="flex h-full flex-col p-3">
+                <div className="flex items-start gap-2">
+                  <span aria-hidden className="text-[15px] leading-none">{p.node.icon}</span>
+                  <span className="min-w-0 flex-1 line-clamp-2 text-[13px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
+                    {p.node.name}
                   </span>
-                )}
-              </div>
+                  {p.node.is_spof && (
+                    <span
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                      style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}
+                      title="Single point of failure — one instance, no redundancy"
+                    >
+                      SPOF
+                    </span>
+                  )}
+                </div>
 
-              <p className="px-3 pt-1 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-                {p.node.role}
-              </p>
+                <p className="mt-1 line-clamp-2 flex-1 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
+                  {p.node.role}
+                </p>
 
-              <div className="absolute inset-x-3 bottom-8">
-                <div className="flex items-baseline justify-between text-[11px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
+                <div className="mt-1 flex items-baseline justify-between text-[11px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
                   <span style={{ color: "var(--cv-ink)" }}>{fmtRps(p.arrival_rps)} rps</span>
                   <span>{pct(p.utilization)}</span>
                 </div>
@@ -335,16 +347,41 @@ export function ArchCanvas({ arch, frame = null, targetId = null, activeFlowInde
                     }}
                   />
                 </div>
+                <div className="mt-1.5 truncate text-[10.5px] font-semibold" style={{ color: hue }}>
+                  {p.status === "ok" ? "\u2713 " : "\u25B2 "}
+                  {STATUS_WORD[p.status]}
+                  {p.isBottleneck && <span style={{ color: "var(--cv-muted)" }}> · the limit</span>}
+                </div>
               </div>
-
-              <div className="absolute inset-x-3 bottom-2.5 text-[10.5px] font-semibold" style={{ color: hue }}>
-                {p.status === "ok" ? "✓ " : "▲ "}
-                {STATUS_WORD[p.status]}
-                {p.isBottleneck && <span style={{ color: "var(--cv-muted)" }}> · the limit</span>}
-              </div>
-            </div>
+            </button>
           );
         })}
+      </div>
+
+      {/* ── the design's own header: what this is, and how far to trust it ── */}
+      <div className="cv-panel absolute left-4 top-4 max-w-[380px] p-3">
+        <p className="text-[14px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
+          {arch.meta.title}
+        </p>
+        <p className="mt-1 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
+          Architecture map · every number is the engine&apos;s, at this load
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold" style={{ background: "rgba(150,170,235,.16)", color: "var(--cv-muted)" }}>
+            {arch.meta.accuracy_level}
+          </span>
+          <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold tabular-nums" style={{ background: "rgba(150,170,235,.16)", color: "var(--cv-muted)" }}>
+            {fmtRps(frame?.load_rps ?? arch.meta.offered_load_rps)} req/s offered
+          </span>
+          {arch.meta.high_stakes && (
+            <span className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider" style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}>
+              expert review required
+            </span>
+          )}
+        </div>
+        <p className="mt-1.5 text-[9.5px] leading-snug" style={{ color: "var(--cv-amber)" }}>
+          confidence: {arch.meta.confidence}
+        </p>
       </div>
 
       {/* ── zoom controls ── */}
