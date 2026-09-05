@@ -23,6 +23,7 @@ from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
 from keystone.arch_map import build_arch_map, render_html
+from keystone import scenarios as chaos
 from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
@@ -150,7 +151,64 @@ def simulate_topology(req: SimulateRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
     if html is not None:
         arch["html"] = html
+    # The chaos catalogue THIS model can truthfully run (plus what we refuse to fake), so the
+    # panel renders exactly what POST /scenario will accept — a card is never a dead button.
+    arch["scenarios"] = chaos.catalogue_for(model)
+    arch["unmodelled"] = chaos.UNMODELLED
     return _sanitize(arch)
+
+
+class ScenarioRequest(SimulateRequest):
+    """A canvas topology plus the chaos scenario to run against it."""
+    scenario_id: str = Field(..., min_length=1, max_length=64)
+    target_id: str | None = Field(None, max_length=128)
+
+
+@app.post("/scenario")
+def run_chaos_scenario(req: ScenarioRequest) -> dict:
+    """Run a chaos scenario as a counterfactual: simulate the design, then simulate it perturbed.
+
+    Same stateless-calculator contract as /simulate (no auth, no persistence, no secrets).
+
+    Prime directive intact: `keystone.scenarios` only ever returns a modified `SystemModel`;
+    `simulate()` runs twice and is the sole author of every number on both sides. The `delta`
+    block is arithmetic over those two engine runs and carries its own derivation trace.
+    Fail-closed: an unknown scenario, a wrong-kind target, or one the model cannot express yields
+    a clean 400 — never a silent no-op that would show an unchanged design as "survived".
+    """
+    try:
+        model = build_model_from_topology(
+            {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
+        result = chaos.run_scenario(model, req.scenario_id, req.target_id)
+        perturbed_model = chaos.apply_scenario(model, req.scenario_id, req.target_id)
+        baseline_arch = build_arch_map(model, result.baseline, sweep=req.render)
+        perturbed_arch = build_arch_map(perturbed_model, result.perturbed, sweep=req.render)
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid scenario request: {e}")
+
+    return _sanitize({
+        "scenario": {
+            "id": result.scenario_id, "name": result.scenario_name,
+            "category": result.category, "question": result.question, "caveat": result.caveat,
+            "target_id": result.target_id, "target_name": result.target_name,
+        },
+        "baseline": baseline_arch,
+        "perturbed": perturbed_arch,
+        "delta": {
+            "verdict": result.verdict,
+            "survives": result.survives,
+            "bottleneck_moved": result.bottleneck_moved,
+            "latency_multiple": result.latency_multiple,
+            "utilization_delta": result.utilization_delta,
+            "baseline_latency_ms": result.baseline.mean_latency_ms,
+            "perturbed_latency_ms": result.perturbed.mean_latency_ms,
+            "baseline_bottleneck": result.baseline.bottleneck_name,
+            "perturbed_bottleneck": result.perturbed.bottleneck_name,
+            "baseline_confidence": result.baseline.confidence,
+            "perturbed_confidence": result.perturbed.confidence,
+            "derivation": result.derivation,
+        },
+    })
 
 
 class GenerateRequest(BaseModel):
@@ -190,6 +248,8 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     ref = match_reference(req.intent)
     arch["matched"] = ref[1] if ref else None       # which reference architecture (null = generic fallback)
     arch["catalogue"] = reference_catalogue()        # the offline options, for a "try one of these" hint
+    arch["scenarios"] = chaos.catalogue_for(model)   # the chaos panel for this generated design
+    arch["unmodelled"] = chaos.UNMODELLED
     if html is not None:
         arch["html"] = html
     return _sanitize(arch)
