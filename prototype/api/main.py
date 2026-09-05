@@ -125,6 +125,7 @@ class SimulateRequest(BaseModel):
     nodes: list[dict] = Field(default_factory=list)
     edges: list[list[str]] = Field(default_factory=list)
     render: bool = False   # also return the self-contained interactive HTML map (so an edit re-renders it)
+    sweep: bool = False    # also run the load sweep (one real simulate() per stop) for the load axis
 
 
 @app.post("/simulate")
@@ -145,7 +146,7 @@ def simulate_topology(req: SimulateRequest) -> dict:
         model = build_model_from_topology(
             {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
         sim = simulate(model)
-        arch = build_arch_map(model, sim, sweep=req.render)   # sweep powers the interactive load simulator
+        arch = build_arch_map(model, sim, sweep=req.sweep or req.render)  # each stop = one real simulate()
         html = render_html(arch, title=req.name) if req.render else None
     except (IngestError, ValueError, KeyError, ArithmeticError) as e:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
@@ -159,7 +160,22 @@ def simulate_topology(req: SimulateRequest) -> dict:
 
 
 class ScenarioRequest(SimulateRequest):
-    """A canvas topology plus the chaos scenario to run against it."""
+    """The design to perturb, plus which scenario to run.
+
+    The design arrives one of two ways, and they are NOT interchangeable:
+
+    * `intent` — rebuild the generated architecture from the same deterministic, offline path
+      `/generate` used. Use this whenever the user is looking at a generated design.
+    * `nodes`/`edges` — a canvas topology, for a design the user has edited.
+
+    Why the distinction matters: `build_model_from_topology` reconstructs flows with every step at
+    `visit_prob = 1.0`, because a drawn canvas carries no branch probabilities. A generated
+    blueprint does carry them (a 10% cache-miss path, say). Rebuilding a generated design from its
+    topology therefore yields a *different model* — one where `cache_cold` is a no-op — so the
+    catalogue offered for the generated design would not match what actually ran. Passing `intent`
+    keeps the scenario's baseline identical to the design on screen.
+    """
+    intent: str | None = Field(None, max_length=2000)
     scenario_id: str = Field(..., min_length=1, max_length=64)
     target_id: str | None = Field(None, max_length=128)
 
@@ -177,8 +193,14 @@ def run_chaos_scenario(req: ScenarioRequest) -> dict:
     a clean 400 — never a silent no-op that would show an unchanged design as "survived".
     """
     try:
-        model = build_model_from_topology(
-            {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
+        if req.intent:
+            # Same deterministic offline path /generate used, so the baseline is byte-for-byte the
+            # design on screen — including flow branch probabilities a topology cannot carry.
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
         result = chaos.run_scenario(model, req.scenario_id, req.target_id)
         perturbed_model = chaos.apply_scenario(model, req.scenario_id, req.target_id)
         baseline_arch = build_arch_map(model, result.baseline, sweep=req.render)
@@ -215,6 +237,7 @@ class GenerateRequest(BaseModel):
     """A one-line intent ("a platform like Twitter") to turn into a deep architecture."""
     intent: str = Field(..., min_length=1, max_length=2000)
     render: bool = False   # also return a self-contained interactive HTML map (for the frontend studio)
+    sweep: bool = False    # also run the load sweep (one real simulate() per stop) for the load axis
 
 
 @app.post("/generate")
@@ -239,7 +262,7 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     try:
         model = generate_architecture(req.intent, provider="stub")  # public surface: offline, $0, no LLM
         sim = simulate(model)                                        # simulate() is the sole number source
-        arch = build_arch_map(model, sim, sweep=req.render)          # sweep powers the interactive load simulator
+        arch = build_arch_map(model, sim, sweep=req.sweep or req.render)  # each stop = one real simulate()
         # Render BEFORE attaching catalogue/matched so the embedded JSON island stays the clean arch map
         # (build the map once — no redundant recompute on the hot path).
         html = render_html(arch, title=req.intent[:80]) if req.render else None

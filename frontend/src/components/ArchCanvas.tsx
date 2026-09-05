@@ -1,0 +1,383 @@
+"use client";
+
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ArchMap, ArchMapNode, NodeStatus } from "@/lib/archMap";
+import { useReducedMotion } from "@/lib/useReducedMotion";
+
+// The architecture map, as a real React component.
+//
+// It replaces the sandboxed iframe that used to carry the Python-rendered HTML. Same visual
+// language (the `--cv-*` tokens in globals.css mirror arch_map.py's _CSS), but now it is a
+// component: it takes engine output as props, so it can be re-pointed at a sweep frame or at a
+// chaos scenario's perturbed run without a round-trip through a string template.
+//
+// PRIME DIRECTIVE. This file computes no metric. Every number rendered here is read straight off
+// `arch` (the engine's `build_arch_map` output) or off a `frame` (a real `simulate()` run at a
+// different offered load). The only arithmetic is *visual encoding* — turning an engine number
+// into a bar width or a particle count, the way a bar chart turns a number into a length. Nothing
+// here originates a value, and nothing is interpolated between engine runs.
+
+// ─── layout (deterministic; mirrors the layered bands the engine already assigns) ──────────────
+const NODE_W = 268;
+const NODE_H = 138;
+const GAP_X = 104;
+const GAP_Y = 26;
+const PAD = 56;
+const HEADER_H = 30; // room for the column label above each band
+
+export interface SweepFrameNode {
+  utilization: number | null;
+  arrival_rps: number | null;
+  saturated: boolean;
+  status: NodeStatus;
+}
+
+export interface SweepFrame {
+  load_rps: number;
+  multiple: number;
+  bottleneck_id: string | null;
+  bottleneck_utilization: number | null;
+  breakpoint_rps_safe: number | null;
+  monthly_cost_cents: number;
+  nodes: Record<string, SweepFrameNode>;
+}
+
+interface Placed {
+  node: ArchMapNode;
+  x: number;
+  y: number;
+  /** live values for the currently displayed engine run (design load, or a sweep frame) */
+  utilization: number | null;
+  arrival_rps: number | null;
+  status: NodeStatus;
+  isBottleneck: boolean;
+}
+
+const STATUS_HUE: Record<NodeStatus, string> = {
+  ok: "var(--cv-green)",
+  hot: "var(--cv-amber)",
+  saturated: "var(--cv-red)",
+};
+
+const ZOOM_BTN =
+  "rounded px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-white/10 " +
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1";
+
+const STATUS_WORD: Record<NodeStatus, string> = {
+  ok: "plenty of headroom",
+  hot: "running hot",
+  saturated: "over capacity",
+};
+
+function fmtRps(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return n.toFixed(n < 10 ? 1 : 0);
+}
+
+function pct(u: number | null): string {
+  return u === null || !Number.isFinite(u) ? "—" : `${Math.round(u * 100)}%`;
+}
+
+export interface ArchCanvasProps {
+  arch: ArchMap;
+  /** An engine sweep frame to display instead of the design-load numbers. */
+  frame?: SweepFrame | null;
+  /** Component the active chaos scenario targets — gets a marker so the cause is visible. */
+  targetId?: string | null;
+  /** Flow to spotlight; other wires recede. */
+  activeFlowIndex?: number | null;
+}
+
+export function ArchCanvas({ arch, frame = null, targetId = null, activeFlowIndex = null }: ArchCanvasProps) {
+  const reduced = useReducedMotion();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [autoFit, setAutoFit] = useState(true);
+
+  // ── placement: one column per layer that actually holds nodes, in engine order ──
+  const { placed, width, height, columns } = useMemo(() => {
+    const used = arch.layers
+      .filter((l) => arch.nodes.some((n) => n.layer === l.id))
+      .sort((a, b) => a.order - b.order);
+    const colIndex = new Map(used.map((l, i) => [l.id, i]));
+    const rows = new Map<string, number>();
+    const out: Placed[] = arch.nodes.map((node) => {
+      const ci = colIndex.get(node.layer) ?? 0;
+      const ri = rows.get(node.layer) ?? 0;
+      rows.set(node.layer, ri + 1);
+      const live = frame?.nodes?.[node.id];
+      return {
+        node,
+        x: PAD + ci * (NODE_W + GAP_X),
+        y: PAD + HEADER_H + ri * (NODE_H + GAP_Y),
+        utilization: live ? live.utilization : node.utilization,
+        arrival_rps: live ? live.arrival_rps : node.arrival_rps,
+        status: live ? live.status : node.status,
+        isBottleneck: frame ? frame.bottleneck_id === node.id : node.is_bottleneck,
+      };
+    });
+    const maxRows = Math.max(1, ...[...rows.values()]);
+    return {
+      placed: out,
+      columns: used.map((l, i) => ({ ...l, x: PAD + i * (NODE_W + GAP_X) })),
+      width: PAD * 2 + used.length * NODE_W + Math.max(0, used.length - 1) * GAP_X,
+      height: PAD * 2 + HEADER_H + maxRows * NODE_H + Math.max(0, maxRows - 1) * GAP_Y,
+    };
+  }, [arch, frame]);
+
+  const byId = useMemo(() => new Map(placed.map((p) => [p.node.id, p])), [placed]);
+
+  // ── wires: consecutive pairs from every engine flow, deduped, keeping flow identity ──
+  const wires = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { id: string; from: Placed; to: Placed; color: string; flowIndex: number; d: string }[] = [];
+    arch.flows.forEach((flow, flowIndex) => {
+      for (let i = 0; i + 1 < flow.steps.length; i++) {
+        const a = byId.get(flow.steps[i].component_id);
+        const b = byId.get(flow.steps[i + 1].component_id);
+        if (!a || !b || a === b) continue;
+        const key = `${a.node.id}->${b.node.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const x1 = a.x + NODE_W;
+        const y1 = a.y + NODE_H / 2;
+        const x2 = b.x;
+        const y2 = b.y + NODE_H / 2;
+        const bend = Math.max(38, (x2 - x1) * 0.42);
+        out.push({
+          id: key,
+          from: a,
+          to: b,
+          color: flow.color,
+          flowIndex,
+          d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+        });
+      }
+    });
+    return out;
+  }, [arch.flows, byId]);
+
+  const systemRps = frame?.load_rps ?? arch.meta.offered_load_rps ?? 0;
+
+  // ── fit-to-container. Recomputed on resize while autoFit is on. ──
+  const fit = useCallback(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const s = Math.min(el.clientWidth / width, el.clientHeight / height, 1.35);
+    setScale(Number.isFinite(s) && s > 0 ? s : 1);
+  }, [width, height]);
+
+  useLayoutEffect(() => {
+    if (!autoFit) return;
+    fit();
+    const el = shellRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [autoFit, fit]);
+
+  const zoom = (delta: number) => {
+    setAutoFit(false);
+    setScale((s) => Math.min(2.2, Math.max(0.3, s + delta)));
+  };
+
+  return (
+    <div
+      ref={shellRef}
+      className="canvas-glass relative h-full w-full overflow-hidden"
+      style={{ background: "var(--cv-paper)", color: "var(--cv-ink)" }}
+    >
+      {/* dot grid — decoration only */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, rgba(150,170,235,0.16) 1px, transparent 1px)",
+          backgroundSize: "26px 26px",
+        }}
+      />
+
+      <div
+        className="absolute left-1/2 top-1/2 origin-center"
+        style={{
+          width,
+          height,
+          transform: `translate(-50%, -50%) scale(${scale})`,
+          transition: reduced ? "none" : "transform 260ms cubic-bezier(.2,.7,.3,1)",
+        }}
+      >
+        {/* ── wires + particles ── */}
+        <svg
+          width={width}
+          height={height}
+          className="absolute inset-0"
+          style={{ overflow: "visible" }}
+          aria-hidden
+        >
+          <defs>
+            {wires.map((w) => (
+              <path key={`p-${w.id}`} id={`wire-${w.id}`} d={w.d} fill="none" />
+            ))}
+          </defs>
+          {wires.map((w) => {
+            const muted = activeFlowIndex !== null && w.flowIndex !== activeFlowIndex;
+            // Particle COUNT encodes the engine's arrival_rps at the downstream component,
+            // relative to system load — a visual encoding of an engine number, like a bar length.
+            // It originates nothing: with no engine value, no particles are drawn.
+            const rps = w.to.arrival_rps;
+            const share = systemRps > 0 && rps !== null ? Math.min(1, rps / systemRps) : 0;
+            const count = rps === null ? 0 : Math.max(1, Math.min(5, Math.round(share * 5)));
+            const dur = 2.6 - Math.min(1.4, share * 1.4); // busier wire → quicker stream
+            return (
+              <g key={w.id} opacity={muted ? 0.18 : 1}>
+                <path
+                  d={w.d}
+                  fill="none"
+                  stroke="var(--cv-steel)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 6"
+                  opacity={0.5}
+                />
+                {!reduced &&
+                  Array.from({ length: count }).map((_, i) => (
+                    <circle key={i} r={3} fill={w.color}>
+                      <animateMotion
+                        dur={`${dur}s`}
+                        begin={`${(i * dur) / Math.max(1, count)}s`}
+                        repeatCount="indefinite"
+                        rotate="auto"
+                      >
+                        <mpath href={`#wire-${w.id}`} />
+                      </animateMotion>
+                    </circle>
+                  ))}
+                {reduced && count > 0 && (
+                  // Static equivalent: a solid segment carries "this wire is busy" without motion.
+                  <path d={w.d} fill="none" stroke={w.color} strokeWidth={2} opacity={0.55} />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* ── column labels ── */}
+        {columns.map((c) => (
+          <div
+            key={c.id}
+            className="absolute text-[11px] font-semibold uppercase tracking-[0.18em]"
+            style={{ left: c.x, top: PAD, width: NODE_W, color: "var(--cv-muted)" }}
+          >
+            {c.label}
+          </div>
+        ))}
+
+        {/* ── node cards ── */}
+        {placed.map((p) => {
+          const hue = STATUS_HUE[p.status];
+          const isTarget = targetId === p.node.id;
+          const barPct = p.utilization === null || !Number.isFinite(p.utilization)
+            ? 0
+            : Math.max(2, Math.min(100, p.utilization * 100));
+          return (
+            <div
+              key={p.node.id}
+              className="cv-panel absolute overflow-hidden"
+              style={{
+                left: p.x,
+                top: p.y,
+                width: NODE_W,
+                height: NODE_H,
+                borderLeft: `3px solid ${hue}`,
+                boxShadow: p.isBottleneck
+                  ? `0 0 0 1px ${hue}, 0 12px 40px rgba(0,0,0,.5)`
+                  : isTarget
+                    ? "0 0 0 1px var(--cv-blue), 0 12px 40px rgba(0,0,0,.5)"
+                    : undefined,
+                transition: reduced ? "none" : "box-shadow 200ms ease",
+              }}
+            >
+              <div className="flex items-start gap-2 px-3 pt-3">
+                <span aria-hidden className="text-[15px] leading-none">{p.node.icon}</span>
+                <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
+                  {p.node.name}
+                </span>
+                {p.node.is_spof && (
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                    style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}
+                    title="Single point of failure — one instance, no redundancy"
+                  >
+                    SPOF
+                  </span>
+                )}
+              </div>
+
+              <p className="px-3 pt-1 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
+                {p.node.role}
+              </p>
+
+              <div className="absolute inset-x-3 bottom-8">
+                <div className="flex items-baseline justify-between text-[11px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
+                  <span style={{ color: "var(--cv-ink)" }}>{fmtRps(p.arrival_rps)} rps</span>
+                  <span>{pct(p.utilization)}</span>
+                </div>
+                <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full" style={{ background: "rgba(150,170,235,.16)" }}>
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${barPct}%`,
+                      background: hue,
+                      transition: reduced ? "none" : "width 420ms cubic-bezier(.2,.7,.3,1)",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="absolute inset-x-3 bottom-2.5 text-[10.5px] font-semibold" style={{ color: hue }}>
+                {p.status === "ok" ? "✓ " : "▲ "}
+                {STATUS_WORD[p.status]}
+                {p.isBottleneck && <span style={{ color: "var(--cv-muted)" }}> · the limit</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── zoom controls ── */}
+      <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-lg p-1" style={{ background: "var(--cv-panel)", border: "1px solid var(--cv-line)" }}>
+        {/* Written out rather than mapped over a config array: the react-hooks/refs rule treats a
+            closure array built during render as reading the ref at render time. */}
+        <button
+          onClick={() => { setAutoFit(true); fit(); }}
+          className={ZOOM_BTN}
+          style={{ color: "var(--cv-ink)", outlineColor: "var(--cv-blue)" }}
+        >
+          Fit
+        </button>
+        <button
+          onClick={() => zoom(-0.15)}
+          aria-label="Zoom out"
+          className={ZOOM_BTN}
+          style={{ color: "var(--cv-ink)", outlineColor: "var(--cv-blue)" }}
+        >
+          −
+        </button>
+        <button
+          onClick={() => zoom(0.15)}
+          aria-label="Zoom in"
+          className={ZOOM_BTN}
+          style={{ color: "var(--cv-ink)", outlineColor: "var(--cv-blue)" }}
+        >
+          +
+        </button>
+        <span className="px-1.5 text-[10px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
+          {Math.round(scale * 100)}%
+        </span>
+      </div>
+    </div>
+  );
+}

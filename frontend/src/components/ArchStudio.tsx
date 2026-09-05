@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasEditor, type CanvasSeed } from "@/components/CanvasEditor";
+import { ArchCanvas, type SweepFrame } from "@/components/ArchCanvas";
+import { ChaosPanel } from "@/components/ChaosPanel";
+import { LoadTransport } from "@/components/LoadTransport";
 import { seedFromArchMap, type ArchMap } from "@/lib/archMap";
+import {
+  runScenario, type ScenarioOption, type ScenarioRun, type Unmodelled,
+} from "@/lib/scenarios";
 
 // The one architecture surface. Describe an intent → the engine designs + simulates a DEEP architecture
 // (POST /generate) → it opens on the beautiful, animated map (the self-contained renderer, journeys +
@@ -16,6 +22,9 @@ import { seedFromArchMap, type ArchMap } from "@/lib/archMap";
 type GenerateResponse = ArchMap & {
   matched?: string | null; // which reference architecture (null = no offline match → generic fallback)
   catalogue?: string[];
+  sweep?: SweepFrame[];         // one real simulate() run per load stop
+  scenarios?: ScenarioOption[]; // the chaos scenarios THIS design can truthfully run
+  unmodelled?: Unmodelled;      // and the ones the engine refuses to fake, with reasons
 };
 
 type State = "idle" | "generating" | "done" | "error";
@@ -37,6 +46,14 @@ export function ArchStudio() {
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [genId, setGenId] = useState(0); // bumps each generation → remounts the canvas with a fresh seed
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loadIndex, setLoadIndex] = useState(0);
+  const [chaos, setChaos] = useState<ScenarioRun | null>(null);
+  const [chaosRunning, setChaosRunning] = useState<string | null>(null);
+  const [chaosError, setChaosError] = useState<string | null>(null);
+  const chaosAbort = useRef<AbortController | null>(null);
+  // A generated design must be perturbed via its intent (the topology cannot carry flow branch
+  // probabilities). Once the user edits on the canvas, the topology IS the design, so we switch.
+  const [edited, setEdited] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -62,7 +79,9 @@ export function ArchStudio() {
       const res = await fetch(`${API}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent: brief, render: true }), // render:true → the animated map HTML
+        // sweep:true → the load axis (one real simulate() per stop). render:false → no HTML string;
+        // the map is a React component now, so the self-contained document is no longer needed.
+        body: JSON.stringify({ intent: brief, render: false, sweep: true }),
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -72,6 +91,10 @@ export function ArchStudio() {
       const data: GenerateResponse = await res.json();
       if (controller.signal.aborted) return;
       setResult(data);
+      setLoadIndex(0);
+      setEdited(false);
+      setChaos(null);
+      setChaosError(null);
       setGenId((n) => n + 1);
       setMode("map");
       setState("done");
@@ -84,8 +107,13 @@ export function ArchStudio() {
 
   function reset() {
     abortRef.current?.abort();
+    chaosAbort.current?.abort();
     setState("idle");
     setResult(null);
+    setChaos(null);
+    setChaosError(null);
+    setLoadIndex(0);
+    setEdited(false);
     setIntent("");
     setErrorMsg(null);
     textareaRef.current?.focus();
@@ -103,6 +131,54 @@ export function ArchStudio() {
   const seed: CanvasSeed | null = result
     ? { ...seedFromArchMap(result), systemRps: Math.round(result.meta.offered_load_rps), archMap: result }
     : null;
+
+  // A chaos scenario is a counterfactual: the engine simulates the design, then the perturbed
+  // model, and we swap the canvas to the perturbed run. Nothing is animated between the two —
+  // they are two separate engine answers.
+  async function launchScenario(option: ScenarioOption) {
+    if (!API || !seed || !result) return;
+    chaosAbort.current?.abort();
+    const controller = new AbortController();
+    chaosAbort.current = controller;
+    setChaosRunning(option.key);
+    setChaosError(null);
+    try {
+      const run = await runScenario(
+        API,
+        edited
+          ? {
+              mode: "topology",
+              name: result.meta.title,
+              system_rps: Math.round(result.meta.offered_load_rps),
+              nodes: seed.nodes.map((n) => ({
+                id: n.id, kind: n.kind, name: n.name,
+                per_instance_rps: n.per_instance_rps, instances: n.instances,
+              })),
+              edges: seed.edges,
+            }
+          : { mode: "intent", intent },
+        option.id,
+        option.target_id,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setChaos(run);
+      setLoadIndex(0); // a scenario answers at the design load; the load axis restarts from there
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setChaosError(err instanceof Error ? err.message : "the scenario could not be run");
+    } finally {
+      if (!controller.signal.aborted) setChaosRunning(null);
+    }
+  }
+
+  // What the canvas shows: the perturbed run while a scenario is active, otherwise the design.
+  const shown: ArchMap | null = chaos ? chaos.perturbed : result;
+  const frames: SweepFrame[] = useMemo(
+    () => (chaos ? [] : ((result?.sweep as SweepFrame[] | undefined) ?? [])),
+    [chaos, result],
+  );
+  const frame = frames.length > 0 ? frames[Math.min(loadIndex, frames.length - 1)] : null;
 
   const tabBtn = (active: boolean) =>
     `font-sans text-label px-3 py-1 rounded-full transition-colors duration-ui ${
@@ -169,7 +245,12 @@ export function ArchStudio() {
 
       {/* Result — full-screen. Default = the beautiful animated map; one "Edit" toggle to refine. */}
       {state === "done" && result && seed && (
-        <div className="canvas-glass fixed inset-0 z-50 flex flex-col">
+        <div
+          className="canvas-glass fixed inset-0 z-50 flex flex-col"
+          // painted inline as well as via the class: a bare custom class in globals.css can be
+          // dropped by Turbopack in dev, which would leave this overlay transparent over the page
+          style={{ background: "var(--cv-paper)", color: "var(--cv-ink)" }}
+        >
           <div className="flex items-center justify-between gap-4 px-4 py-2 border-b border-[var(--cv-line)]">
             <div className="flex items-baseline gap-2 min-w-0">
               <span className="font-sans font-semibold text-[var(--cv-ink)] shrink-0">keystone</span>
@@ -194,22 +275,62 @@ export function ArchStudio() {
             </div>
           </div>
 
-          <div className="flex-1 min-h-0">
-            {/* Map (default): the exact self-contained animated renderer, isolated in a sandboxed iframe. */}
-            <iframe
-              title={`Architecture map for: ${intent}`}
-              srcDoc={result.html ?? ""}
-              sandbox="allow-scripts"
-              className={`w-full h-full border-0 bg-[var(--cv-paper)] ${mode === "map" ? "block" : "hidden"}`}
-            />
+          <div className="flex min-h-0 flex-1">
+            {/* Map (default): the architecture map as a real component — engine output in, canvas out.
+                It can be re-pointed at a sweep frame or a chaos scenario's perturbed run without a
+                round-trip through a rendered HTML string. */}
+            {mode === "map" && shown && (
+              <>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1">
+                    <ArchCanvas
+                      arch={shown}
+                      frame={frame}
+                      targetId={chaos?.scenario.target_id ?? null}
+                    />
+                  </div>
+                  {frames.length > 0 && (
+                    <LoadTransport frames={frames} index={loadIndex} onIndex={setLoadIndex} />
+                  )}
+                  {chaos && (
+                    <p
+                      className="px-4 py-2 font-mono text-[10.5px]"
+                      style={{ borderTop: "1px solid var(--cv-line)", color: "var(--cv-muted)" }}
+                    >
+                      showing the <b style={{ color: "var(--cv-ink)" }}>{chaos.scenario.name}</b> counterfactual —
+                      the load axis returns with the design
+                    </p>
+                  )}
+                </div>
+                <aside
+                  className="w-[290px] shrink-0 overflow-hidden"
+                  style={{ borderLeft: "1px solid var(--cv-line)", background: "var(--cv-paper)" }}
+                  aria-label="Chaos scenarios"
+                >
+                  <ChaosPanel
+                    scenarios={result.scenarios ?? []}
+                    unmodelled={result.unmodelled ?? {}}
+                    active={chaos}
+                    runningKey={chaosRunning}
+                    error={chaosError}
+                    onRun={(o) => void launchScenario(o)}
+                    onClear={() => { setChaos(null); setChaosError(null); }}
+                  />
+                </aside>
+              </>
+            )}
             {/* Edit: the editable canvas, seeded from the design. On re-simulate it updates the map too. */}
             {mode === "edit" && (
               <CanvasEditor
                 key={genId}
                 seed={seed}
-                onSimulated={(arch) =>
-                  setResult((prev) => (prev ? { ...arch, matched: prev.matched, catalogue: prev.catalogue } : prev))
-                }
+                onSimulated={(arch) => {
+                  // The edit is now the design: its own scenario catalogue rides along on /simulate,
+                  // and further scenarios must run against the topology, not the original intent.
+                  setEdited(true);
+                  setChaos(null);
+                  setResult((prev) => (prev ? { ...arch, matched: prev.matched, catalogue: prev.catalogue } : prev));
+                }}
               />
             )}
           </div>
