@@ -189,13 +189,19 @@ def make_council(provider: str | None = None, model: str | None = None,
     if provider not in known_providers():
         raise ValueError(
             f"Unknown COUNCIL_PROVIDER={provider!r}. Use one of: stub | consensus | claude | "
-            "openai | openrouter | gemini | groq | cerebras | xai | github | nvidia | ollama."
+            "claude_cli | openai | openrouter | gemini | groq | cerebras | xai | github | nvidia "
+            "| ollama."
         )
     council_model = model or os.getenv("COUNCIL_MODEL")
-    if not council_model:
+    # The local CLI reads its own configured default model from the user's Claude Code settings, so
+    # COUNCIL_MODEL is optional there — unlike a raw API transport, where there is no sensible
+    # cross-vendor default and a missing model has to be an error.
+    model_optional = provider == "claude_cli"
+    if not council_model and not model_optional:
         raise ValueError(
             f"COUNCIL_PROVIDER={provider!r} needs an explicit model — set COUNCIL_MODEL "
             "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."
         )
-    return ClaudeCouncil(model=council_model, source=f"{provider}:{council_model}", meter=meter,
+    return ClaudeCouncil(model=council_model or "", 
+                         source=f"{provider}:{council_model or 'default'}", meter=meter,
                          client=client if client is not None else make_llm(provider, council_model, meter=meter))
