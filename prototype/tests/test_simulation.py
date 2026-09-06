@@ -193,3 +193,41 @@ class TestEngineAuditFixes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QueueLatencyHonestyTest(unittest.TestCase):
+    """A queue's sojourn is summed into user-facing latency, because the engine has no async path.
+
+    That is right for a synchronous hop and wrong for the usual reason a queue exists. Until the v2
+    discrete-event engine can model a drain, the honest move is to say so wherever a queue actually
+    sits on a modelled flow — silence would present a background wait as user latency (docs/03).
+    """
+
+    MARKER = "SYNCHRONOUS hop"
+
+    def test_caveat_appears_when_a_queue_is_on_a_flow(self):
+        result = simulate(ticket_booking.build())
+        queues = [c.name for c in ticket_booking.build().components.values()
+                  if c.kind is ComponentKind.QUEUE]
+        self.assertTrue(queues, "fixture must contain a queue for this test to mean anything")
+        hits = [c for c in result.caveats if self.MARKER in c]
+        self.assertEqual(len(hits), 1, "exactly one queue caveat")
+        for name in queues:
+            self.assertIn(name, hits[0], "the caveat must name the queue it is about")
+        self.assertIn("backlog", hits[0].lower())
+
+    def test_no_caveat_when_there_is_no_queue(self):
+        result = simulate(url_shortener.build())
+        self.assertFalse([c for c in result.caveats if self.MARKER in c],
+                         "a design without a queue must not carry a queue caveat")
+
+    def test_the_engine_maths_stays_kind_agnostic(self):
+        """The caveat is prose. If a future change makes a NUMBER depend on kind, this fails —
+        the engine's contract is that behaviour comes from capacity and service time alone."""
+        import inspect
+        import keystone.simulation as sim
+        source = inspect.getsource(sim)
+        numeric = source.split("caveats = [")[0]   # everything before the caveat block
+        self.assertNotIn("ComponentKind.", numeric,
+                         "the numeric path must not branch on ComponentKind")
+

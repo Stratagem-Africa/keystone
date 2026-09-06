@@ -20,7 +20,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
-from keystone.model import Flow, SystemModel
+# ComponentKind is imported for ONE purpose: a prose caveat (see the queue note in `simulate`).
+# The engine's maths remains entirely kind-agnostic — there is no branch on kind anywhere in the
+# numeric path, and a component's behaviour comes from its capacity and service time alone.
+from keystone.model import ComponentKind, Flow, SystemModel
 
 SAFE_UTILIZATION = 0.85   # conventional "run hot" ceiling
 _RHO_CEIL = 0.999         # guard against divide-by-zero as rho -> 1
@@ -423,6 +426,25 @@ def simulate(model: SystemModel) -> SimulationResult:
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
+    # Honesty gap closed (2026-09-06): `_flow_latency_ms` sums EVERY component's sojourn along the
+    # path, including a queue's. That is right for a synchronous hop and wrong for the usual reason a
+    # queue exists — the producer enqueues and returns, and the consumer drains on its own time. The
+    # engine has no async notion (it never branches on ComponentKind), so rather than quietly report a
+    # background wait as user-facing latency, say so wherever a queue is actually on a modelled path.
+    queued = sorted({
+        comp_results[step.component_id].name
+        for flow in model.flows for step in flow.path
+        if model.components[step.component_id].kind is ComponentKind.QUEUE
+    })
+    if queued:
+        caveats.append(
+            f"Latency here treats {', '.join(queued)} as a SYNCHRONOUS hop — the queue's own wait is "
+            f"added to the request's latency as if the caller blocks on it. If the consumer is "
+            f"asynchronous (the usual reason to add a queue), real user-facing latency is lower than "
+            f"shown, and the backlog and drain time that actually matter are not modelled at all. "
+            f"The v1 engine has no async path; treat any flow through a queue as an upper bound."
+        )
+
     if len(model.flows) > 1:
         # Honesty (engine audit): latency is computed for the DOMINANT (largest-share) flow only, so a
         # lower-share flow on a different (often more congested) path is NOT reflected in these figures.
