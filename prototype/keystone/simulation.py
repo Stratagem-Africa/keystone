@@ -426,6 +426,20 @@ def simulate(model: SystemModel) -> SimulationResult:
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
+    # A design whose components carry no price is not a free design — it is an unpriced one, and
+    # "$0.00 / month" beside a 20-component architecture is a confidently wrong headline. The LLM
+    # design path deliberately does not ask the model for cost (ingestion.py sets it to 0, because
+    # the council must never author a number), so this is exactly the case that needs saying rather
+    # than showing. Triggered on the total, so it also covers a canvas topology drawn without prices.
+    if cost_breakdown.get("compute", 0) == 0 and model.components:
+        caveats.append(
+            "COST IS NOT MODELLED for this design: no component carries a price, so the monthly "
+            "total reads as zero. That is missing input, not a free architecture — most likely the "
+            "design came from the LLM path, which is deliberately never asked to produce a number. "
+            "Set per-instance costs on the canvas, or start from a reference blueprint, before "
+            "treating any cost figure here as meaningful."
+        )
+
     # Honesty gap closed (2026-09-06): `_flow_latency_ms` sums EVERY component's sojourn along the
     # path, including a queue's. That is right for a synchronous hop and wrong for the usual reason a
     # queue exists — the producer enqueues and returns, and the consumer drains on its own time. The

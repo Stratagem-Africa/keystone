@@ -4,6 +4,7 @@ Run from prototype/:  python3 -m unittest discover -s tests -v
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import random
 import unittest
@@ -231,3 +232,27 @@ class QueueLatencyHonestyTest(unittest.TestCase):
         self.assertNotIn("ComponentKind.", numeric,
                          "the numeric path must not branch on ComponentKind")
 
+
+class UnpricedDesignHonestyTest(unittest.TestCase):
+    """A design with no prices is UNPRICED, not free.
+
+    The LLM design path never asks the model for a cost (ingestion.py sets it to 0 — the council
+    must not author numbers), so an intent-designed architecture reports $0.00/month. Left silent,
+    that is a confidently wrong headline sitting beside a real 20-component design.
+    """
+
+    MARKER = "COST IS NOT MODELLED"
+
+    def test_a_priced_design_carries_no_cost_caveat(self):
+        self.assertFalse([c for c in simulate(url_shortener.build()).caveats if self.MARKER in c])
+
+    def test_an_unpriced_design_says_so(self):
+        model = url_shortener.build()
+        free = dataclasses.replace(model, components={
+            k: dataclasses.replace(c, monthly_cost_per_instance=0)
+            for k, c in model.components.items()})
+        result = simulate(free)
+        hits = [c for c in result.caveats if self.MARKER in c]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(result.monthly_cost, 0, "the number is still zero — the caveat explains it")
+        self.assertIn("not a free architecture", hits[0])
