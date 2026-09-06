@@ -27,8 +27,8 @@ from .model import ComponentKind, SystemModel
 from .simulation import SAFE_UTILIZATION, SimulationResult, simulate
 
 __all__ = [
-    "Scenario", "ScenarioResult", "CATALOGUE", "UNMODELLED",
-    "available", "apply_scenario", "run_scenario", "get", "catalogue_for",
+    "Scenario", "ScenarioResult", "ScenarioSpec", "CATALOGUE", "UNMODELLED",
+    "available", "apply_scenario", "run_scenario", "run_compound", "get", "catalogue_for",
 ]
 
 
@@ -55,6 +55,14 @@ UNMODELLED: dict[str, str] = {
     "partial_degradation_over_time": (
         "Memory leaks and gradual degradation are trajectories. Same blocker as above: no time axis."
     ),
+    "orchestration_and_provisioning_failures": (
+        "A container that will not start, a pod stuck pending, a Terraform apply that fails — these "
+        "are failures of the control plane, and the canonical model has no control plane. It models "
+        "serving capacity, not how that capacity came to exist. Expressing them needs component "
+        "kinds for the orchestrator and the provisioning pipeline, plus a notion of desired-vs-actual "
+        "replicas, which is a model change behind an ADR. Their *effect* on serving capacity is "
+        "already reachable today as lost instances or degraded capacity."
+    ),
 }
 
 
@@ -73,36 +81,34 @@ def _scale_load(model: SystemModel, factor: float) -> SystemModel:
         model, workload=dataclasses.replace(wl, system_rps=wl.system_rps * factor))
 
 
-def _traffic_spike(model: SystemModel, target: str | None) -> SystemModel:
-    return _scale_load(model, 10.0)
+def _traffic_surge(model: SystemModel, target: str | None, magnitude: float) -> SystemModel:
+    """Offered load multiplied. `magnitude` is the multiple (2x … 100x)."""
+    return _scale_load(model, magnitude)
 
 
-def _traffic_double(model: SystemModel, target: str | None) -> SystemModel:
-    return _scale_load(model, 2.0)
-
-
-def _capacity_halved(model: SystemModel, target: str) -> SystemModel:
-    """Each instance serves half as many requests — the steady-state shadow of a CPU spike or a
-    noisy neighbour. Service *rate* falls; the queue discipline is unchanged."""
+def _capacity_degraded(model: SystemModel, target: str, magnitude: float) -> SystemModel:
+    """Each instance serves a `magnitude` FRACTION of its rated throughput (0.5 = half rate) — the
+    steady-state shadow of a CPU spike, a noisy neighbour or a degraded node. Service *rate* falls;
+    the queue discipline is unchanged."""
     return _replace_component(
-        model, target, per_instance_rps=model.components[target].per_instance_rps * 0.5)
+        model, target, per_instance_rps=model.components[target].per_instance_rps * magnitude)
 
 
-def _instance_loss(model: SystemModel, target: str) -> SystemModel:
-    """Lose one instance from a horizontally-scaled tier. Only offered where instances >= 2 —
-    losing the last instance is `hard_node_failure`, which this model cannot express (see
-    UNMODELLED)."""
-    return _replace_component(model, target, instances=model.components[target].instances - 1)
-
-
-def _slow_dependency(model: SystemModel, target: str) -> SystemModel:
-    """Service time inflates 10x with capacity unchanged — a dependency that got slow but stayed
-    up. Adds latency without moving utilisation, so it isolates the latency axis."""
+def _instance_loss(model: SystemModel, target: str, magnitude: float) -> SystemModel:
+    """Lose `magnitude` instances from a horizontally-scaled tier. At least one must remain —
+    losing the last is `hard_node_failure`, which this model cannot express (see UNMODELLED)."""
     return _replace_component(
-        model, target, base_latency_ms=model.components[target].base_latency_ms * 10.0)
+        model, target, instances=model.components[target].instances - int(magnitude))
 
 
-def _cache_cold(model: SystemModel, target: str) -> SystemModel:
+def _slow_dependency(model: SystemModel, target: str, magnitude: float) -> SystemModel:
+    """Service time inflates `magnitude`x with capacity unchanged — a dependency that got slow but
+    stayed up. Adds latency without moving utilisation, so it isolates the latency axis."""
+    return _replace_component(
+        model, target, base_latency_ms=model.components[target].base_latency_ms * magnitude)
+
+
+def _cache_cold(model: SystemModel, target: str, magnitude: float) -> SystemModel:
     """Every read misses. In each flow that visits `target` (a cache), any *later* step whose
     visit probability was below 1.0 is the miss path — it now takes every request. Models a cold
     start, a flushed cache or an eviction storm as a sustained state, not as the transient spike
@@ -126,13 +132,16 @@ def _cache_cold(model: SystemModel, target: str) -> SystemModel:
 # --------------------------------------------------------------------------------------
 # The catalogue
 # --------------------------------------------------------------------------------------
-def _has_replicas(model: SystemModel, target: str) -> tuple[bool, str]:
+def _has_replicas(model: SystemModel, target: str, magnitude: float = 1.0) -> tuple[bool, str]:
     n = model.components[target].instances
-    return (n >= 2, f"tier runs {n} instance(s); losing the last one is a hard failure this model "
-                    f"cannot express (see UNMODELLED['hard_node_failure'])")
+    lose = max(1, int(magnitude))
+    return (n > lose,
+            f"tier runs {n} instance(s); losing {lose} would leave {n - lose}. At least one must "
+            f"remain — a fully dead tier is a hard failure this model cannot express "
+            f"(see UNMODELLED['hard_node_failure'])")
 
 
-def _has_miss_path(model: SystemModel, target: str) -> tuple[bool, str]:
+def _has_miss_path(model: SystemModel, target: str, magnitude: float = 1.0) -> tuple[bool, str]:
     """`cache_cold` only means something where a miss path exists — a step *after* the cache whose
     visit probability is below certainty. Canvas-drawn topologies wire every step at 1.0 (see
     `topology.build_model_from_topology`), so there the cache absorbs nothing and going cold would
@@ -156,13 +165,21 @@ class Scenario:
     category: str          # traffic | capacity | data | dependency
     question: str          # the plain-English question this answers
     caveat: str            # what this perturbation does NOT model
-    apply: Callable[[SystemModel, str | None], SystemModel] = field(compare=False, repr=False)
+    apply: Callable[[SystemModel, str | None, float], SystemModel] = field(compare=False, repr=False)
     targets: tuple[ComponentKind, ...] = ()   # () = whole-system, no target needed
+    # Selectable severities. The first is the default. () = the scenario is binary (it either
+    # happens or it does not) and `magnitude` is ignored.
+    magnitudes: tuple[float, ...] = ()
+    magnitude_unit: str = ""                  # how to render one, e.g. "x" or "% of rated rate"
     # Guard that decides whether this scenario is *meaningful* on a given target. Returning False
     # keeps it out of `available()` and makes `apply_scenario` fail closed — so the panel never
     # renders a card that would be a no-op dressed up as a survived scenario.
-    precondition: Callable[[SystemModel, str], tuple[bool, str]] | None = field(
+    precondition: Callable[[SystemModel, str, float], tuple[bool, str]] | None = field(
         default=None, compare=False, repr=False)
+
+    @property
+    def default_magnitude(self) -> float:
+        return self.magnitudes[0] if self.magnitudes else 1.0
 
     def to_dict(self) -> dict:
         """Serialisable form for the API/UI catalogue (drops the callables)."""
@@ -170,6 +187,9 @@ class Scenario:
             "id": self.id, "name": self.name, "category": self.category,
             "question": self.question, "caveat": self.caveat,
             "targets": [k.value for k in self.targets],
+            "magnitudes": list(self.magnitudes),
+            "magnitude_unit": self.magnitude_unit,
+            "default_magnitude": self.default_magnitude,
         }
 
 
@@ -181,29 +201,27 @@ _ANY_SERVING = (
 
 CATALOGUE: tuple[Scenario, ...] = (
     Scenario(
-        id="traffic_double", name="Traffic doubles", category="traffic",
-        question="Does the design still hold if demand doubles?",
-        caveat="A sustained doubling, not a burst — the steady-state model has no time axis.",
-        apply=_traffic_double,
+        id="traffic_surge", name="Traffic surge", category="traffic",
+        question="How far can demand rise before the design stops holding?",
+        caveat="A SUSTAINED multiple, not a burst. Retry amplification and thundering-herd "
+               "transients need a time axis the v1 engine does not have.",
+        apply=_traffic_surge, magnitudes=(2.0, 5.0, 10.0, 25.0, 100.0), magnitude_unit="x",
     ),
     Scenario(
-        id="traffic_spike", name="Traffic 10x (viral)", category="traffic",
-        question="Where does the design break when demand goes up an order of magnitude?",
-        caveat="A sustained 10x, not a spike-and-recover. Retry amplification is not modelled.",
-        apply=_traffic_spike,
+        id="capacity_degraded", name="Capacity degraded", category="capacity",
+        question="What happens if this tier serves at a fraction of its rated throughput?",
+        caveat="The steady-state shadow of a CPU spike, noisy neighbour or degraded node — not the "
+               "transient, and not a crash.",
+        apply=_capacity_degraded, targets=_ANY_SERVING,
+        magnitudes=(0.5, 0.25, 0.1, 0.01), magnitude_unit="x rated rate",
     ),
     Scenario(
-        id="capacity_halved", name="Capacity halved", category="capacity",
-        question="What happens if this tier serves requests at half its rated throughput?",
-        caveat="Models the steady-state shadow of a CPU spike or noisy neighbour, not the transient.",
-        apply=_capacity_halved, targets=_ANY_SERVING,
-    ),
-    Scenario(
-        id="instance_loss", name="Lose one instance", category="capacity",
+        id="instance_loss", name="Lose instances", category="capacity",
         question="Can the remaining instances absorb the load?",
-        caveat="Only for tiers already running 2+ instances; losing the last one is a hard failure "
-               "this model cannot express.",
+        caveat="At least one instance must remain; a fully dead tier is a hard failure this model "
+               "cannot express.",
         apply=_instance_loss, targets=_ANY_SERVING, precondition=_has_replicas,
+        magnitudes=(1.0, 2.0, 3.0, 5.0), magnitude_unit=" instance(s)",
     ),
     Scenario(
         id="cache_cold", name="Cache goes cold", category="data",
@@ -212,11 +230,12 @@ CATALOGUE: tuple[Scenario, ...] = (
         apply=_cache_cold, targets=(ComponentKind.CACHE,), precondition=_has_miss_path,
     ),
     Scenario(
-        id="slow_dependency", name="Dependency slows 10x", category="dependency",
+        id="slow_dependency", name="Dependency slows", category="dependency",
         question="How much end-to-end latency does a slow dependency add?",
         caveat="Service time inflates; capacity is unchanged, so utilisation does not move. "
-               "Timeouts and retries are not modelled.",
+               "Timeouts, retries and circuit breakers are not modelled.",
         apply=_slow_dependency, targets=_ANY_SERVING,
+        magnitudes=(2.0, 10.0, 100.0, 1000.0), magnitude_unit="x slower",
     ),
 )
 
@@ -245,7 +264,8 @@ def available(model: SystemModel) -> list[tuple[Scenario, str | None]]:
         for cid, comp in model.components.items():
             if comp.kind not in scenario.targets:
                 continue
-            if scenario.precondition is not None and not scenario.precondition(model, cid)[0]:
+            if (scenario.precondition is not None
+                    and not scenario.precondition(model, cid, scenario.default_magnitude)[0]):
                 continue
             out.append((scenario, cid))
     return out
@@ -267,9 +287,23 @@ def catalogue_for(model: SystemModel) -> list[dict]:
     ]
 
 
-def apply_scenario(model: SystemModel, scenario_id: str, target_id: str | None = None) -> SystemModel:
-    """Return the perturbed model. Pure; the input model is never mutated."""
+def apply_scenario(model: SystemModel, scenario_id: str, target_id: str | None = None,
+                   magnitude: float | None = None) -> SystemModel:
+    """Return the perturbed model. Pure; the input model is never mutated.
+
+    `magnitude` selects the severity. It must be one the scenario declares — an arbitrary value is
+    refused rather than silently accepted, so a UI cannot invent a severity the catalogue never
+    offered and the result stays reproducible from the catalogue alone.
+    """
     scenario = get(scenario_id)
+    if scenario.magnitudes:
+        magnitude = scenario.default_magnitude if magnitude is None else magnitude
+        if magnitude not in scenario.magnitudes:
+            raise ValueError(
+                f"scenario {scenario_id!r} does not offer magnitude {magnitude!r}; "
+                f"choose one of {list(scenario.magnitudes)}")
+    else:
+        magnitude = 1.0
     if scenario.targets:
         if target_id is None:
             raise ValueError(f"scenario {scenario_id!r} requires a target component id")
@@ -280,10 +314,22 @@ def apply_scenario(model: SystemModel, scenario_id: str, target_id: str | None =
             raise ValueError(
                 f"scenario {scenario_id!r} does not apply to a {kind.value} component")
         if scenario.precondition is not None:
-            ok, why = scenario.precondition(model, target_id)
+            ok, why = scenario.precondition(model, target_id, magnitude)
             if not ok:
                 raise ValueError(f"scenario {scenario_id!r} is not meaningful here: {why}")
-    return scenario.apply(model, target_id)
+    return scenario.apply(model, target_id, magnitude)
+
+
+@dataclass(frozen=True)
+class ScenarioSpec:
+    """One scenario, aimed and dialled. Several of these compose into a compound failure."""
+    scenario_id: str
+    target_id: str | None = None
+    magnitude: float | None = None
+
+    @property
+    def key(self) -> str:
+        return self.scenario_id if self.target_id is None else f"{self.scenario_id}:{self.target_id}"
 
 
 @dataclass
@@ -305,6 +351,8 @@ class ScenarioResult:
     bottleneck_moved: bool
     survives: bool                   # perturbed bottleneck stays at/below SAFE_UTILIZATION
     verdict: str
+    # Every scenario in the compound, in the order applied (one entry for a single scenario).
+    applied: tuple[dict, ...] = ()
 
     @property
     def derivation(self) -> list[str]:
@@ -336,16 +384,61 @@ def _verdict(scenario: Scenario, base: SimulationResult, pert: SimulationResult,
             f"{pert.mean_latency_ms:.0f}ms.")
 
 
-def run_scenario(model: SystemModel, scenario_id: str,
-                 target_id: str | None = None) -> ScenarioResult:
-    """Run the counterfactual: simulate the model as designed, then simulate it perturbed.
+def run_scenario(model: SystemModel, scenario_id: str, target_id: str | None = None,
+                 magnitude: float | None = None) -> ScenarioResult:
+    """Run one scenario as a counterfactual: simulate the design, then simulate it perturbed."""
+    return run_compound(model, [ScenarioSpec(scenario_id, target_id, magnitude)])
 
-    Deterministic — the same (model, scenario, target) always yields the same result, because
-    `simulate()` is deterministic and the perturbation is a pure dataclass replacement.
+
+def run_compound(model: SystemModel, specs: list[ScenarioSpec]) -> ScenarioResult:
+    """Run several scenarios AT ONCE — "the cache is cold *and* the database is slow".
+
+    Perturbations are applied in the given order to build one perturbed model, and the engine runs
+    exactly twice: once on the design, once on the compound. That matters for honesty — a compound
+    failure is not the sum of its parts' verdicts, because each perturbation changes the arrivals
+    and utilisations the next one lands on. Simulating the composed model is the only way to get the
+    interaction right.
+
+    Deterministic: the same (model, specs) always yields the same result. Aiming two scenarios at
+    the same component is refused, because the second silently compounding the first (halving an
+    already-halved capacity) reads as one severity while being another.
     """
-    scenario = get(scenario_id)
+    if not specs:
+        raise ValueError("run_compound needs at least one scenario")
+
+    seen: set[str] = set()
+    for spec in specs:
+        if spec.key in seen:
+            raise ValueError(
+                f"{spec.key!r} appears twice — aim each scenario at a component once, and use its "
+                f"magnitude to choose severity")
+        seen.add(spec.key)
+
     baseline = simulate(model)
-    perturbed = simulate(apply_scenario(model, scenario_id, target_id))
+    perturbed_model = model
+    applied: list[dict] = []
+    for spec in specs:
+        scenario = get(spec.scenario_id)
+        magnitude = (scenario.default_magnitude if spec.magnitude is None else spec.magnitude)
+        perturbed_model = apply_scenario(
+            perturbed_model, spec.scenario_id, spec.target_id, spec.magnitude)
+        applied.append({
+            "scenario_id": scenario.id,
+            "name": scenario.name,
+            "category": scenario.category,
+            "caveat": scenario.caveat,
+            "target_id": spec.target_id,
+            "target_name": model.components[spec.target_id].name if spec.target_id else None,
+            "magnitude": magnitude if scenario.magnitudes else None,
+            "magnitude_unit": scenario.magnitude_unit,
+        })
+    perturbed = simulate(perturbed_model)
+
+    head = get(specs[0].scenario_id)
+    compound = len(specs) > 1
+    name = (" + ".join(a["name"] for a in applied) if compound else head.name)
+    caveat = (" · ".join(dict.fromkeys(a["caveat"] for a in applied)) if compound else head.caveat)
+    question = ("Does the design survive all of these at once?" if compound else head.question)
 
     base_lat = baseline.mean_latency_ms
     multiple = (perturbed.mean_latency_ms / base_lat) if base_lat > 0 else float("inf")
@@ -353,18 +446,19 @@ def run_scenario(model: SystemModel, scenario_id: str,
     survives = perturbed.bottleneck_utilization <= SAFE_UTILIZATION
 
     return ScenarioResult(
-        scenario_id=scenario.id,
-        scenario_name=scenario.name,
-        category=scenario.category,
-        question=scenario.question,
-        caveat=scenario.caveat,
-        target_id=target_id,
-        target_name=model.components[target_id].name if target_id else None,
+        scenario_id=head.id if not compound else "+".join(a["scenario_id"] for a in applied),
+        scenario_name=name,
+        category=head.category,
+        question=question,
+        caveat=caveat,
+        target_id=specs[0].target_id,
+        target_name=applied[0]["target_name"],
+        applied=tuple(applied),
         baseline=baseline,
         perturbed=perturbed,
         latency_multiple=multiple,
         utilization_delta=perturbed.bottleneck_utilization - baseline.bottleneck_utilization,
         bottleneck_moved=moved,
         survives=survives,
-        verdict=_verdict(scenario, baseline, perturbed, survives, moved),
+        verdict=_verdict(head, baseline, perturbed, survives, moved),
     )

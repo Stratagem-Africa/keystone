@@ -20,6 +20,17 @@ export interface ScenarioOption {
   targets: string[];
   target_id: string | null;
   target_name: string | null;
+  /** Selectable severities; empty means the scenario is binary. First entry is the default. */
+  magnitudes: number[];
+  magnitude_unit: string;
+  default_magnitude: number;
+}
+
+/** One scenario, aimed and dialled. Several compose into a compound failure. */
+export interface ScenarioSpec {
+  scenario_id: string;
+  target_id: string | null;
+  magnitude?: number | null;
 }
 
 export interface ScenarioDelta {
@@ -37,6 +48,17 @@ export interface ScenarioDelta {
   derivation: string[];
 }
 
+export interface AppliedScenario {
+  scenario_id: string;
+  name: string;
+  category: ScenarioCategory;
+  caveat: string;
+  target_id: string | null;
+  target_name: string | null;
+  magnitude: number | null;
+  magnitude_unit: string;
+}
+
 export interface ScenarioRun {
   scenario: {
     id: string;
@@ -46,6 +68,7 @@ export interface ScenarioRun {
     caveat: string;
     target_id: string | null;
     target_name: string | null;
+    applied: AppliedScenario[];
   };
   baseline: ArchMap;
   perturbed: ArchMap;
@@ -80,11 +103,13 @@ export type ScenarioSubject =
 
 /** POST /scenario — returns both engine runs plus the delta. Throws with the API's own message so
  *  a refused scenario (wrong kind, no miss path, last instance) surfaces its reason to the user. */
+/** Run one scenario, or several at once. A compound is composed into ONE model and simulated once —
+ *  it is not the sum of the individual verdicts, because each perturbation changes the arrivals the
+ *  next one lands on. */
 export async function runScenario(
   api: string,
   subject: ScenarioSubject,
-  scenarioId: string,
-  targetId: string | null,
+  specs: ScenarioSpec[],
   signal?: AbortSignal,
 ): Promise<ScenarioRun> {
   const body =
@@ -99,7 +124,12 @@ export async function runScenario(
   const res = await fetch(`${api}/scenario`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, scenario_id: scenarioId, target_id: targetId }),
+    body: JSON.stringify(
+      specs.length === 1
+        ? { ...body, scenario_id: specs[0].scenario_id, target_id: specs[0].target_id,
+            magnitude: specs[0].magnitude ?? null }
+        : { ...body, specs },
+    ),
     signal,
   });
   if (!res.ok) {

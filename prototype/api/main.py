@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
@@ -160,6 +160,13 @@ def simulate_topology(req: SimulateRequest) -> dict:
     return _sanitize(arch)
 
 
+class ScenarioSpecIn(BaseModel):
+    """One scenario in a compound: which one, aimed where, dialled how far."""
+    scenario_id: str = Field(..., min_length=1, max_length=64)
+    target_id: str | None = Field(None, max_length=128)
+    magnitude: float | None = None
+
+
 class ScenarioRequest(SimulateRequest):
     """The design to perturb, plus which scenario to run.
 
@@ -177,8 +184,20 @@ class ScenarioRequest(SimulateRequest):
     keeps the scenario's baseline identical to the design on screen.
     """
     intent: str | None = Field(None, max_length=2000)
-    scenario_id: str = Field(..., min_length=1, max_length=64)
+    # Single form.
+    scenario_id: str | None = Field(None, min_length=1, max_length=64)
     target_id: str | None = Field(None, max_length=128)
+    magnitude: float | None = None
+    # Compound form: several scenarios at once ("the cache is cold AND the database is slow").
+    # A compound is not the sum of its parts' verdicts — each perturbation changes the arrivals the
+    # next one lands on — so they are composed into ONE model and the engine runs once on it.
+    specs: list[ScenarioSpecIn] | None = None
+
+    @model_validator(mode="after")
+    def _one_form_only(self):
+        if bool(self.scenario_id) == bool(self.specs):
+            raise ValueError("provide exactly one of `scenario_id` or `specs`")
+        return self
 
 
 class RemediateRequest(SimulateRequest):
@@ -272,8 +291,14 @@ def run_chaos_scenario(req: ScenarioRequest) -> dict:
             model = build_model_from_topology(
                 {"name": req.name, "system_rps": req.system_rps,
                  "nodes": req.nodes, "edges": req.edges})
-        result = chaos.run_scenario(model, req.scenario_id, req.target_id)
-        perturbed_model = chaos.apply_scenario(model, req.scenario_id, req.target_id)
+        specs = ([chaos.ScenarioSpec(s.scenario_id, s.target_id, s.magnitude) for s in req.specs]
+                 if req.specs
+                 else [chaos.ScenarioSpec(req.scenario_id, req.target_id, req.magnitude)])
+        result = chaos.run_compound(model, specs)
+        perturbed_model = model
+        for spec in specs:
+            perturbed_model = chaos.apply_scenario(
+                perturbed_model, spec.scenario_id, spec.target_id, spec.magnitude)
         baseline_arch = build_arch_map(model, result.baseline, sweep=req.render)
         perturbed_arch = build_arch_map(perturbed_model, result.perturbed, sweep=req.render)
     except (IngestError, ValueError, KeyError, ArithmeticError) as e:
@@ -284,6 +309,7 @@ def run_chaos_scenario(req: ScenarioRequest) -> dict:
             "id": result.scenario_id, "name": result.scenario_name,
             "category": result.category, "question": result.question, "caveat": result.caveat,
             "target_id": result.target_id, "target_name": result.target_name,
+            "applied": list(result.applied),
         },
         "baseline": baseline_arch,
         "perturbed": perturbed_arch,

@@ -97,7 +97,7 @@ class TestCatalogueMatchesTheRun(unittest.TestCase):
 
 class TestScenarioResponse(unittest.TestCase):
     def test_delta_reduces_to_the_two_engine_runs(self):
-        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_spike"})
+        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_surge"})
         self.assertEqual(r.status_code, 200)
         d = r.json()
         for key in ("baseline", "perturbed", "delta", "scenario"):
@@ -111,7 +111,7 @@ class TestScenarioResponse(unittest.TestCase):
         self.assertEqual(d["baseline"]["verdict"]["bottleneck_name"], delta["baseline_bottleneck"])
 
     def test_both_sides_are_full_arch_maps(self):
-        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_spike"})
+        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_surge"})
         d = r.json()
         for side in ("baseline", "perturbed"):
             with self.subTest(side):
@@ -120,7 +120,7 @@ class TestScenarioResponse(unittest.TestCase):
                 self.assertTrue(arch["derivation"], "each run keeps the engine's own derivation")
 
     def test_no_auth_required(self):
-        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_double"})
+        r = client.post("/scenario", json={"intent": INTENT, "scenario_id": "traffic_surge"})
         self.assertEqual(r.status_code, 200)
 
 
@@ -143,6 +143,46 @@ class TestScenarioFailsClosed(unittest.TestCase):
     def test_scenario_id_is_required(self):
         r = client.post("/scenario", json={"intent": INTENT})
         self.assertEqual(r.status_code, 422, "pydantic rejects a missing scenario_id at the edge")
+
+
+class TestMagnitudeAndCompound(unittest.TestCase):
+    def test_catalogue_publishes_selectable_magnitudes(self):
+        d = client.post("/generate", json={"intent": INTENT}).json()
+        parameterised = [s for s in d["scenarios"] if s["magnitudes"]]
+        self.assertTrue(parameterised, "some scenarios must be dial-able")
+        for s in parameterised:
+            self.assertTrue(s["magnitude_unit"])
+            self.assertEqual(s["default_magnitude"], s["magnitudes"][0])
+
+    def test_a_magnitude_the_catalogue_did_not_offer_is_refused(self):
+        r = client.post("/scenario", json={
+            "intent": INTENT, "scenario_id": "traffic_surge", "magnitude": 7})
+        self.assertEqual(r.status_code, 400)
+
+    def test_compound_runs_and_reports_every_part(self):
+        r = client.post("/scenario", json={"intent": INTENT, "specs": [
+            {"scenario_id": "cache_cold", "target_id": "cache"},
+            {"scenario_id": "slow_dependency", "target_id": "db", "magnitude": 100},
+        ]})
+        self.assertEqual(r.status_code, 200, r.text)
+        applied = r.json()["scenario"]["applied"]
+        self.assertEqual(len(applied), 2)
+        self.assertEqual(applied[1]["magnitude"], 100)
+
+    def test_exactly_one_form_is_accepted(self):
+        both = client.post("/scenario", json={
+            "intent": INTENT, "scenario_id": "cache_cold",
+            "specs": [{"scenario_id": "cache_cold"}]})
+        self.assertEqual(both.status_code, 422)
+        neither = client.post("/scenario", json={"intent": INTENT})
+        self.assertEqual(neither.status_code, 422)
+
+    def test_duplicate_targets_in_a_compound_are_refused(self):
+        r = client.post("/scenario", json={"intent": INTENT, "specs": [
+            {"scenario_id": "cache_cold", "target_id": "cache"},
+            {"scenario_id": "cache_cold", "target_id": "cache"},
+        ]})
+        self.assertEqual(r.status_code, 400)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,8 @@ from keystone.benchmarks.reference_models import REFERENCE_MODELS
 from keystone.blueprints import ticket_booking, url_shortener
 from keystone.model import ComponentKind
 from keystone.scenarios import (
-    CATALOGUE, UNMODELLED, ScenarioResult, apply_scenario, available, get, run_scenario,
+    CATALOGUE, UNMODELLED, ScenarioResult, ScenarioSpec, apply_scenario, available, get,
+    run_compound, run_scenario,
 )
 from keystone.simulation import SAFE_UTILIZATION, simulate
 
@@ -79,7 +80,7 @@ class PurityAndDeterminismTest(unittest.TestCase):
     def test_baseline_matches_a_plain_simulate_run(self):
         """The baseline side must be the engine's own untouched answer — not a re-derivation."""
         direct = simulate(self.model)
-        result = run_scenario(self.model, "traffic_spike")
+        result = run_scenario(self.model, "traffic_surge", None, 10.0)
         self.assertEqual(result.baseline.mean_latency_ms, direct.mean_latency_ms)
         self.assertEqual(result.baseline.bottleneck_id, direct.bottleneck_id)
         self.assertEqual(result.baseline.monthly_cost, direct.monthly_cost)
@@ -109,13 +110,13 @@ class PrimeDirectiveTest(unittest.TestCase):
 
     def test_perturbed_side_carries_its_own_confidence_and_caveats(self):
         """A chaos result inherits the honesty apparatus; it is a full SimulationResult, not a number."""
-        r = run_scenario(self.model, "traffic_spike")
+        r = run_scenario(self.model, "traffic_surge", None, 10.0)
         self.assertTrue(r.perturbed.confidence)
         self.assertTrue(r.perturbed.derivation, "perturbed run must keep its derivation trace")
         self.assertIn("saturated", r.perturbed.confidence.lower())
 
     def test_derivation_shows_its_working(self):
-        r = run_scenario(self.model, "traffic_spike")
+        r = run_scenario(self.model, "traffic_surge", None, 10.0)
         joined = "\n".join(r.derivation)
         self.assertIn("baseline", joined)
         self.assertIn("perturbed", joined)
@@ -206,8 +207,8 @@ class PerturbationSemanticsTest(unittest.TestCase):
         self.assertFalse(r.survives)
         self.assertGreater(r.latency_multiple, 10.0)
 
-    def test_capacity_halved_halves_capacity(self):
-        out = apply_scenario(self.model, "capacity_halved", self.app)
+    def test_capacity_degraded_scales_the_service_rate(self):
+        out = apply_scenario(self.model, "capacity_degraded", self.app, 0.5)
         self.assertAlmostEqual(out.components[self.app].per_instance_rps,
                                self.model.components[self.app].per_instance_rps * 0.5)
         self.assertEqual(out.components[self.app].instances,
@@ -220,12 +221,12 @@ class PerturbationSemanticsTest(unittest.TestCase):
 
     def test_slow_dependency_moves_latency_but_not_utilisation(self):
         """Service time inflates while capacity holds — so rho must not move."""
-        r = run_scenario(self.model, "slow_dependency", self.app)
+        r = run_scenario(self.model, "slow_dependency", self.app, 10.0)
         self.assertAlmostEqual(r.utilization_delta, 0.0, places=9)
         self.assertGreater(r.latency_multiple, 1.0)
 
     def test_traffic_scenarios_scale_only_the_workload(self):
-        out = apply_scenario(self.model, "traffic_spike")
+        out = apply_scenario(self.model, "traffic_surge", None, 10.0)
         self.assertAlmostEqual(out.workload.system_rps, self.model.workload.system_rps * 10.0)
         self.assertEqual(out.components, self.model.components)
         self.assertEqual(out.flows, self.model.flows)
@@ -247,6 +248,98 @@ class CorpusRobustnessTest(unittest.TestCase):
                     self.assertGreaterEqual(result.perturbed.mean_latency_ms, 0.0)
                     checked += 1
         self.assertGreater(checked, 20, "corpus sweep should cover a meaningful number of runs")
+
+
+class MagnitudeTest(unittest.TestCase):
+    """Severity is a declared, closed set — a UI cannot invent one the catalogue never offered."""
+
+    def setUp(self):
+        self.model = url_shortener.build()
+
+    def test_declared_magnitudes_are_ordered_and_usable(self):
+        for s in CATALOGUE:
+            if not s.magnitudes:
+                continue
+            with self.subTest(s.id):
+                self.assertTrue(s.magnitude_unit, f"{s.id} must say what its magnitude means")
+                self.assertEqual(s.default_magnitude, s.magnitudes[0])
+                self.assertEqual(len(set(s.magnitudes)), len(s.magnitudes))
+
+    def test_an_undeclared_magnitude_is_refused(self):
+        with self.assertRaises(ValueError):
+            apply_scenario(self.model, "traffic_surge", None, 7.0)
+
+    def test_severity_moves_the_answer_monotonically(self):
+        """A bigger dial must not produce a smaller effect — the whole point of parameterising."""
+        latencies = [
+            run_scenario(self.model, "slow_dependency", "db", m).perturbed.mean_latency_ms
+            for m in (2.0, 10.0, 100.0, 1000.0)
+        ]
+        self.assertEqual(latencies, sorted(latencies), f"latency should rise with severity: {latencies}")
+
+    def test_binary_scenarios_ignore_magnitude(self):
+        a = run_scenario(self.model, "cache_cold", "cache")
+        b = run_scenario(self.model, "cache_cold", "cache", 99.0)
+        self.assertEqual(a.perturbed.mean_latency_ms, b.perturbed.mean_latency_ms)
+
+    def test_instance_loss_precondition_respects_the_magnitude(self):
+        """Losing 5 of 12 is fine; losing 5 of 3 would empty the tier and must be refused."""
+        apply_scenario(self.model, "instance_loss", "app", 5.0)
+        thin = dataclasses.replace(
+            self.model,
+            components={**self.model.components,
+                        "app": dataclasses.replace(self.model.components["app"], instances=3)})
+        with self.assertRaises(ValueError):
+            apply_scenario(thin, "instance_loss", "app", 5.0)
+
+
+class CompoundTest(unittest.TestCase):
+    def setUp(self):
+        self.model = url_shortener.build()
+
+    def test_compound_is_simulated_once_on_the_composed_model(self):
+        both = run_compound(self.model, [
+            ScenarioSpec("cache_cold", "cache"),
+            ScenarioSpec("slow_dependency", "db", 100.0),
+        ])
+        self.assertEqual(len(both.applied), 2)
+        self.assertIn("+", both.scenario_name)
+        # Strictly worse than either part alone — the composed model carries both perturbations.
+        cold = run_scenario(self.model, "cache_cold", "cache")
+        slow = run_scenario(self.model, "slow_dependency", "db", 100.0)
+        self.assertGreater(both.perturbed.mean_latency_ms, cold.perturbed.mean_latency_ms)
+        self.assertGreater(both.perturbed.mean_latency_ms, slow.perturbed.mean_latency_ms)
+
+    def test_compound_is_not_the_sum_of_its_parts(self):
+        """Documents WHY composition must be simulated rather than added up."""
+        both = run_compound(self.model, [
+            ScenarioSpec("cache_cold", "cache"),
+            ScenarioSpec("slow_dependency", "db", 100.0),
+        ])
+        base = both.baseline.mean_latency_ms
+        cold = run_scenario(self.model, "cache_cold", "cache").perturbed.mean_latency_ms
+        slow = run_scenario(self.model, "slow_dependency", "db", 100.0).perturbed.mean_latency_ms
+        self.assertNotAlmostEqual(both.perturbed.mean_latency_ms, cold + slow - base, places=2)
+
+    def test_aiming_twice_at_the_same_component_is_refused(self):
+        with self.assertRaises(ValueError):
+            run_compound(self.model, [
+                ScenarioSpec("cache_cold", "cache"), ScenarioSpec("cache_cold", "cache")])
+
+    def test_empty_compound_is_refused(self):
+        with self.assertRaises(ValueError):
+            run_compound(self.model, [])
+
+    def test_compound_is_deterministic_and_order_stable(self):
+        specs = [ScenarioSpec("traffic_surge", None, 5.0), ScenarioSpec("capacity_degraded", "app", 0.5)]
+        a, b = run_compound(self.model, specs), run_compound(self.model, specs)
+        self.assertEqual(a.perturbed.mean_latency_ms, b.perturbed.mean_latency_ms)
+        self.assertEqual(a.verdict, b.verdict)
+
+    def test_single_run_reports_one_applied_entry(self):
+        r = run_scenario(self.model, "traffic_surge", None, 10.0)
+        self.assertEqual(len(r.applied), 1)
+        self.assertEqual(r.applied[0]["magnitude"], 10.0)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,8 @@ import { FixPanel } from "@/components/FixPanel";
 import { LoadTransport } from "@/components/LoadTransport";
 import { seedFromArchMap, type ArchMap, type ArchMapNode } from "@/lib/archMap";
 import {
-  runScenario, type ScenarioOption, type ScenarioRun, type ScenarioSubject, type Unmodelled,
+  runScenario, type ScenarioOption, type ScenarioRun, type ScenarioSpec, type ScenarioSubject,
+  type Unmodelled,
 } from "@/lib/scenarios";
 import { planCapacity, type RemediationPlan } from "@/lib/remediation";
 
@@ -157,15 +158,15 @@ export function ArchStudio() {
   // A chaos scenario is a counterfactual: the engine simulates the design, then the perturbed
   // model, and we swap the canvas to the perturbed run. Nothing is animated between the two —
   // they are two separate engine answers.
-  async function launchScenario(option: ScenarioOption) {
-    if (!API || !seed || !result) return;
+  async function launchScenario(specs: ScenarioSpec[]) {
+    if (!API || !seed || !result || specs.length === 0) return;
     chaosAbort.current?.abort();
     const controller = new AbortController();
     chaosAbort.current = controller;
-    setChaosRunning(option.key);
+    setChaosRunning("running");
     setChaosError(null);
     try {
-      const run = await runScenario(API, subject!, option.id, option.target_id, controller.signal);
+      const run = await runScenario(API, subject!, specs, controller.signal);
       if (controller.signal.aborted) return;
       setChaos(run);
       setLoadIndex(-1);  // a scenario answers at the design load; the load axis restarts from there
@@ -407,9 +408,9 @@ export function ArchStudio() {
                         scenarios={result.scenarios ?? []}
                         unmodelled={result.unmodelled ?? {}}
                         active={chaos}
-                        runningKey={chaosRunning}
+                        running={chaosRunning !== null}
                         error={chaosError}
-                        onRun={(o) => void launchScenario(o)}
+                        onRun={(specs) => void launchScenario(specs)}
                         onClear={() => { setChaos(null); setChaosError(null); }}
                       />
                     )}
