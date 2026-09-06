@@ -38,12 +38,28 @@ _REFERENCES: tuple[tuple[tuple[str, ...], object, str], ...] = (
 
 
 def match_reference(intent: str):
-    """Best-matching reference (build_fn, label) for an intent, or None. Keyword match — deliberately
-    simple; the LLM path is what generalises beyond the catalogue."""
+    """Best-matching reference (build_fn, label) for an intent, or None.
+
+    Two tiers, most specific first:
+      1. The hand-built deep blueprints in `_REFERENCES` — richer than anything generated (the
+         Twitter one carries 20 components and six journeys), so they win where they match.
+      2. The BLUEPRINT LIBRARY: spec files under `blueprints/library/`, each of which had to pass
+         the engine gate (`blueprint_library.validate_library_entry`) before it shipped — it
+         simulates, it holds at its own design load, and its costs come from the grounded
+         catalogue rather than a hand-typed guess.
+
+    Keyword matching is deliberately simple in both tiers; the LLM design path is what generalises
+    to an arbitrary intent. The library's job is to answer the common cases instantly, offline, $0.
+    """
     q = f" {intent.lower()} "
     for triggers, build, label in _REFERENCES:
         if any(t in q for t in triggers):
             return build, label
+
+    from keystone.blueprint_library import match as _match_library   # lazy: keeps import graph flat
+    entry = _match_library(intent)
+    if entry is not None:
+        return entry.build, entry.name
     return None
 
 
