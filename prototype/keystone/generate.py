@@ -26,10 +26,18 @@ from keystone.model import (
 # (keyword triggers, builder, label). First match wins — order most-specific first. The blueprint
 # library is the offline "generation" for common intents; the LLM generalises to anything else.
 _REFERENCES: tuple[tuple[tuple[str, ...], object, str], ...] = (
-    (("twitter", "social network", "social media", "social platform", "microblog", "instagram",
+    # SCOPE OF EACH TIER-1 TRIGGER — narrowed once the library shipped a better answer.
+    # Tier 1 wins on any trigger it claims, so a trigger it should not own is a wrong ANSWER, not a
+    # missed opportunity: "instagram" used to return the Twitter design, whose components are named
+    # "Tweet Service" and "Timeline Service (fan-out read)" — the identity leak `test_generic_fallback`
+    # exists to prevent, arriving through the matcher instead of the fallback. And "an online store"
+    # used to return the 5-component payments design, which has no catalogue, no cart and no
+    # inventory: a checkout is PART of a storefront, not a storefront. Both now have dedicated,
+    # engine-gated library blueprints, so tier 1 gives those words up and keeps only what it is
+    # genuinely the deepest answer for.
+    (("twitter", "social network", "social media", "social platform", "microblog",
       "tiktok", "news feed", "timeline", "followers", " x "), twitter.build, "social platform"),
-    (("payment", "checkout", "billing", "e-commerce", "ecommerce", "commerce", "online shop",
-      "online store", "storefront", "stripe", "cart"), payments.build, "payments / checkout"),
+    (("payment", "checkout", "billing", "stripe"), payments.build, "payments / checkout"),
     (("ticket", "booking", "reservation", "box office", "seats", "flash sale", "flash-sale",
       "event platform"), ticket_booking.build, "ticket booking"),
     (("url shortener", "link shortener", "short link", "shortlink", "bitly", "tinyurl"),

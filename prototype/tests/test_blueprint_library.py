@@ -10,7 +10,8 @@ import json
 import unittest
 
 from keystone.blueprint_library import (
-    LIBRARY_DIR, library, load_entry, match, validate_library_entry,
+    LIBRARY_DIR, byte_gaps, keyword_collisions, library, load_entry, match,
+    validate_library_entry,
 )
 from keystone.generate import match_reference
 from keystone.pricing_catalogue import KINDS_WITHOUT_PER_INSTANCE_PRICE
@@ -82,11 +83,45 @@ class MatchingTest(unittest.TestCase):
                 self.assertEqual(match(phrase), match(phrase))
 
     def test_each_entry_is_reachable_by_its_own_keywords(self):
-        """A blueprint nobody can find is not in the library in any useful sense."""
+        """A blueprint nobody can find is not in the library in any useful sense.
+
+        This test USED TO ASSERT ONLY `assertIsNotNone`, and was green over ten entries whose own
+        keywords resolved to a DIFFERENT blueprint — "x clone" in twitter_clone.json swallowing
+        "a netflix clone", bare "rag" firing inside "sto-rag-e". Asserting that *something* matched
+        is not a reachability test; it has to assert the WINNER.
+        """
         for entry in library():
-            for kw in entry.keywords[:3]:
+            for kw in entry.keywords:
                 with self.subTest(f"{entry.key} <- {kw}"):
-                    self.assertIsNotNone(match(f"I want to build {kw}"))
+                    winner = match(f"I want to build {kw}")
+                    self.assertIsNotNone(winner, f"{entry.key}: own keyword {kw!r} matches nothing")
+                    self.assertEqual(winner.key, entry.key,
+                                     f"{entry.key}: own keyword {kw!r} resolves to {winner.key}")
+
+    def test_no_keyword_collisions_across_the_library(self):
+        """A too-generic keyword in one file silently hijacks another author's entry."""
+        collisions = keyword_collisions()
+        self.assertEqual(collisions, {}, f"keywords resolve to the wrong blueprint: {collisions}")
+
+    def test_the_confirmed_substring_hijacks_stay_fixed(self):
+        """Each of these shipped a wrong answer before the audit caught it."""
+        for phrase, expected in (("a netflix clone", "video_streaming"),
+                                 ("a tool like telegram", "realtime_chat"),
+                                 ("an uber clone", "ride_sharing")):
+            with self.subTest(phrase):
+                winner = match(phrase)
+                self.assertIsNotNone(winner, phrase)
+                self.assertEqual(winner.key, expected)
+
+    def test_intents_described_rather_than_named_still_match(self):
+        """The flagship was findable only by people who already knew the word 'bitly'."""
+        for phrase, expected in (("i want to shorten urls", "url_shortener"),
+                                 ("a ci pipeline for our monorepo", "ci_cd"),
+                                 ("a parking app", "parking_lot")):
+            with self.subTest(phrase):
+                winner = match(phrase)
+                self.assertIsNotNone(winner, f"{phrase!r} matches nothing")
+                self.assertEqual(winner.key, expected)
 
     def test_an_unrelated_intent_matches_nothing(self):
         self.assertIsNone(match("a recipe for banana bread with walnuts"))
@@ -113,3 +148,35 @@ class LibraryFileHygieneTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ByteGapDisclosureTest(unittest.TestCase):
+    """An incomplete cost must reach the REPORT, not just the validator's console output."""
+
+    def test_every_gate_warning_is_declared_on_the_model_it_came_from(self):
+        """The gate and the report must never disagree about what is missing."""
+        for entry in library():
+            with self.subTest(entry.key):
+                warned = len(validate_library_entry(entry.path).warnings)
+                declared = sum(1 for a in entry.build().assumptions if a.provenance == "GAP")
+                self.assertEqual(declared, warned,
+                                 f"{entry.key}: gate warns {warned}x, model declares {declared}")
+
+    def test_the_disclosure_survives_into_the_rendered_report(self):
+        """The end the user actually reads. Asserting on the model would not prove this."""
+        from keystone.report import render
+        from keystone.simulation import simulate
+        entry = next(e for e in library() if e.key == "video_streaming")
+        model = entry.build()
+        text = render(model, [], simulate(model))
+        self.assertIn("COST IS A FLOOR", text)
+        self.assertIn("| GAP |", text)
+
+    def test_a_blueprint_that_declares_its_bytes_gets_no_gap(self):
+        """The guard must stay silent on a complete design, or it is noise nobody reads."""
+        entry = next(e for e in library() if e.key == "video_streaming")
+        model = entry.build()
+        for comp in model.components.values():
+            if comp.kind.value in ("cdn", "object_store"):
+                comp.egress_gb_per_month = 1_000_000
+        self.assertEqual(byte_gaps(model), [])

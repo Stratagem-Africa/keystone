@@ -1,0 +1,310 @@
+{
+  "spec_version": 1,
+  "name": "Serverless REST API",
+  "workload": {
+    "system_rps": 1500,
+    "description": "Managed API gateway in front of a function tier; 80% reads, 20% writes"
+  },
+  "components": [
+    {
+      "id": "apigw",
+      "kind": "api_gateway",
+      "name": "Managed API gateway (auth, throttling)",
+      "per_instance_rps": 10000,
+      "instances": 1,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 777600000,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "fn",
+      "kind": "app_server",
+      "name": "Function tier \u2014 4 concurrency units (t4g.medium-equivalent)",
+      "per_instance_rps": 500,
+      "instances": 4,
+      "base_latency_ms": 25.0,
+      "monthly_cost_per_instance": 2453,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 2453.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 2453.0,
+          "confidence_high": 2453.0,
+          "provenance": "GROUNDED",
+          "measured_context": "t4g.medium \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2), BURSTABLE. Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0336/h x 730 = 2453c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117). BURSTABLE: launches in Unlimited mode by default; sustained above-baseline CPU adds $0.04/vCPU-hour (Price List SKU VQE3NKNEDMWWG8DZ). At sustained 100% CPU the real bill can reach ~2.9x this figure. Disclosed, deliberately NOT folded into the band."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "t4g.medium"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Response / hot-item cache",
+      "per_instance_rps": 40000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 4745.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.065/h x 730 = 4745c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.medium"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Key-value item store (DynamoDB-shaped)",
+      "per_instance_rps": 5000,
+      "instances": 1,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store \u2014 uploads and exports",
+      "per_instance_rps": 5500,
+      "instances": 1,
+      "base_latency_ms": 15.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 1200,
+      "storage_gb": 4000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "read_item",
+      "share": 0.6,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.2
+        }
+      ]
+    },
+    {
+      "name": "list_query",
+      "share": 0.2,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.5
+        }
+      ]
+    },
+    {
+      "name": "write_item",
+      "share": 0.15,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "upload_asset",
+      "share": 0.05,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "1,500 req/s peak, 80:20 read:write. Monthly request volume assumes an average of 300 req/s (20% of peak) = 777.6M gateway requests/month",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fn",
+      "statement": "THE ENGINE HAS NO SERVERLESS COMPONENT KIND. The function tier is modelled as an app_server whose capacity is its CONCURRENCY CEILING (4 units x ~500 req/s), which is the shape that actually constrains a Lambda-style API. Cold starts, per-invocation billing and burst-concurrency limits are NOT modelled",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fn",
+      "statement": "Compute is priced from the provisioned-instance catalogue (t4g.medium x4), i.e. the cost of holding that concurrency warm. Pure per-invocation pricing would be cheaper at low duty cycle and dearer at high; treat the compute line as an upper bound",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The engine has no key-value/document kind, so the item store is modelled as `sql_db` \u2014 the persistent record store on the path. 5,000 req/s stands for provisioned read/write capacity, not a Postgres primary",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "80% hit-rate on single-item reads, 50% on list queries (list results go stale faster)",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The API gateway is the dominant line: at $3.00 per million requests, 777.6M requests/month is roughly $2,330 \u2014 several times the compute bill. That is the real trade-off of the serverless shape, not a modelling artefact",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The $3.00-per-million request rate is applied to the API GATEWAY only, which is the kind it was measured for. Object-store request charges are left out: S3's per-request price is an order of magnitude lower and the engine carries only one request rate",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "intermediate",
+    "summary": "Managed API gateway fronting a function tier, a hot-item cache and a key-value store.",
+    "keywords": [
+      "serverless",
+      "serverless api",
+      "aws lambda",
+      "lambda function",
+      "faas",
+      "cloud functions",
+      "rest api"
+    ]
+  }
+}

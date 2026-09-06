@@ -1,0 +1,364 @@
+{
+  "spec_version": 1,
+  "name": "RAG + MCP Assistant",
+  "workload": {
+    "system_rps": 200.0,
+    "description": "200 asks/s; 30% semantic-cache hit; retrieval + model call behind a provider quota"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Ingress load balancer",
+      "per_instance_rps": 20000.0,
+      "instances": 2,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 1509,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "api",
+      "kind": "app_server",
+      "name": "Assistant API / agent runtime (MCP host)",
+      "per_instance_rps": 60.0,
+      "instances": 5,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "llm",
+      "kind": "api_gateway",
+      "name": "Model API gateway (provider quota pools)",
+      "per_instance_rps": 67.0,
+      "instances": 3,
+      "base_latency_ms": 2400.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 475061760000,
+      "llm_output_tokens_per_month": 53239680000,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Semantic answer + embedding cache (Redis)",
+      "per_instance_rps": 30000.0,
+      "instances": 2,
+      "base_latency_ms": 0.6,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 4745.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.065/h x 730 = 4745c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.medium"
+      }
+    },
+    {
+      "id": "vec",
+      "kind": "sql_db",
+      "name": "Vector store (PostgreSQL + pgvector, HNSW)",
+      "per_instance_rps": 900.0,
+      "instances": 1,
+      "base_latency_ms": 25.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "GROUNDED",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "object_store",
+      "name": "Document + chunk store (S3)",
+      "per_instance_rps": 5500.0,
+      "instances": 1,
+      "base_latency_ms": 30.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 4200,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "ask",
+      "share": 0.86,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "vec",
+          "visit_prob": 0.7
+        },
+        {
+          "component_id": "docs",
+          "visit_prob": 0.35
+        },
+        {
+          "component_id": "llm",
+          "visit_prob": 0.7
+        }
+      ]
+    },
+    {
+      "name": "open_citation",
+      "share": 0.11,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "docs",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "ingest_doc",
+      "share": 0.03,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "docs",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "llm",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "vec",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "200 questions/s at peak for a large internal knowledge assistant: 86% asks, 11% users opening a cited source, 3% document ingestion.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "30% of asks are served from the semantic answer cache, so retrieval and the model call both carry visit probability 0.7. Half of the remaining asks need full chunk text from object storage (0.35 of asks).",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "The hosted model provider is NOT a separate node: v1's compute catalogue has no per-instance price for an external API, so pricing one would be an invented number. It is modelled as the model API gateway that fronts it (LiteLLM/Bedrock-shaped). Capacity is the PROVISIONED PROVIDER QUOTA: 3 pools x 4,000 requests/minute, about 201 model calls/s. That ceiling, not the servers, is what a real deployment hits first.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "5,800 input and 650 output tokens per model call, blended across answer generation and embedding calls. Monthly token volume = peak model-call rate / 4 (peak-to-average) x 2,592,000 s.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "PROMPT CACHING IS NOT MODELLED. The engine has one input-token rate and no cache-read tier, so a design reusing a long system/tool prefix would pay far less than shown. Treat the token line as an upper bound.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "api",
+      "statement": "60 req/s per runtime instance: each request is held open for the roughly 2.4 s model round-trip, so this tier is concurrency-bound rather than CPU-bound.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "vec",
+      "statement": "900 ANN searches/s per pgvector instance (HNSW, top-k over a few million chunks on 2 vCPU / 16 GiB).",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "docs",
+      "statement": "Object-store capacity is expressed as about 5,500 GET/s per S3 prefix; instances here mean PREFIXES, not servers. Corpus sized at roughly 4.2 TB of source documents and chunks.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "Egress is billed per response: ~6 KB per answer with citations, ~64 KB when a user opens a cited source document, ~512 B per ingestion acknowledgement.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The model gateway carries NO compute and NO per-request charge: v1 has no per-instance price for this kind, and a self-hosted proxy has no per-request SKU, so inventing either would be worse than the gap. Its whole cost line is the provider token spend.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The write primary is a SINGLE instance and the engine reports it as a single point of failure. That is the shape of the design: high availability comes from Multi-AZ standby failover, which v1 cannot express - `instances` means active capacity, and a warm standby serves no traffic. Budget for it (the RDS price band tops out at Multi-AZ) and treat the SPOF flag as a reminder, not a modelling error.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Latency here is an UPPER BOUND. The engine queues each component as a single server (M/M/1 sojourn), so a component with a multi-second service time running hot shows a large waiting term. A provider quota is really hundreds of concurrent slots, which queues far better than one server; read the model-call latency as pessimistic and the ARRIVAL and UTILISATION figures as the trustworthy part.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Streaming responses are modelled as a single request/response. Time-to-first-token, which is what users actually feel in a RAG assistant, is NOT computable in v1.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "ai_agents",
+    "difficulty": "intermediate",
+    "summary": "Retrieval-augmented assistant: semantic cache, pgvector search over a document corpus, and a quota-bounded model gateway.",
+    "keywords": [
+      "retrieval augmented generation",
+      "vector search",
+      "pgvector",
+      "embeddings",
+      "semantic search",
+      "knowledge assistant",
+      "chat with your docs",
+      "document q&a",
+      "vector database",
+      "mcp assistant",
+      "rag pipeline",
+      "retrieval augmented"
+    ]
+  }
+}
