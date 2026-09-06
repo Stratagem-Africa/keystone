@@ -26,6 +26,7 @@ from keystone.arch_map import build_arch_map, render_html
 from keystone import scenarios as chaos
 from keystone import remediation
 from keystone import export as spec
+from keystone import loadtest
 from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
@@ -199,6 +200,49 @@ class ScenarioRequest(SimulateRequest):
         if bool(self.scenario_id) == bool(self.specs):
             raise ValueError("provide exactly one of `scenario_id` or `specs`")
         return self
+
+
+class LoadTestRequest(SimulateRequest):
+    """The design to generate a load-test plan for. Same intent-vs-topology rule as /scenario."""
+    intent: str | None = Field(None, max_length=2000)
+    base_url: str = Field("http://localhost:8080", max_length=500)
+    duration_s: int = Field(60, gt=0, le=3600)
+
+
+@app.post("/loadtest")
+def emit_loadtest(req: LoadTestRequest) -> dict:
+    """Emit a k6 script whose thresholds ARE the engine's predictions.
+
+    The only artifact in this space that can exist: a load test can assert a threshold only if
+    something made a falsifiable prediction first. Running it tries to prove the engine wrong, and
+    the summary feeds `keystone.actuals` — the L0 → L1 calibration path (docs/03).
+
+    Deterministic renderer, no LLM. Every numeric literal in the emitted file is a declared constant
+    naming its source, and `limits` states what the test cannot prove (notably that k6 measures
+    client-observed wall time, which includes a network the engine does not model).
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+        sim = simulate(model)
+        plan = loadtest.build_plan(model, sim, duration_s=req.duration_s)
+        script = loadtest.render_k6(plan, base_url=req.base_url)
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not build a load-test plan: {e}")
+
+    slug = "".join(ch if ch.isalnum() else "-" for ch in model.name.lower()).strip("-") or "design"
+    return _sanitize({
+        "script": script,
+        "filename": f"{slug}.k6.js",
+        "scenarios": [dict(s) for s in plan.scenarios],
+        "literals": [{"name": x.name, "value": x.value, "source": x.source, "why": x.why}
+                     for x in plan.literals],
+        "limits": list(loadtest.EMITTER_LIMITS),
+    })
 
 
 class ExportRequest(SimulateRequest):
