@@ -19,7 +19,9 @@ import os
 
 from keystone.blueprints import payments, ticket_booking, twitter, url_shortener
 from keystone.ingestion import Source, make_ingestor
-from keystone.model import SystemModel
+from keystone.model import (
+    Assumption, Component, ComponentKind, Flow, FlowStep, SystemModel, Workload,
+)
 
 # (keyword triggers, builder, label). First match wins — order most-specific first. The blueprint
 # library is the offline "generation" for common intents; the LLM generalises to anything else.
@@ -60,9 +62,72 @@ def generate_architecture(intent: str, *, provider: str | None = None,
     ref = match_reference(intent)
     if ref is not None:
         return ref[0]()
-    # No LLM and no catalogue match: hand back a real, deep starting point the user can edit on the
-    # canvas — honest about the limit (arbitrary-intent generation needs the LLM activated, #182).
-    return url_shortener.build()
+    return generic_starting_point(intent)
+
+
+def generic_starting_point(intent: str = "") -> SystemModel:
+    """The honest answer when nothing matched: a neutral three-tier shape to edit, that never
+    pretends to be a design of the thing you asked for.
+
+    This used to `return url_shortener.build()`. That was a real honesty defect, not a cosmetic one:
+    asking for a video service or a bidding exchange handed back a model literally NAMED "URL
+    Shortener", and every downstream surface — the design card, the verdict, the cost, the chaos
+    catalogue, the remediation plan — then presented another product's architecture as the answer,
+    with confident numbers attached. Under docs/03 the assumption behind a printed number has to
+    travel WITH it; a single line of chrome saying "generic starting point" does not discharge that
+    when the artifact itself is wearing someone else's name.
+
+    So the fallback now carries its own identity and its own GAP assumption, which flows into the
+    report's Assumptions section and the canvas rail like any other provenance. The shape is
+    deliberately plain — a load balancer, an app tier, a cache and a primary — because a neutral
+    starting point is a defensible thing to hand someone and a borrowed blueprint is not.
+
+    The real fix for arbitrary intents is the LLM design path above (issue #182); this keeps the
+    offline, $0 default honest until that is activated.
+    """
+    asked = (intent or "").strip()
+    components = {
+        "lb": Component("lb", ComponentKind.LOAD_BALANCER, "Load balancer",
+                        per_instance_rps=30_000, instances=1, base_latency_ms=1.0,
+                        monthly_cost_per_instance=2_500),
+        "app": Component("app", ComponentKind.APP_SERVER, "Application tier",
+                         per_instance_rps=1_200, instances=4, base_latency_ms=8.0,
+                         monthly_cost_per_instance=3_000),
+        "cache": Component("cache", ComponentKind.CACHE, "Cache",
+                           per_instance_rps=100_000, instances=1, base_latency_ms=0.5,
+                           monthly_cost_per_instance=12_000),
+        "db": Component("db", ComponentKind.SQL_DB, "Primary database",
+                        per_instance_rps=8_000, instances=1, base_latency_ms=5.0,
+                        monthly_cost_per_instance=25_000),
+    }
+    flows = [
+        Flow(name="read", share=0.9, path=[
+            FlowStep("lb"), FlowStep("app"), FlowStep("cache"), FlowStep("db", visit_prob=0.2)]),
+        Flow(name="write", share=0.1, path=[FlowStep("lb"), FlowStep("app"), FlowStep("db")]),
+    ]
+    return SystemModel(
+        name="Generic starting point (no reference matched)",
+        components=components,
+        flows=flows,
+        workload=Workload(system_rps=1_000, description="placeholder load — set this to your own"),
+        assumptions=[
+            Assumption(
+                subject="design",
+                statement=(
+                    "No reference architecture matched"
+                    + (f" \u201c{asked[:80]}\u201d" if asked else " this intent")
+                    + ". This is a NEUTRAL three-tier starting point, not a design of what you "
+                      "asked for — the shape, the component sizes and the 1,000 req/s load are "
+                      "placeholders to edit. Every number below is the engine's arithmetic on "
+                      "those placeholders, so it describes this generic shape and nothing else. "
+                      "Designing an arbitrary intent needs the LLM design path (issue #182)."),
+                confidence="low", source="fallback", provenance="GAP"),
+            Assumption(
+                subject="workload",
+                statement="1,000 req/s placeholder, 90:10 read:write — not derived from your intent",
+                confidence="low", source="fallback", provenance="GAP"),
+        ],
+    )
 
 
 def reference_catalogue() -> list[str]:

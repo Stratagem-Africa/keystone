@@ -314,7 +314,7 @@ export function ArchStudio() {
               <span className="font-mono text-[11px] text-[var(--cv-muted)] truncate">
                 {intent}
                 {result.matched == null && (
-                  <span className="text-[var(--cv-amber)]"> · generic starting point — Edit to fit</span>
+                  <span className="text-[var(--cv-amber)]"> · no reference matched — placeholder shape</span>
                 )}
               </span>
             </div>
@@ -398,6 +398,7 @@ export function ArchStudio() {
                     ) : rail === "verdict" ? (
                       <DesignPanel
                         arch={shown}
+                        unmatched={result.matched === null && !chaos && !fixApplied}
                         selected={selectedNode}
                         activeFlowIndex={activeFlowIndex}
                         onFlow={setActiveFlowIndex}

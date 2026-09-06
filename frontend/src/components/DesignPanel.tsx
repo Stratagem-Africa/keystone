@@ -81,13 +81,18 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 
 interface DesignPanelProps {
   arch: ArchMap;
+  /** True when no reference architecture matched the intent — the design on screen is a neutral
+   *  starting shape, not a design of what was asked for. Stated here, not just in the chrome. */
+  unmatched?: boolean;
   selected: ArchMapNode | null;
   activeFlowIndex: number | null;
   onFlow: (i: number | null) => void;
   onClearSelection: () => void;
 }
 
-export function DesignPanel({ arch, selected, activeFlowIndex, onFlow, onClearSelection }: DesignPanelProps) {
+export function DesignPanel({
+  arch, unmatched = false, selected, activeFlowIndex, onFlow, onClearSelection,
+}: DesignPanelProps) {
   const [showWorking, setShowWorking] = useState(false);
   const { meta, verdict } = arch;
 
@@ -161,6 +166,23 @@ export function DesignPanel({ arch, selected, activeFlowIndex, onFlow, onClearSe
   // ── the verdict ──
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-3">
+      {/* No reference matched: the numbers below are the engine's arithmetic on a PLACEHOLDER shape.
+          That has to sit above the verdict, not beside the title, or the verdict reads as an answer
+          to the question that was actually asked. */}
+      {unmatched && (
+        <div className="cv-panel p-3" style={{ borderLeft: "3px solid var(--cv-amber)" }}>
+          <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--cv-amber)" }}>
+            Not a design of what you asked for
+          </p>
+          <p className="mt-1.5 text-[11.5px] leading-snug" style={{ color: "var(--cv-ink)" }}>
+            Nothing in the reference library matched your description, so this is a neutral
+            three-tier starting point. The shape, the component sizes and the load are placeholders —
+            every figure below is correct arithmetic on <em>those placeholders</em>, and describes
+            this generic shape rather than your system. Edit it on the canvas, then re-simulate.
+          </p>
+        </div>
+      )}
+
       {/* High-stakes domains carry a mandatory expert-review flag (docs/03). Never suppressed. */}
       {meta.high_stakes && (
         <div className="cv-panel p-3" style={{ borderLeft: "3px solid var(--cv-amber)" }}>

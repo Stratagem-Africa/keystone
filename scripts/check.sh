@@ -3,6 +3,10 @@
 # test/lint signal that gates every merge. Zero-dependency: the engine + council +
 # ingestion + reconciliation tests need no pip install and no API key ($0).
 #
+# Covers BOTH halves of the repo. It used to be Python-only, which meant no eslint, no tsc and no
+# `next build` ever ran here — a lint error reached main in #140, and a CSS regression that only
+# manifested in `next dev` went unnoticed for weeks. See scripts/check-frontend.sh.
+#
 #   scripts/check.sh        # run from anywhere in the repo
 #
 # Exit 0 = safe to merge (after review). Non-zero = do not merge.
@@ -60,6 +64,10 @@ else
   echo; echo "==> mypy: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
 
+# Frontend half of the gate. Kept in its own script so it can be run alone during UI work, and so a
+# missing node_modules skips cleanly instead of failing a Python-only clone.
+echo
+"$root/scripts/check-frontend.sh" || status=1
 
 echo
 if [ "$status" -eq 0 ]; then
