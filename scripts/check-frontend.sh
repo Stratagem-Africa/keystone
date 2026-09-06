@@ -27,6 +27,20 @@ fi
 
 cd "$fe" || { echo "error: cannot find frontend/"; exit 2; }
 
+# Build into a directory nothing else touches, and typecheck with tsconfig.gate.json, which reads
+# the SOURCE plus this build's generated types — never .next/.
+#
+# Why: .next/types/ is shared with a running `next dev`, AND on this machine a second process is
+# copying files as they are written — the duplicates land as "routes.d 3.ts" with 0600 permissions
+# while the real file is 0644, one per minute, matching each gate run. tsc then reports duplicate
+# identifiers and the gate fails on code that is fine: intermittently at first (1 run in 3), then
+# every run as they accumulated. A gate that is red for reasons unrelated to the change is worse
+# than no gate, because it teaches you to ignore red.
+export NEXT_DIST_DIR=".next-gate"
+
+# Sweep any duplicates a sync/AV agent left behind, so a stale copy cannot fail a later run.
+find .next .next-gate -name "* [0-9].*" -delete 2>/dev/null || true
+
 echo "==> frontend: design-token guard  (every --cv-* the components read is declared on :root)"
 node --input-type=module -e '
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -74,12 +88,12 @@ echo; echo "==> frontend: eslint (warnings are errors)"
 npx --no-install eslint src --max-warnings=0 2>&1 | tail -n 5
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
-echo; echo "==> frontend: tsc --noEmit"
-npx --no-install tsc --noEmit 2>&1 | tail -n 5
-[ "${PIPESTATUS[0]}" -eq 0 ] || status=1
-
 echo; echo "==> frontend: next build"
 npm run build 2>&1 | grep -E "✓|✗|error|Error|Failed" | tail -n 6
+[ "${PIPESTATUS[0]}" -eq 0 ] || status=1
+
+echo; echo "==> frontend: tsc --noEmit (gate tsconfig)"
+npx --no-install tsc -p tsconfig.gate.json --noEmit 2>&1 | tail -n 5
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
 exit "$status"

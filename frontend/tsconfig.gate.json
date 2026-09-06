@@ -1,0 +1,21 @@
+{
+  // Typecheck config for the merge gate ONLY.
+  //
+  // The default tsconfig includes `.next/types/**/*.ts` so route/layout prop types are checked.
+  // That directory belongs to whichever Next process wrote it last, and on this machine something
+  // (AV or a file-sync agent) leaves numbered duplicates behind — "routes.d 3.ts", "routes.d 4.ts"
+  // — which tsc then reports as duplicate identifiers. The result was a gate that failed on code
+  // that is completely fine, first intermittently and then every run as the duplicates piled up.
+  //
+  // The gate therefore typechecks the SOURCE plus its own build's generated types, and never reads
+  // the dev server's output directory. `npm run typecheck` (the default tsconfig) is still the
+  // right thing to run while developing.
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next-gate/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next", ".next-gate/cache", "out", "build"]
+}

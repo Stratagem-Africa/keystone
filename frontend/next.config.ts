@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The merge gate builds into its OWN directory. `next build` and a running `next dev` otherwise
+  // share .next/types/, and tsconfig includes that path — so a concurrent write leaves duplicate
+  // generated files ("routes.d 2.ts") and the gate's typecheck fails on code that is fine. A gate
+  // that is red 1 run in 3 trains you to ignore red, which is worse than having no gate.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Required for Cloudflare Workers — disables Node.js-specific image optimisation.
   images: { unoptimized: true },
   // The dev indicator's default bottom-left position sits directly on top of the studio's
