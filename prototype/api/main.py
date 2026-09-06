@@ -25,6 +25,7 @@ from keystone.topology import build_model_from_topology
 from keystone.arch_map import build_arch_map, render_html
 from keystone import scenarios as chaos
 from keystone import remediation
+from keystone import export as spec
 from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
@@ -198,6 +199,62 @@ class ScenarioRequest(SimulateRequest):
         if bool(self.scenario_id) == bool(self.specs):
             raise ValueError("provide exactly one of `scenario_id` or `specs`")
         return self
+
+
+class ExportRequest(SimulateRequest):
+    """The design to serialise. Same intent-vs-topology rule as /scenario and /remediate."""
+    intent: str | None = Field(None, max_length=2000)
+
+
+@app.post("/export")
+def export_spec(req: ExportRequest) -> dict:
+    """Serialise a design to the spec file docs/05 §4 specifies — the artifact you commit.
+
+    Inputs only: the spec carries the model, never a verdict, so re-importing it and running the
+    engine reproduces the run rather than replaying a stale one. Stateless, unauthenticated, and it
+    persists nothing — the file is the user's to keep.
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not export: {e}")
+    slug = "".join(ch if ch.isalnum() else "-" for ch in model.name.lower()).strip("-") or "design"
+    return _sanitize({
+        "spec": spec.to_dict(model),
+        "filename": f"{slug}.keystone.json",
+        "orphans": spec.orphans(model),   # unwired components: a design smell worth showing
+    })
+
+
+class ImportRequest(BaseModel):
+    """A previously exported spec file."""
+    spec: dict
+
+
+@app.post("/import")
+def import_spec(req: ImportRequest) -> dict:
+    """Load a spec file → the engine's verdict + architecture map, exactly as if freshly designed.
+
+    Fail-closed: an unknown spec version, an unknown component kind, a dangling flow reference or a
+    model the engine would reject yields a clean 400 naming the problem — never a partial load.
+    """
+    try:
+        model = spec.from_dict(req.spec)
+        sim = simulate(model)
+        arch = build_arch_map(model, sim, sweep=True)
+    except spec.ExportError as e:
+        raise HTTPException(status_code=400, detail=f"invalid spec file: {e}")
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"spec could not be simulated: {e}")
+    arch["scenarios"] = chaos.catalogue_for(model)
+    arch["unmodelled"] = chaos.UNMODELLED
+    arch["orphans"] = spec.orphans(model)
+    return _sanitize(arch)
 
 
 class RemediateRequest(SimulateRequest):

@@ -13,6 +13,7 @@ import {
   type Unmodelled,
 } from "@/lib/scenarios";
 import { planCapacity, type RemediationPlan } from "@/lib/remediation";
+import { downloadSpec, exportSpec, importSpec } from "@/lib/spec";
 
 // The one architecture surface. Describe an intent → the engine designs + simulates a DEEP architecture
 // (POST /generate) → it opens on the beautiful, animated map (the self-contained renderer, journeys +
@@ -65,6 +66,8 @@ export function ArchStudio() {
   const [fixError, setFixError] = useState<string | null>(null);
   const [fixApplied, setFixApplied] = useState(false);
   const fixAbort = useRef<AbortController | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [specBusy, setSpecBusy] = useState(false);
   const [activeFlowIndex, setActiveFlowIndex] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<ArchMapNode | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -232,6 +235,40 @@ export function ArchStudio() {
   const effectiveIndex = loadIndex < 0 ? baseIndex : Math.min(loadIndex, frames.length - 1);
   const frame = frames.length > 0 ? frames[effectiveIndex] : null;
 
+  // Save the design as the spec file docs/05 §4 specifies — inputs only, so re-opening it and
+  // running the engine reproduces the run instead of replaying a stale verdict.
+  async function saveSpec() {
+    if (!API || !subject) return;
+    setSpecBusy(true);
+    try {
+      downloadSpec(await exportSpec(API, subject));
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "could not save this design");
+    } finally {
+      setSpecBusy(false);
+    }
+  }
+
+  async function openSpec(file: File) {
+    if (!API) return;
+    setSpecBusy(true);
+    try {
+      const arch = await importSpec(API, JSON.parse(await file.text()));
+      setResult({ ...arch, matched: arch.meta.title, catalogue: result?.catalogue });
+      setEdited(true);            // an opened spec IS the design; perturb it as a topology
+      setChaos(null); setChaosError(null); setFixPlan(null); setFixApplied(false);
+      setLoadIndex(-1); setActiveFlowIndex(null); setSelectedNode(null);
+      setIntent(arch.meta.title);
+      setGenId((n) => n + 1);
+      setState("done");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "that file is not a Keystone design");
+      setState("error");
+    } finally {
+      setSpecBusy(false);
+    }
+  }
+
   const railBtn = (active: boolean) =>
     `flex-1 rounded-md px-2 py-1.5 font-sans text-[11.5px] font-semibold transition-colors ${
       active ? "bg-[var(--cv-blue)] text-[var(--cv-paper)]" : "text-[var(--cv-muted)] hover:text-[var(--cv-ink)]"
@@ -245,6 +282,20 @@ export function ArchStudio() {
   return (
     <div className="flex flex-col gap-8">
       <p role="status" aria-live="polite" className="sr-only">{liveMessage}</p>
+
+      {/* Mounted at the top level, not inside the result view: opening a saved design is something
+          you do BEFORE you have one on screen. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";      // re-selecting the same file must still fire onChange
+          if (f) void openSpec(f);
+        }}
+      />
 
       {/* Describe */}
       <form
@@ -285,6 +336,15 @@ export function ArchStudio() {
         >
           {busy ? "Designing…" : "Generate architecture →"}
         </button>
+
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy || specBusy}
+          className="self-start font-sans text-label text-ink-muted underline underline-offset-4 transition-colors hover:text-paper disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
+        >
+          …or open a saved design (.keystone.json)
+        </button>
       </form>
 
       {state === "generating" && (
@@ -319,6 +379,24 @@ export function ArchStudio() {
               </span>
             </div>
             <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => void saveSpec()}
+                  disabled={specBusy}
+                  title="Save this design as a spec file you can commit, diff and re-open"
+                  className="font-sans text-label px-2.5 py-1 rounded-full text-[var(--cv-muted)] transition-colors hover:text-[var(--cv-ink)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
+                >
+                  ⭳ Save
+                </button>
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={specBusy}
+                  title="Open a Keystone spec file"
+                  className="font-sans text-label px-2.5 py-1 rounded-full text-[var(--cv-muted)] transition-colors hover:text-[var(--cv-ink)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
+                >
+                  ⭱ Open
+                </button>
+              </div>
               <div className="flex items-center gap-1 rounded-full border border-[var(--cv-line)] p-0.5">
                 <button className={tabBtn(mode === "map")} onClick={() => setMode("map")}>Map</button>
                 <button className={tabBtn(mode === "edit")} onClick={() => setMode("edit")}>✎ Edit</button>
