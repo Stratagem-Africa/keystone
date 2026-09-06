@@ -113,13 +113,20 @@ class ClaudeCliLLM:
         self._meter = meter
         self._timeout = timeout
 
-    def complete(self, *, label: str, system: str, user: str, max_tokens: int) -> str:
+    def complete(self, *, label: str, system: str, user: str, max_tokens: int,
+                 agents: str | None = None) -> str:
+        """`agents` is an optional Claude Code `--agents` JSON object. When given, the CLI runs those
+        personas as SUBAGENTS inside this one session — the mechanism `panel_council` uses to hold a
+        whole deliberation in a single call instead of one call per persona. It is an extra keyword,
+        so the plain `LLM` protocol is unaffected and every other caller is untouched."""
         _refuse_if_served()
         if not cli_available():
             raise LLMError("`claude` is not on PATH — install Claude Code, or use a provider "
                            "with an API key.")
 
         cmd = ["claude", "-p", "--output-format", "json"]
+        if agents:
+            cmd += ["--agents", agents]
         if self.model:
             cmd += ["--model", self.model]
         if system.strip():

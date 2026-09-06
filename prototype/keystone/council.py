@@ -164,11 +164,19 @@ def make_council(provider: str | None = None, model: str | None = None,
     provider = (provider or os.getenv("COUNCIL_PROVIDER", "stub")).strip().lower()
     if provider == "stub":
         return DeterministicStubCouncil()
+    if provider == "claude_panel":
+        # DECK 1: Keystone's seven personas run as SUBAGENTS inside one Claude Code call, instead of
+        # one call per persona. Same personas, same prime-directive guard, one session.
+        # COUNCIL_PROVIDER=consensus can still wrap this as DECK 2 with independent voter MODELS.
+        from keystone.panel_council import PanelCouncil  # lazy
+        return PanelCouncil(model=model or os.getenv("COUNCIL_MODEL", ""), meter=meter)
     if provider == "consensus":
         # Multi-model consensus (ADR-010): a PRIMARY council (CONSENSUS_PRIMARY, default claude) wrapped
         # with independent voter models (CONSENSUS_VOTERS). The primary spec is `provider:model`, so the
         # primary can now be ANY provider (e.g. gemini:gemini-2.0-flash). Lazy; stays $0 until configured.
         from keystone.consensus import make_consensus_council  # lazy
+        # The primary may itself be `claude_panel`, which is what makes the stack double-decker:
+        # a panel of personas underneath, independent voter models on top.
         prim_provider, _, prim_model = os.getenv("CONSENSUS_PRIMARY", "claude").partition(":")
         primary = make_council(prim_provider.strip() or "claude", prim_model.strip() or None,
                                client=client, meter=meter)
