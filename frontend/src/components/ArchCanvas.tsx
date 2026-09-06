@@ -23,6 +23,8 @@ const NODE_H = 152;
 const GAP_X = 104;
 const GAP_Y = 26;
 const PAD = 56;
+const GAP_SUB = 26;     // gap between wrapped sub-columns inside one layer band
+const MAX_ROWS = 4;     // a layer taller than this wraps into another sub-column
 const HEADER_H = 30; // room for the column label above each band
 
 export interface SweepFrameNode {
@@ -101,34 +103,63 @@ export function ArchCanvas({
   const shellRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [autoFit, setAutoFit] = useState(true);
+  // Pan offset. A large design (20+ nodes) will not fit even at "Fit", and the header card sits
+  // over the top-left of the canvas, so the view has to be movable.
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
+  const panStart = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const [showHeader, setShowHeader] = useState(true);
 
   // ── placement: one column per layer that actually holds nodes, in engine order ──
   const { placed, width, height, columns } = useMemo(() => {
+    // One band per layer that actually holds nodes, in the engine's order. Within a band, nodes
+    // wrap into sub-columns after MAX_ROWS — a 20-node design otherwise becomes one unreadable
+    // vertical stack taller than any viewport.
     const used = arch.layers
       .filter((l) => arch.nodes.some((n) => n.layer === l.id))
       .sort((a, b) => a.order - b.order);
-    const colIndex = new Map(used.map((l, i) => [l.id, i]));
-    const rows = new Map<string, number>();
-    const out: Placed[] = arch.nodes.map((node) => {
-      const ci = colIndex.get(node.layer) ?? 0;
-      const ri = rows.get(node.layer) ?? 0;
-      rows.set(node.layer, ri + 1);
-      const live = frame?.nodes?.[node.id];
-      return {
-        node,
-        x: PAD + ci * (NODE_W + GAP_X),
-        y: PAD + HEADER_H + ri * (NODE_H + GAP_Y),
-        utilization: live ? live.utilization : node.utilization,
-        arrival_rps: live ? live.arrival_rps : node.arrival_rps,
-        status: live ? live.status : node.status,
-        isBottleneck: frame ? frame.bottleneck_id === node.id : node.is_bottleneck,
-      };
-    });
-    const maxRows = Math.max(1, ...[...rows.values()]);
+
+    const inLayer = new Map<string, ArchMapNode[]>();
+    for (const l of used) inLayer.set(l.id, arch.nodes.filter((n) => n.layer === l.id));
+
+    // Plain loop, not map-with-accumulator: the react-hooks/immutability rule (React Compiler)
+    // rejects reassigning a variable from inside a callback that could outlive the render.
+    const bands: { id: string; label: string; order: number; x: number; rows: number; bandWidth: number }[] = [];
+    let cursor = PAD;
+    for (const l of used) {
+      const n = inLayer.get(l.id)!.length;
+      const rows = Math.min(n, MAX_ROWS);
+      const subCols = Math.max(1, Math.ceil(n / Math.max(1, rows)));
+      const bandWidth = subCols * NODE_W + (subCols - 1) * GAP_SUB;
+      bands.push({ id: l.id, label: l.label, order: l.order, x: cursor, rows, bandWidth });
+      cursor = cursor + bandWidth + GAP_X;
+    }
+    const byLayer = new Map(bands.map((b) => [b.id, b]));
+
+    const out: Placed[] = [];
+    for (const l of used) {
+      const band = byLayer.get(l.id)!;
+      inLayer.get(l.id)!.forEach((node, i) => {
+        const col = Math.floor(i / band.rows);
+        const row = i % band.rows;
+        const live = frame?.nodes?.[node.id];
+        out.push({
+          node,
+          x: band.x + col * (NODE_W + GAP_SUB),
+          y: PAD + HEADER_H + row * (NODE_H + GAP_Y),
+          utilization: live ? live.utilization : node.utilization,
+          arrival_rps: live ? live.arrival_rps : node.arrival_rps,
+          status: live ? live.status : node.status,
+          isBottleneck: frame ? frame.bottleneck_id === node.id : node.is_bottleneck,
+        });
+      });
+    }
+
+    const maxRows = Math.max(1, ...bands.map((b) => b.rows));
     return {
       placed: out,
-      columns: used.map((l, i) => ({ ...l, x: PAD + i * (NODE_W + GAP_X) })),
-      width: PAD * 2 + used.length * NODE_W + Math.max(0, used.length - 1) * GAP_X,
+      columns: bands,
+      width: cursor - GAP_X + PAD,
       height: PAD * 2 + HEADER_H + maxRows * NODE_H + Math.max(0, maxRows - 1) * GAP_Y,
     };
   }, [arch, frame]);
@@ -173,6 +204,7 @@ export function ArchCanvas({
     if (!el) return;
     const s = Math.min(el.clientWidth / width, el.clientHeight / height, 1.35);
     setScale(Number.isFinite(s) && s > 0 ? s : 1);
+    setOffset({ x: 0, y: 0 });
   }, [width, height]);
 
   useLayoutEffect(() => {
@@ -190,11 +222,41 @@ export function ArchCanvas({
     setScale((s) => Math.min(2.2, Math.max(0.3, s + delta)));
   };
 
+  // Drag the background to pan. Pointer events (not mouse) so trackpad and pen work; the guard
+  // keeps a drag that started on a node card from stealing that card's click.
+  const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest("button,input,a")) return;
+    setAutoFit(false);
+    setPanning(true);
+    panStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const start = panStart.current;
+    if (!panning || !start) return;
+    setOffset({ x: start.ox + (e.clientX - start.x), y: start.oy + (e.clientY - start.y) });
+  };
+  const endPan = (e: React.PointerEvent) => {
+    if (!panning) return;
+    setPanning(false);
+    panStart.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  };
+
   return (
     <div
       ref={shellRef}
       className="canvas-glass relative h-full w-full overflow-hidden"
-      style={{ background: "var(--cv-paper)", color: "var(--cv-ink)" }}
+      style={{
+        background: "var(--cv-paper)",
+        color: "var(--cv-ink)",
+        cursor: panning ? "grabbing" : "grab",
+        touchAction: "none",
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPan}
+      onPointerCancel={endPan}
     >
       {/* dot grid — decoration only */}
       <div
@@ -212,8 +274,8 @@ export function ArchCanvas({
         style={{
           width,
           height,
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          transition: reduced ? "none" : "transform 260ms cubic-bezier(.2,.7,.3,1)",
+          transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
+          transition: reduced || panning ? "none" : "transform 260ms cubic-bezier(.2,.7,.3,1)",
         }}
       >
         {/* ── wires + particles ── */}
@@ -275,7 +337,7 @@ export function ArchCanvas({
           <div
             key={c.id}
             className="absolute text-[11px] font-semibold uppercase tracking-[0.18em]"
-            style={{ left: c.x, top: PAD, width: NODE_W, color: "var(--cv-muted)" }}
+            style={{ left: c.x, top: PAD, width: c.bandWidth, color: "var(--cv-muted)" }}
           >
             {c.label}
           </div>
@@ -360,9 +422,21 @@ export function ArchCanvas({
 
       {/* ── the design's own header: what this is, and how far to trust it ── */}
       <div className="cv-panel absolute left-4 top-4 max-w-[380px] p-3">
-        <p className="text-[14px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
-          {arch.meta.title}
-        </p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-[14px] font-semibold leading-tight" style={{ color: "var(--cv-ink)" }}>
+            {arch.meta.title}
+          </p>
+          <button
+            onClick={() => setShowHeader((v) => !v)}
+            aria-expanded={showHeader}
+            aria-label={showHeader ? "Collapse design summary" : "Expand design summary"}
+            className="shrink-0 rounded px-1.5 text-[11px] transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2"
+            style={{ color: "var(--cv-muted)", outlineColor: "var(--cv-blue)" }}
+          >
+            {showHeader ? "▾" : "▸"}
+          </button>
+        </div>
+        {showHeader && (<>
         <p className="mt-1 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
           Architecture map · every number is the engine&apos;s, at this load
         </p>
@@ -382,6 +456,7 @@ export function ArchCanvas({
         <p className="mt-1.5 text-[9.5px] leading-snug" style={{ color: "var(--cv-amber)" }}>
           confidence: {arch.meta.confidence}
         </p>
+        </>)}
       </div>
 
       {/* ── zoom controls ── */}

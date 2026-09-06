@@ -24,6 +24,7 @@ from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
 from keystone.arch_map import build_arch_map, render_html
 from keystone import scenarios as chaos
+from keystone import remediation
 from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
@@ -178,6 +179,76 @@ class ScenarioRequest(SimulateRequest):
     intent: str | None = Field(None, max_length=2000)
     scenario_id: str = Field(..., min_length=1, max_length=64)
     target_id: str | None = Field(None, max_length=128)
+
+
+class RemediateRequest(SimulateRequest):
+    """The design to size, plus the load to size it for. Same intent-vs-topology rule as /scenario."""
+    intent: str | None = Field(None, max_length=2000)
+    target_rps: float | None = Field(None, gt=0, le=10_000_000)
+
+
+@app.post("/remediate")
+def remediate(req: RemediateRequest) -> dict:
+    """Given a design and a load, propose the smallest instance change that keeps it under the ceiling.
+
+    Same stateless-calculator contract as /simulate and /scenario (no auth, no persistence).
+
+    Prime directive intact: `remediation.plan_capacity` chooses only INPUTS (instance counts) and
+    re-runs `simulate()` to decide whether they worked; `before` and `after` are two real engine runs
+    and the cost delta is their difference in integer minor units. Where a component cannot honestly
+    be sized by adding instances — a single-writer primary, a third-party dependency — the planner
+    returns a BLOCKER carrying the architectural options rather than a fabricated number.
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+        plan = remediation.plan_capacity(model, req.target_rps)
+        after_arch = build_arch_map(
+            dataclasses.replace(
+                model,
+                components={
+                    **model.components,
+                    **{r.component_id: dataclasses.replace(
+                        model.components[r.component_id], instances=r.to_instances)
+                       for r in plan.remedies},
+                },
+                workload=dataclasses.replace(model.workload, system_rps=plan.target_rps),
+            ),
+            plan.after,
+        )
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not plan capacity: {e}")
+
+    return _sanitize({
+        "target_rps": plan.target_rps,
+        "ceiling": plan.ceiling,
+        "holds": plan.holds,
+        "verdict": plan.verdict,
+        "remedies": [r.to_dict() for r in plan.remedies],
+        "blockers": [b.to_dict() for b in plan.blockers],
+        "monthly_cost_delta_cents": plan.monthly_cost_delta_cents,
+        "before": {
+            "bottleneck_name": plan.before.bottleneck_name,
+            "bottleneck_utilization": plan.before.bottleneck_utilization,
+            "mean_latency_ms": plan.before.mean_latency_ms,
+            "monthly_cost_cents": plan.before.monthly_cost,
+            "confidence": plan.before.confidence,
+        },
+        "after": {
+            "bottleneck_name": plan.after.bottleneck_name,
+            "bottleneck_utilization": plan.after.bottleneck_utilization,
+            "mean_latency_ms": plan.after.mean_latency_ms,
+            "monthly_cost_cents": plan.after.monthly_cost,
+            "confidence": plan.after.confidence,
+        },
+        "after_map": after_arch,   # the fixed design, ready to render on the canvas
+        "limits": list(plan.limits),
+        "derivation": plan.derivation,
+    })
 
 
 @app.post("/scenario")

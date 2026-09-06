@@ -5,11 +5,13 @@ import { CanvasEditor, type CanvasSeed } from "@/components/CanvasEditor";
 import { ArchCanvas, type SweepFrame } from "@/components/ArchCanvas";
 import { ChaosPanel } from "@/components/ChaosPanel";
 import { DesignPanel } from "@/components/DesignPanel";
+import { FixPanel } from "@/components/FixPanel";
 import { LoadTransport } from "@/components/LoadTransport";
 import { seedFromArchMap, type ArchMap, type ArchMapNode } from "@/lib/archMap";
 import {
-  runScenario, type ScenarioOption, type ScenarioRun, type Unmodelled,
+  runScenario, type ScenarioOption, type ScenarioRun, type ScenarioSubject, type Unmodelled,
 } from "@/lib/scenarios";
+import { planCapacity, type RemediationPlan } from "@/lib/remediation";
 
 // The one architecture surface. Describe an intent → the engine designs + simulates a DEEP architecture
 // (POST /generate) → it opens on the beautiful, animated map (the self-contained renderer, journeys +
@@ -56,7 +58,12 @@ export function ArchStudio() {
   // A generated design must be perturbed via its intent (the topology cannot carry flow branch
   // probabilities). Once the user edits on the canvas, the topology IS the design, so we switch.
   const [edited, setEdited] = useState(false);
-  const [rail, setRail] = useState<"verdict" | "chaos">("verdict");
+  const [rail, setRail] = useState<"verdict" | "chaos" | "fix">("verdict");
+  const [fixPlan, setFixPlan] = useState<RemediationPlan | null>(null);
+  const [fixRunning, setFixRunning] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
+  const [fixApplied, setFixApplied] = useState(false);
+  const fixAbort = useRef<AbortController | null>(null);
   const [activeFlowIndex, setActiveFlowIndex] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<ArchMapNode | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -100,6 +107,9 @@ export function ArchStudio() {
       setEdited(false);
       setActiveFlowIndex(null);
       setSelectedNode(null);
+      setFixPlan(null);
+      setFixApplied(false);
+      setFixError(null);
       setChaos(null);
       setChaosError(null);
       setGenId((n) => n + 1);
@@ -123,6 +133,9 @@ export function ArchStudio() {
     setEdited(false);
     setActiveFlowIndex(null);
     setSelectedNode(null);
+    setFixPlan(null);
+    setFixApplied(false);
+    setFixError(null);
     setIntent("");
     setErrorMsg(null);
     textareaRef.current?.focus();
@@ -152,24 +165,7 @@ export function ArchStudio() {
     setChaosRunning(option.key);
     setChaosError(null);
     try {
-      const run = await runScenario(
-        API,
-        edited
-          ? {
-              mode: "topology",
-              name: result.meta.title,
-              system_rps: Math.round(result.meta.offered_load_rps),
-              nodes: seed.nodes.map((n) => ({
-                id: n.id, kind: n.kind, name: n.name,
-                per_instance_rps: n.per_instance_rps, instances: n.instances,
-              })),
-              edges: seed.edges,
-            }
-          : { mode: "intent", intent },
-        option.id,
-        option.target_id,
-        controller.signal,
-      );
+      const run = await runScenario(API, subject!, option.id, option.target_id, controller.signal);
       if (controller.signal.aborted) return;
       setChaos(run);
       setLoadIndex(-1);  // a scenario answers at the design load; the load axis restarts from there
@@ -182,11 +178,49 @@ export function ArchStudio() {
     }
   }
 
+  // The design as POST /scenario and /remediate need it: intent while it is still the generated
+  // design (topologies cannot carry flow branch probabilities), the drawn topology once edited.
+  const subject: ScenarioSubject | null = !result || !seed
+    ? null
+    : edited
+      ? {
+          mode: "topology",
+          name: result.meta.title,
+          system_rps: Math.round(result.meta.offered_load_rps),
+          nodes: seed.nodes.map((n) => ({
+            id: n.id, kind: n.kind, name: n.name,
+            per_instance_rps: n.per_instance_rps, instances: n.instances,
+          })),
+          edges: seed.edges,
+        }
+      : { mode: "intent", intent };
+
+  async function planFix(targetRps: number) {
+    if (!API || !subject) return;
+    fixAbort.current?.abort();
+    const controller = new AbortController();
+    fixAbort.current = controller;
+    setFixRunning(true);
+    setFixError(null);
+    try {
+      const p = await planCapacity(API, subject, targetRps, controller.signal);
+      if (controller.signal.aborted) return;
+      setFixPlan(p);
+      setFixApplied(false);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setFixError(err instanceof Error ? err.message : "could not size this design");
+    } finally {
+      if (!controller.signal.aborted) setFixRunning(false);
+    }
+  }
+
   // What the canvas shows: the perturbed run while a scenario is active, otherwise the design.
-  const shown: ArchMap | null = chaos ? chaos.perturbed : result;
+  const shown: ArchMap | null =
+    fixApplied && fixPlan ? fixPlan.after_map : chaos ? chaos.perturbed : result;
   const frames: SweepFrame[] = useMemo(
-    () => (chaos ? [] : ((result?.sweep as SweepFrame[] | undefined) ?? [])),
-    [chaos, result],
+    () => (chaos || fixApplied ? [] : ((result?.sweep as SweepFrame[] | undefined) ?? [])),
+    [chaos, fixApplied, result],
   );
   // The sweep brackets the design load (0.25x … 10x), so stop 0 is NOT the design. Open on the
   // stop the user actually asked for, and make that where "back to design load" returns.
@@ -342,11 +376,25 @@ export function ArchStudio() {
                       Verdict
                     </button>
                     <button onClick={() => setRail("chaos")} className={railBtn(rail === "chaos")}>
-                      Break it{result.scenarios ? ` (${result.scenarios.length})` : ""}
+                      Break it
+                    </button>
+                    <button onClick={() => setRail("fix")} className={railBtn(rail === "fix")}>
+                      Fix it
                     </button>
                   </div>
                   <div className="min-h-0 flex-1">
-                    {rail === "verdict" ? (
+                    {rail === "fix" ? (
+                      <FixPanel
+                        targetRps={frame?.load_rps ?? shown.meta.offered_load_rps}
+                        plan={fixPlan}
+                        running={fixRunning}
+                        error={fixError}
+                        applied={fixApplied}
+                        onPlan={() => void planFix(frame?.load_rps ?? shown.meta.offered_load_rps)}
+                        onApply={() => { setFixApplied(true); setChaos(null); }}
+                        onRevert={() => setFixApplied(false)}
+                      />
+                    ) : rail === "verdict" ? (
                       <DesignPanel
                         arch={shown}
                         selected={selectedNode}
