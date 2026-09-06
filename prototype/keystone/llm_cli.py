@@ -23,7 +23,13 @@ Measured on Claude Code 2.1.157, subscription auth (`authMethod: claude.ai`, `ma
 * It is SLOW compared with the API: ~13 s for a trivial prompt, ~59 s for a real one, because each
   invocation boots a full Claude Code session. Budget minutes for a council run, not seconds.
 * The envelope reports `total_cost_usd`. On a subscription that is NOTIONAL — what the same tokens
-  would have cost via the API — so it is recorded as `notional_usd`, never as spend.
+  would have cost via the API — so it is recorded for visibility, never as spend.
+* **It runs in a neutral directory, deliberately.** `claude -p` auto-discovers `CLAUDE.md` from its
+  working directory, so running the council from inside the Keystone repo silently prepends this
+  project's own instructions to every persona prompt. Measured: ~7,400 extra context tokens and
+  roughly double the notional cost, and — worse — the council's answer would then depend on which
+  directory the developer happened to be standing in. Keystone's whole contract is reproducibility,
+  so the prompt is exactly what `_model_brief` and the persona say, and nothing ambient.
 
 Prime directive is untouched: this is a transport. It returns text for the council to reason with,
 and `simulate()` remains the only source of a number.
@@ -34,6 +40,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 
 from .cost_meter import CostMeter
 from .llm import LLMError
@@ -122,7 +129,11 @@ class ClaudeCliLLM:
         cmd.append(user)
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self._timeout)
+            # Neutral cwd: see the module docstring. Without this the council inherits whatever
+            # CLAUDE.md is above the caller's directory, and stops being reproducible.
+            with tempfile.TemporaryDirectory(prefix="keystone-cli-") as neutral:
+                proc = subprocess.run(cmd, capture_output=True, text=True,
+                                      timeout=self._timeout, cwd=neutral)
         except subprocess.TimeoutExpired as e:
             raise LLMError(
                 f"{label}: `claude -p` timed out after {self._timeout}s. Each call boots a whole "

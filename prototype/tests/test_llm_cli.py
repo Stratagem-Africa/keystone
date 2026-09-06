@@ -111,6 +111,17 @@ class CompleteTest(unittest.TestCase):
         self.assertIn("--output-format", cmd)
         self.assertIn("json", cmd)
 
+    def test_runs_in_a_neutral_directory(self):
+        """`claude -p` auto-discovers CLAUDE.md from its cwd. Running the council inside the repo
+        prepends this project's own instructions to every persona prompt — measured at ~7,400 extra
+        tokens and ~2x the notional cost — and makes the answer depend on where the dev was
+        standing. The prompt must be exactly the persona + the model brief."""
+        with mock.patch("subprocess.run", return_value=_proc(_envelope())) as run:
+            self.llm.complete(label="t", system="", user="u", max_tokens=9)
+        cwd = run.call_args.kwargs.get("cwd")
+        self.assertIsNotNone(cwd, "the CLI must run in a pinned, neutral cwd")
+        self.assertNotIn("Keystone", str(cwd), "must not inherit the repo's CLAUDE.md")
+
     def test_json_schema_is_not_used(self):
         """Measured on CLI 2.1.157: --json-schema returned PROSE, not a conforming object. The
         council's own _extract_json is the reliable path, so we must not depend on the flag."""
