@@ -415,7 +415,7 @@
     },
     {
       "subject": "engine",
-      "statement": "Latency here is an UPPER BOUND. The engine queues each component as a single server (M/M/1 sojourn), so a component with a multi-second service time running hot shows a large waiting term. A provider quota is really hundreds of concurrent slots, which queues far better than one server; read the model-call latency as pessimistic and the ARRIVAL and UTILISATION figures as the trustworthy part.",
+      "statement": "The engine now queues each tier as M/M/c (Erlang-C over its instance count), so a fleet is no longer charged the waiting time of a single server — this assumption previously warned that the latency here was pessimistic for exactly that reason, and that warning is obsolete as of 2026-09-07. What remains true, and matters more: a PROVIDER QUOTA is not a fleet you own. Its concurrency is a contractual number you buy, it can be changed by the provider, and it cannot be relieved by adding your own instances. Read the ARRIVAL and UTILISATION figures as the trustworthy output and treat the quota row as a contract to renegotiate rather than capacity to provision.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"

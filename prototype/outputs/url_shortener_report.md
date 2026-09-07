@@ -32,7 +32,7 @@ _Range = the output span when each GROUNDED input is swept across its **cited** 
 
 ## Per-flow latency
 
-_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
+_Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier's instance count; fixed-shape exponential percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
 
 | Flow | Share | Mean | p50 | p95 | p99 |
 |---|--:|--:|--:|--:|--:|
@@ -195,14 +195,14 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Bottleneck = highest rho -> App tier (t4g.medium x12) at rho=0.69 (10,000 / 14,400 rps).
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
 - Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 11 ms.
-- Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
+- Percentiles are a FIXED-SHAPE approximation, not a second measurement: p50/p95/p99 = mean x 0.69/3.00/4.61. Two consequences worth knowing. (1) The ratio p99/p50 is the constant 6.64 for EVERY design at EVERY load, so the percentiles carry no information the mean does not already carry — read them as a shape applied to the mean, never as an independently derived tail. (2) The multipliers assume an exponentially distributed sojourn, which is EXACT for a single M/M/1 hop and only approximate here, because the engine now models each tier as M/M/c (whose sojourn is a mixture, not an exponential) and sums several hops along a path. It over-states the tail in the common case; treat it as a directional upper bound. A real tail model needs the M/M/c sojourn distribution convolved along the path, and is not in v1.
 - Monthly cost = compute $1,045.00 = $1,045.00 (integer cents; usage rates GROUNDED (cited)).
 
 ## Where this is wrong (read before trusting a number)
 
-- Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
+- Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities & prices have MIXED provenance — each is GROUNDED (matches a cited benchmark band), RECONCILE (your value kept despite falling outside the cited band), or ASSUMPTION (uncited), as marked in the Grounding & reconciliation section. None are calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
-- Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
+- Percentiles are a FIXED SHAPE applied to the mean, not a second measurement. The ratio p99/p50 is the constant 6.64 for every design at every load, so they carry no information the mean does not already carry — do not read p99 as an independently derived tail. The exponential shape is EXACT for a single M/M/c tier with one server and only approximate here, because each tier is M/M/c (whose sojourn is a mixture, not an exponential) and a path sums several of them. It tends to OVER-state the tail; treat p95/p99 as upper-bound directional figures. A real tail model needs the M/M/c sojourn distribution convolved along the path, and is not in v1.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope. NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — the per-component COMPUTE prices that drive most of this figure carry their own provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding & reconciliation section; some may be RECONCILE (your value kept despite the cited band).
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 - Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — 'redirect' (99% of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a different (often worse) path can differ sharply.

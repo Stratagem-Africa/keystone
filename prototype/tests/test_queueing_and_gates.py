@@ -233,3 +233,55 @@ class CoverageDisclosureTest(unittest.TestCase):
         self.assertEqual(
             [c for c, _ in missing_capabilities("a twitter clone with payments", twitter.build())],
             ["taking payments"])
+
+
+class TailModelIsHonestlyLabelledTest(unittest.TestCase):
+    """p99/p50 is the constant 6.6439 for every design at every load, because the percentiles are a
+    fixed shape applied to the mean rather than an independently derived tail. That is a real
+    limitation — SysSimulator's flat percentiles are the defect Keystone's teardown convicts it of,
+    and Keystone's are flat in SHAPE too. The difference has to be that Keystone SAYS SO."""
+
+    def test_the_ratio_really_is_constant(self):
+        """If this ever stops being constant, a real tail model landed — update the caveat."""
+        import dataclasses
+        model = url_shortener.build()
+        ratios = set()
+        for mult in (0.1, 0.5, 1.0, 1.2):
+            w = dataclasses.replace(model.workload, system_rps=model.workload.system_rps * mult)
+            r = simulate(dataclasses.replace(model, workload=w))
+            ratios.add(round(r.p99_ms / r.p50_ms, 4))
+        self.assertEqual(len(ratios), 1, "the tail shape is fixed by construction")
+
+    def test_and_the_report_says_the_ratio_is_fixed(self):
+        """The user must not read p99 as a second, independent measurement."""
+        blob = " ".join(simulate(url_shortener.build()).caveats)
+        self.assertIn("p99/p50", blob)
+        self.assertIn("no information the mean does not", blob)
+
+    def test_and_admits_the_exponential_assumption_no_longer_matches_the_queue(self):
+        """It was EXACT for M/M/1. The engine is M/M/c now, so the label has to change too."""
+        blob = " ".join(simulate(url_shortener.build()).caveats)
+        self.assertIn("M/M/c", blob)
+        self.assertIn("upper-bound", blob)
+        # Asserting "M/M/c appears SOMEWHERE" is not enough and briefly wasn't: the headline caveat
+        # still read "M/M/1 per component" while this test passed on the phrase appearing in a
+        # DIFFERENT caveat. An existence check is not an identity check — the stale claim has to be
+        # asserted GONE, not merely outnumbered.
+        self.assertNotIn("M/M/1 per component", blob,
+                         "the headline caveat still describes the old single-server model")
+
+    def test_no_user_facing_string_still_claims_the_old_model(self):
+        """Every surface, not just the caveats — a stale claim in one is a wrong claim."""
+        from keystone.report import render
+        model = url_shortener.build()
+        sim = simulate(model)
+        surfaces = {
+            "caveats": " ".join(sim.caveats),
+            "derivation": " ".join(sim.derivation),
+            "report": render(model, [], sim),
+            "metric models": " ".join(m.model for m in sim.metrics.values()),
+        }
+        for name, text in surfaces.items():
+            with self.subTest(name):
+                self.assertNotIn("M/M/1 per component", text)
+                self.assertNotIn("M/M/1 sojourn", text)

@@ -11,8 +11,10 @@ Model: an open queueing network (Jackson-style approximation).
     sustainable system rps is today's rps * (ceiling / rho_max).
   - Per-component mean sojourn time via M/M/c (Erlang-C): W = S + Wq, over the tier's
     instance count. Reduces to M/M/1 exactly at c=1. Unstable (infinite) at rho >= 1.
-  - Path latency = sum of mean sojourn times along the dominant flow; percentiles
-    via an exponential-tail approximation (acknowledged in caveats).
+  - Path latency = sum of mean sojourn times along the dominant flow (exact — expectation is
+    linear). Percentiles are a fixed-shape exponential approximation applied to that mean, so
+    p99/p50 is a constant regardless of design or load. Exact for a single M/M/1 hop; approximate
+    for M/M/c and for multi-hop paths. Disclosed in the caveats, never presented as a measurement.
 
 Accuracy level: L0 (Directional) per the Accuracy Charter. Honest by construction.
 """
@@ -281,8 +283,16 @@ def _derivation(
         f"flow ('{dom.name}', {dom.share:.0%} share) -> mean {mean:.0f} ms."
     )
     lines.append(
-        "Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x "
-        f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f} (over-states the tail; treat as a directional upper bound)."
+        "Percentiles are a FIXED-SHAPE approximation, not a second measurement: p50/p95/p99 = mean x "
+        f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f}. Two consequences worth knowing. (1) The ratio "
+        f"p99/p50 is the constant {_P99_K / _P50_K:.2f} for EVERY design at EVERY load, so the "
+        "percentiles carry no information the mean does not already carry — read them as a shape "
+        "applied to the mean, never as an independently derived tail. (2) The multipliers assume an "
+        "exponentially distributed sojourn, which is EXACT for a single M/M/1 hop and only "
+        "approximate here, because the engine now models each tier as M/M/c (whose sojourn is a "
+        "mixture, not an exponential) and sums several hops along a path. It over-states the tail in "
+        "the common case; treat it as a directional upper bound. A real tail model needs the M/M/c "
+        "sojourn distribution convolved along the path, and is not in v1."
     )
     # Cost derivation: list compute -> pricing discount -> + usage lines (all integer cents).
     charged = cost_breakdown.get("compute", 0)
@@ -318,7 +328,8 @@ def _metrics(
     """The headline outputs as self-describing `Metric`s (ADR-007). Each restates a value the
     engine already computed, tagged with the model that produced it + the engine-stability
     confidence qualifier. No numeric band at L0 (not fabricated). Built only here."""
-    tail = ("over-states the tail; directional upper bound",)
+    tail = ("fixed shape applied to the mean (p99/p50 is a constant); over-states the "
+            "tail; directional upper bound, not a second measurement",)
     safe_pct = f"{SAFE_UTILIZATION:.0%}"
     # Rate provenance label agrees with the report's rate tag (stub → "ASSUMPTION", exact prior text).
     rate_model = ("compute (× pricing model) + usage (egress/storage/requests) + AI tokens at "
@@ -462,11 +473,17 @@ def simulate(model: SystemModel) -> SimulationResult:
         "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03)."
     )
     caveats = [
-        "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
-        "simulation. Async/streaming/multi-region topologies are out of v1 scope.",
+        "Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's "
+        "instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.",
         cap_caveat,
-        "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
-        "treat p95/p99 as upper-bound directional figures.",
+        "Percentiles are a FIXED SHAPE applied to the mean, not a second measurement. The ratio "
+        f"p99/p50 is the constant {_P99_K / _P50_K:.2f} for every design at every load, so they "
+        "carry no information the mean does not already carry — do not read p99 as an independently "
+        "derived tail. The exponential shape is EXACT for a single M/M/c tier with one server and "
+        "only approximate here, because each tier is M/M/c (whose sojourn is a mixture, not an "
+        "exponential) and a path sums several of them. It tends to OVER-state the tail; treat "
+        "p95/p99 as upper-bound directional figures. A real tail model needs the M/M/c sojourn "
+        "distribution convolved along the path, and is not in v1.",
         cost_caveat,
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
