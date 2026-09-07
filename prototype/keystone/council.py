@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from keystone.model import SystemModel
+from keystone.model import ComponentKind, SystemModel
 
 # Cheap dev default (Doc 02 §4 — one model, control cost). Mirrors .env.example;
 # set COUNCIL_MODEL=claude-opus-4-8 for a production-grade council.
@@ -98,42 +98,110 @@ class Council(Protocol):
 
 class DeterministicStubCouncil:
     """Stand-in for the real council so the pipeline runs without an LLM.
-    Returns canned, clearly-labelled ADRs. NOT live reasoning."""
+    Clearly-labelled illustrative ADRs, derived from the model. NOT live reasoning."""
 
     def design(self, model: SystemModel) -> list[ADR]:
-        adrs = [
-            ADR(
-                area="Datastore",
-                decision="Single relational primary (PostgreSQL) for the mapping table.",
-                rationale="Workload is simple key->value with strong-read tolerance once "
-                          "cached; a relational primary is the boring, reliable default.",
-                dissent=["Data engineer: a KV store (DynamoDB) scales writes more cheaply "
-                         "at very high create volume; revisit if write share rises."],
-                confidence="high",
-                kill_criteria=["Create (write) traffic exceeds ~30% of total",
-                               "Mapping table exceeds single-primary write capacity"],
-            ),
-            ADR(
-                area="Caching",
-                decision="Cache-aside on the redirect (read) path with a high hit-rate cache.",
-                rationale="Redirects dominate traffic and are highly cacheable; the cache "
-                          "shields the primary from the read storm.",
-                dissent=["SRE: the cache is now load-bearing -- a cold cache or stampede "
-                         "melts the DB. Add request-coalescing / stampede protection."],
-                confidence="high",
-                kill_criteria=["Cache hit-rate falls below ~70% in production",
-                               "No stampede protection before launch"],
-            ),
-            ADR(
-                area="Resilience",
-                decision="Add a read replica and cache failover before production.",
-                rationale="A single primary and single cache are single points of failure.",
-                dissent=["YAGNI-skeptic: acceptable to defer for a prototype (Tier-0), but "
-                         "NOT for external traffic (Tier-1)."],
+        """ADRs derived from THIS model's own structure.
+
+        These used to be three hardcoded decisions about a URL shortener — "the mapping table",
+        "cache-aside on the redirect (read) path", "create (write) traffic exceeds ~30%" — returned
+        for every model, because `design()` took `model` and ignored it. The committed golden
+        `outputs/ticket_booking_report.md` therefore shipped, under the heading "Design decisions
+        (council)", three decisions about a different product entirely.
+
+        That is exactly the defect `generate.py` calls out for the fallback path: presenting another
+        product's architecture as the answer, and a label saying "illustrative" does not discharge
+        it when the artifact itself is describing someone else's system. A stub may be shallow — it
+        must not be about the wrong thing.
+
+        So each decision is now composed from what the engine can actually see in this model: the
+        datastores present, whether a cache sits on the dominant read path, and which components are
+        single points of failure. No numbers (prime directive) — structure and names only.
+        """
+        stores = [c for c in model.components.values()
+                  if c.kind in (ComponentKind.SQL_DB, ComponentKind.OBJECT_STORE)]
+        caches = [c for c in model.components.values() if c.kind == ComponentKind.CACHE]
+        replicas = [c for c in model.components.values() if c.kind == ComponentKind.REPLICA]
+        queues = [c for c in model.components.values() if c.kind == ComponentKind.QUEUE]
+        externals = [c for c in model.components.values() if c.kind == ComponentKind.EXTERNAL_API]
+        spofs = [c.name for c in model.components.values() if c.is_spof]
+        subject = model.name
+
+        def names(cs, empty="none in this design"):
+            return ", ".join(c.name for c in cs) if cs else empty
+
+        adrs: list[ADR] = []
+
+        adrs.append(ADR(
+            area="Datastore",
+            decision=(f"{subject} keeps its system of record in {names(stores)}."
+                      if stores else
+                      f"{subject} declares no database — state lives outside the modelled system."),
+            rationale=("A relational primary is the boring, reliable default; it is the component "
+                       "whose write path cannot be scaled out by adding instances, so the design "
+                       "hangs on it."
+                       if stores else
+                       "Nothing here owns durable state, so there is no write bottleneck to reason "
+                       "about — confirm that is deliberate and not an omission in the model."),
+            dissent=["Data engineer: if writes dominate, a partitioned or KV store scales that path "
+                     "more cheaply than a single primary; revisit if the write share rises."],
+            confidence="high" if stores else "low",
+            kill_criteria=["Write traffic outgrows what one primary can serve",
+                           "A second service needs write access to the same tables"],
+        ))
+
+        adrs.append(ADR(
+            area="Caching",
+            decision=(f"Reads are shielded by {names(caches)}"
+                      + (f", with {names(replicas)} behind it." if replicas else ".")
+                      if caches else
+                      f"{subject} has no cache tier; reads go straight to the system of record."),
+            rationale=("The read path dominates, and a cache keeps that volume off the primary."
+                       if caches else
+                       "Every read is paid for at the datastore. That is simpler and correct, and "
+                       "it is the first thing to revisit when the read path binds."),
+            dissent=["YAGNI-skeptic: a cache is a second source of truth and a new failure mode; "
+                     "do not add one before the read path is demonstrably the constraint."],
+            confidence="med",
+            kill_criteria=["Cache hit-rate falls far enough that the primary sees the read storm",
+                           "Stale reads become user-visible in a way the product cannot accept"],
+        ))
+
+        if queues or externals:
+            adrs.append(ADR(
+                area="Asynchronous work and third parties",
+                decision=(f"Work is deferred through {names(queues)}." if queues else "")
+                         + (f" {subject} depends on {names(externals)}, which it does not own."
+                            if externals else ""),
+                rationale=("Deferring work keeps the request path short. A dependency you do not "
+                           "own cannot be scaled by adding your own instances — its limit is "
+                           "contractual, so it has to be designed around rather than provisioned "
+                           "away." if externals else
+                           "Deferring work keeps the request path short and absorbs bursts."),
+                dissent=["SRE: a queue converts a fast failure into a slow backlog; decide now what "
+                         "happens to messages that cannot be delivered."],
                 confidence="med",
-                kill_criteria=["Going to external/production traffic with 1 DB + 1 cache"],
-            ),
-        ]
+                kill_criteria=["Backlog drain time exceeds what the product can tolerate",
+                               "A third party's quota becomes the binding constraint"],
+            ))
+
+        adrs.append(ADR(
+            area="Resilience",
+            decision=(f"Single points of failure in this design: {', '.join(spofs)}."
+                      if spofs else
+                      "No single points of failure — every tier in this design is replicated."),
+            rationale=("Each of these is one instance; losing it takes the system with it."
+                       if spofs else
+                       "Every component carries more than one instance, so no single loss is total."),
+            dissent=["YAGNI-skeptic: acceptable to defer for a prototype (Tier-0), but NOT for "
+                     "external traffic (Tier-1)."],
+            confidence="med" if spofs else "high",
+            kill_criteria=["Going to external/production traffic with a single-instance tier"],
+        ))
+
+        # High-stakes guard (Doc 03 §6): never imply production-safety for flagged
+        # domains. Shared, identity-based gate (ADR-001 C1) — same as the real council.
+        return ensure_high_stakes_gate(adrs, model.domain_flags, source="stub")
         # High-stakes guard (Doc 03 §6): never imply production-safety for flagged
         # domains. Shared, identity-based gate (ADR-001 C1) — same as the real council.
         return ensure_high_stakes_gate(adrs, model.domain_flags, source="stub")

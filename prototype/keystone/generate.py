@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 
 from keystone.blueprints import payments, ticket_booking, twitter, url_shortener
+from keystone.domains import apply_high_stakes_flags
 from keystone.ingestion import Source, make_ingestor
 from keystone.model import (
     Assumption, Component, ComponentKind, Flow, FlowStep, SystemModel, Workload,
@@ -82,11 +83,17 @@ def generate_architecture(intent: str, *, provider: str | None = None,
         # default transport shape for an injected client (make_ingestor('stub', ...) ignores it).
         eff_provider = provider or (prov if prov not in ("", "stub") else "claude")
         ingestor = make_ingestor(eff_provider, model=model, client=client)
-        return ingestor.ingest(Source(text=intent, name=(intent[:60] or "intent"))).model
+        designed = ingestor.ingest(Source(text=intent, name=(intent[:60] or "intent"))).model
+        # Also on the LLM path, and deliberately NOT delegated to the model: whether a human expert
+        # is required is not a judgement a language model gets to make about its own output.
+        return apply_high_stakes_flags(designed, intent)
     ref = match_reference(intent)
-    if ref is not None:
-        return ref[0]()
-    return generic_starting_point(intent)
+    built = ref[0]() if ref is not None else generic_starting_point(intent)
+    # DETECT the high-stakes domain from what the user actually asked for. Until 2026-09-07 the
+    # flag could only arrive by being hardcoded on a blueprint, so "a hospital patient records
+    # system" and "an election result tallying platform" both returned domain_flags == [] and no
+    # expert-review gate — three of docs/03's four mandatory domains failed OPEN. See domains.py.
+    return apply_high_stakes_flags(built, intent)
 
 
 def generic_starting_point(intent: str = "") -> SystemModel:

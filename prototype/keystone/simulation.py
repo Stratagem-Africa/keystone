@@ -9,7 +9,8 @@ Model: an open queueing network (Jackson-style approximation).
   - Bottleneck = component with the highest rho.
   - Breakpoint scales linearly with offered load (open network), so the max
     sustainable system rps is today's rps * (ceiling / rho_max).
-  - Per-component mean sojourn time via M/M/1: W = service / (1 - rho).
+  - Per-component mean sojourn time via M/M/c (Erlang-C): W = S + Wq, over the tier's
+    instance count. Reduces to M/M/1 exactly at c=1. Unstable (infinite) at rho >= 1.
   - Path latency = sum of mean sojourn times along the dominant flow; percentiles
     via an exponential-tail approximation (acknowledged in caveats).
 
@@ -26,7 +27,9 @@ from dataclasses import dataclass, field, replace
 from keystone.model import ComponentKind, Flow, SystemModel
 
 SAFE_UTILIZATION = 0.85   # conventional "run hot" ceiling
-_RHO_CEIL = 0.999         # guard against divide-by-zero as rho -> 1
+_RHO_CEIL = 0.999         # retained ONLY for the breakpoint search; latency no longer clamps (see
+                          # _mmc_sojourn_ms — above rho=1 the wait is infinite and is reported so)
+_ERLANG_C_MAX_SERVERS = 10_000   # beyond this the Erlang-C wait is numerically nil; see _mmc_sojourn_ms
 # Exponential-tail percentile multipliers. Defined once and used by BOTH the engine and its
 # derivation trace, so the "show your work" line can never drift from the math actually applied.
 _P50_K = math.log(2)      # ~0.69
@@ -92,7 +95,7 @@ class Metric:
     EARNED (L1 grounding / L2 calibration / v2 DES replications) and must bracket `value`."""
     value: float
     unit: str               # "rps" | "ms" | "usd_minor_per_month" | "ratio"
-    model: str              # the formula that produced it, e.g. "M/M/1 sojourn W=S/(1-rho)"
+    model: str              # the formula that produced it, e.g. "M/M/c sojourn W=S+Wq (Erlang-C)"
     confidence: str         # the engine-stability qualifier (NOT an input-provenance tag)
     low: float | None = None
     high: float | None = None
@@ -122,7 +125,7 @@ class ComponentResult:
 
 @dataclass
 class FlowLatency:
-    """One flow's own latency (ms): the same M/M/1-sojourn + exponential-tail model as the headline,
+    """One flow's own latency (ms): the same M/M/c-sojourn + exponential-tail model as the headline,
     applied to THIS flow's path — so a minority flow on a different (often worse) path is not hidden
     behind the dominant flow's figure (engine-audit fix). Built only by `simulate()`."""
     name: str
@@ -184,9 +187,51 @@ def _flow_latency_ms(flow: Flow, comp_results: dict[str, "ComponentResult"]) -> 
     return mean, mean * _P50_K, mean * _P95_K, mean * _P99_K
 
 
-def _mm1_sojourn_ms(service_ms: float, rho: float) -> float:
-    rho = min(rho, _RHO_CEIL)
-    return service_ms / (1.0 - rho)
+def _erlang_c(servers: int, rho: float) -> float:
+    """Probability an arrival must WAIT (Erlang-C), computed via the numerically-stable Erlang-B
+    recursion. The textbook closed form needs a^c / c!, which overflows well before the 320-instance
+    transcode fleet in the library; the recursion never forms either term.
+
+        B(0) = 1 ;  B(k) = a*B(k-1) / (k + a*B(k-1)) ;  C = B(c) / (1 - rho*(1 - B(c)))
+    """
+    a = servers * rho                       # offered load in erlangs
+    b = 1.0
+    for k in range(1, servers + 1):
+        b = (a * b) / (k + a * b)
+    return b / (1.0 - rho * (1.0 - b))
+
+
+def _mmc_sojourn_ms(service_ms: float, servers: int, rho: float) -> float:
+    """Mean time in system for an M/M/c queue: W = S + Wq, with Wq = C(c,rho) / (c*mu*(1 - rho)).
+
+    THIS WAS M/M/1 UNTIL 2026-09-07, and that was a real error, not a simplification. `docs/02` has
+    always advertised "M/M/c utilization"; the code applied the SINGLE-server waiting formula
+    S/(1-rho) to a whole fleet's AGGREGATE utilisation. A 12-instance tier at rho=0.694 does not
+    queue like one server at 69.4% — it queues far better, because an arrival has twelve chances to
+    find a free server. Measured against Erlang-C on the flagship url_shortener that overstated the
+    app tier by 3.12x (26.18ms vs 8.38ms) and the whole path by 2.10x; `blueprints/library/
+    ci_cd.json:282` self-documents ~12x. Every multi-instance tier in all 56 blueprints carried it,
+    so every latency, and every remediation ranked by latency, leaned pessimistic.
+
+    c = 1 reduces to S/(1-rho) EXACTLY (algebraically, not approximately) — `test_simulation`
+    asserts that identity, so the old single-server behaviour is preserved where it was correct.
+
+    Above rho = 1 the queue is UNSTABLE: arrivals outrun the servers and the backlog grows without
+    limit, so the mean is genuinely infinite. It returns `inf` and says so, rather than clamping to
+    a finite figure. The clamp this replaces returned 46,051.7 ms at 100x, 1,000x, 10,000x AND
+    1,000,000x load — a constant that looked like a prediction and was an artifact of `_RHO_CEIL`.
+    """
+    if rho >= 1.0:
+        return math.inf
+    if servers <= 1:
+        return service_ms / (1.0 - rho)
+    if servers > _ERLANG_C_MAX_SERVERS:
+        # C(c,rho) decays exponentially in c at fixed rho<1, so beyond this the wait is numerically
+        # nil and the O(c) recursion is pure cost. Returning the service time is the correct limit.
+        return service_ms
+    c_wait = _erlang_c(servers, rho)
+    wq_ms = c_wait * service_ms / (servers * (1.0 - rho))
+    return service_ms + wq_ms
 
 
 def _fmt_rps(x: float) -> str:
@@ -232,7 +277,7 @@ def _derivation(
         f"theoretical@100% ~ {_fmt_rps(bp_theo)} req/s."
     )
     lines.append(
-        f"Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant "
+        f"Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant "
         f"flow ('{dom.name}', {dom.share:.0%} share) -> mean {mean:.0f} ms."
     )
     lines.append(
@@ -285,7 +330,7 @@ def _metrics(
         "bottleneck_utilization": Metric(rho_max, "ratio", "max rho = arrival / capacity", confidence),
         "breakpoint_rps_safe": Metric(bp_safe, "rps", f"system_rps * ({safe_pct} ceiling / rho_max)", confidence),
         "breakpoint_rps_theoretical": Metric(bp_theo, "rps", "system_rps * (1.0 / rho_max)", confidence),
-        "mean_latency_ms": Metric(mean, "ms", "sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow", confidence),
+        "mean_latency_ms": Metric(mean, "ms", "sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow", confidence),
         "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
         "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
         "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
@@ -339,7 +384,7 @@ def simulate(model: SystemModel) -> SimulationResult:
         a = arrivals[cid]
         cap = comp.capacity_rps
         rho = (a / cap) if cap > 0 else float("inf")
-        latency = _mm1_sojourn_ms(comp.base_latency_ms, rho)
+        latency = _mmc_sojourn_ms(comp.base_latency_ms, comp.instances, rho)
         comp_results[cid] = ComponentResult(
             id=cid, name=comp.name, arrival_rps=a, capacity_rps=cap,
             utilization=rho, mean_latency_ms=latency, saturated=(rho >= 1.0),

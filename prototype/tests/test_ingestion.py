@@ -535,7 +535,11 @@ class TestADR002ReviewFixes(unittest.TestCase):
         # the connectivity check is opt-out (reconciliation flags orphans as soft conflicts).
         validate_model(m, require_connected=False)  # does not raise
         # once wired, it validates strictly too.
-        m.flows.append(Flow("g", 0.0, [FlowStep("ghost")]))
+        # Was `Flow("g", 0.0, [FlowStep("ghost")])` — a ZERO-SHARE phantom flow, which `Flow` now
+        # rejects. A 0-share flow carries none of the offered load, so it declared connectivity
+        # without ever routing a request: exactly the shape that lets a model dodge the orphan check
+        # while changing no arrival total. Wire the component into the real flow instead.
+        m.flows[0].path.append(FlowStep("ghost"))
         self.assertEqual(orphan_components(m), [])
         validate_model(m)  # does not raise
 

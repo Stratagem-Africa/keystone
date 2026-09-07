@@ -19,6 +19,8 @@ omissions to be quietly filled in, they need either a v2 engine or a model chang
 """
 from __future__ import annotations
 
+import math
+
 import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable
@@ -346,7 +348,8 @@ class ScenarioResult:
     perturbed: SimulationResult
 
     # --- derived: arithmetic over the two runs above, nothing else ---
-    latency_multiple: float          # perturbed.mean_latency_ms / baseline.mean_latency_ms
+    latency_multiple: float | None   # perturbed / baseline; None when the perturbed side is
+                                     # OVERLOADED (unbounded latency) — see run_compound
     utilization_delta: float         # perturbed rho_max - baseline rho_max
     bottleneck_moved: bool
     survives: bool                   # perturbed bottleneck stays at/below SAFE_UTILIZATION
@@ -361,9 +364,15 @@ class ScenarioResult:
             f"baseline    = simulate(model)                    -> rho={self.baseline.bottleneck_utilization:.3f}, "
             f"latency={self.baseline.mean_latency_ms:.2f}ms",
             f"perturbed   = simulate({self.scenario_id}(model)) -> rho={self.perturbed.bottleneck_utilization:.3f}, "
-            f"latency={self.perturbed.mean_latency_ms:.2f}ms",
-            f"latency_multiple  = {self.perturbed.mean_latency_ms:.2f} / {self.baseline.mean_latency_ms:.2f} "
-            f"= {self.latency_multiple:.2f}x",
+            + (f"latency={self.perturbed.mean_latency_ms:.2f}ms"
+               if math.isfinite(self.perturbed.mean_latency_ms) else "latency=unbounded (overloaded)"),
+            (f"latency_multiple  = {self.perturbed.mean_latency_ms:.2f} / "
+             f"{self.baseline.mean_latency_ms:.2f} = {self.latency_multiple:.2f}x"
+             if self.latency_multiple is not None else
+             f"latency_multiple  = UNDEFINED: the perturbed system is overloaded "
+             f"(rho={self.perturbed.bottleneck_utilization:.3f} >= 1), so its queue grows without "
+             f"limit and its latency is unbounded. There is no multiple to report — under this "
+             f"scenario the design stops serving."),
             f"utilization_delta = {self.perturbed.bottleneck_utilization:.3f} - "
             f"{self.baseline.bottleneck_utilization:.3f} = {self.utilization_delta:+.3f}",
             f"survives          = perturbed rho {self.perturbed.bottleneck_utilization:.3f} "
@@ -441,7 +450,17 @@ def run_compound(model: SystemModel, specs: list[ScenarioSpec]) -> ScenarioResul
     question = ("Does the design survive all of these at once?" if compound else head.question)
 
     base_lat = baseline.mean_latency_ms
-    multiple = (perturbed.mean_latency_ms / base_lat) if base_lat > 0 else float("inf")
+    # A "latency multiple" only means something between two FINITE latencies. When the scenario
+    # pushes the design past rho = 1 the queue is unstable and the perturbed latency is unbounded,
+    # so there is no multiple — the honest answer is "it stops serving", not "inf x worse" and
+    # certainly not the clamped constant the old rho=0.999 ceiling used to produce (46,051.7 ms
+    # returned identically at 100x, 1,000x and 1,000,000x load). None renders as "unbounded"
+    # through the same path the unbounded breakpoint already uses.
+    multiple = (
+        (perturbed.mean_latency_ms / base_lat)
+        if base_lat > 0 and math.isfinite(perturbed.mean_latency_ms) and math.isfinite(base_lat)
+        else None
+    )
     moved = perturbed.bottleneck_id != baseline.bottleneck_id
     survives = perturbed.bottleneck_utilization <= SAFE_UTILIZATION
 

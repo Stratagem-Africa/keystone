@@ -103,9 +103,19 @@ class TestScenarioResponse(unittest.TestCase):
         for key in ("baseline", "perturbed", "delta", "scenario"):
             self.assertIn(key, d)
         delta = d["delta"]
-        self.assertAlmostEqual(
-            delta["latency_multiple"],
-            delta["perturbed_latency_ms"] / delta["baseline_latency_ms"], places=6)
+        # `latency_multiple` is a ratio of two FINITE latencies or it is null. A traffic surge takes
+        # this design past rho=1, where the queue is unstable and latency is unbounded — so the
+        # honest wire value is null, and a client that divided would be dividing by a clamp
+        # artifact. (It used to be a float unconditionally: the engine manufactured 46,051.7 ms for
+        # every overloaded run, identically at 100x, 1,000x and 1,000,000x load.)
+        if delta["perturbed_latency_ms"] is None:
+            self.assertIsNone(delta["latency_multiple"],
+                              "unbounded perturbed latency cannot carry a multiple")
+            self.assertFalse(d["delta"]["survives"])
+        else:
+            self.assertAlmostEqual(
+                delta["latency_multiple"],
+                delta["perturbed_latency_ms"] / delta["baseline_latency_ms"], places=6)
         self.assertTrue(delta["derivation"], "the delta must show its working")
         self.assertTrue(delta["perturbed_confidence"], "each side keeps its own confidence")
         self.assertEqual(d["baseline"]["verdict"]["bottleneck_name"], delta["baseline_bottleneck"])

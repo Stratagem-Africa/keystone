@@ -45,7 +45,7 @@ Most people who build software can *code* but cannot *architect for scale*. Exis
 - **NFR-4 Confidentiality `MUST`** — Uploaded documents are tenant-isolated and never exposed across users; local-first/export options offered. (`SEC-H*`.)
 - **NFR-5 Latency `SHOULD`** — A first design + simulation in **< 3 minutes** for a typical web-app spec. **[ASSUMPTION]**
 - **NFR-6 Cost `SHOULD`** — v1 infra + AI run-cost buildable and operable within a hobby budget; council runs single-model-multi-persona to control inference spend.
-- **NFR-7 Reproducibility `SHOULD`** — Same input + seed → same simulation result (borrowed from SysSimulator's determinism); designs are shareable as spec + seed.
+- **NFR-7 Reproducibility `MUST`** — Same input → **bit-identical** simulation result. No seed is involved because the engine contains no randomness at all; designs are shareable as the spec file alone. *(This previously read "same input + seed" and credited "SysSimulator's determinism". Both halves were wrong. Keystone has no seed to share, and SysSimulator's determinism claim does not hold for its shipped build: measured 2026-09-05, twelve identical runs gave identical request counts but a p99 spread of 131.6–145.6 ms, `create_simulation()` takes no seed, no seed appears in its export JSON, and its WASM imports `crypto.getRandomValues`. We should not borrow provenance from a property the cited tool does not have.)*
 
 ## 6. Scope
 

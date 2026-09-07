@@ -10,7 +10,7 @@
 
 - **Bottleneck:** App tier (t4g.medium x12) (utilisation 69%)
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
-- **Latency (dominant path):** p50 ~20 ms [3–27] · p95 ~86 ms [14–119] · p99 ~133 ms [22–182] (mean 29 ms)
+- **Latency (dominant path):** p50 ~8 ms [2–12] · p95 ~33 ms [8–52] · p99 ~51 ms [12–80] (mean 11 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
 - **Estimated monthly cost:** ~$1,045.00/month
 - _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
@@ -22,10 +22,10 @@
 | bottleneck_utilization | 69% | — | max rho = arrival / capacity | medium |
 | breakpoint_rps_safe | 12,240 req/s | — | system_rps * (85% ceiling / rho_max) | medium |
 | breakpoint_rps_theoretical | 14,400 req/s | — | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 29 ms | 5 ms – 40 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 20 ms | 3 ms – 27 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 86 ms | 14 ms – 119 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 133 ms | 22 ms – 182 ms | exponential-tail: mean * ln(100) | medium |
+| mean_latency_ms | 11 ms | 3 ms – 17 ms | sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow | medium |
+| p50_ms | 8 ms | 2 ms – 12 ms | exponential-tail: mean * ln(2) | medium |
+| p95_ms | 33 ms | 8 ms – 52 ms | exponential-tail: mean * ln(20) | medium |
+| p99_ms | 51 ms | 12 ms – 80 ms | exponential-tail: mean * ln(100) | medium |
 | monthly_cost | $1,045.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
 
 _Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
@@ -36,14 +36,14 @@ _Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percent
 
 | Flow | Share | Mean | p50 | p95 | p99 |
 |---|--:|--:|--:|--:|--:|
-| redirect | 99% | 29 ms | 20 ms | 86 ms | 133 ms |
-| create | 1% | 33 ms | 23 ms | 100 ms | 154 ms |
+| redirect | 99% | 11 ms | 8 ms | 33 ms | 51 ms |
+| create | 1% | 16 ms | 11 ms | 47 ms | 72 ms |
 
 ## Component load
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |
 |---|--:|--:|--:|--:|:--|
-| App tier (t4g.medium x12) | 10,000 | 14,400 | 69% | 26.2 | ok |
+| App tier (t4g.medium x12) | 10,000 | 14,400 | 69% | 8.4 | ok |
 | Application Load Balancer | 10,000 | 30,000 | 33% | 1.5 | ok |
 | PostgreSQL primary (r7g.large) | 1,090 | 8,000 | 14% | 5.8 | ok |
 | Redis cache (r7g.large) | 9,900 | 100,000 | 10% | 0.6 | ok |
@@ -146,39 +146,39 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 > _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Activate the real council with any provider — a free-tier Gemini/Groq key, a Claude key, or a local Ollama (no key, $0)._
 
 ### Datastore — confidence: high
-**Decision:** Single relational primary (PostgreSQL) for the mapping table.
+**Decision:** URL Shortener keeps its system of record in PostgreSQL primary (r7g.large).
 
-**Rationale:** Workload is simple key->value with strong-read tolerance once cached; a relational primary is the boring, reliable default.
-
-**Recorded dissent:**
-- Data engineer: a KV store (DynamoDB) scales writes more cheaply at very high create volume; revisit if write share rises.
-
-**Kill criteria (revisit this decision if):**
-- Create (write) traffic exceeds ~30% of total
-- Mapping table exceeds single-primary write capacity
-
-### Caching — confidence: high
-**Decision:** Cache-aside on the redirect (read) path with a high hit-rate cache.
-
-**Rationale:** Redirects dominate traffic and are highly cacheable; the cache shields the primary from the read storm.
+**Rationale:** A relational primary is the boring, reliable default; it is the component whose write path cannot be scaled out by adding instances, so the design hangs on it.
 
 **Recorded dissent:**
-- SRE: the cache is now load-bearing -- a cold cache or stampede melts the DB. Add request-coalescing / stampede protection.
+- Data engineer: if writes dominate, a partitioned or KV store scales that path more cheaply than a single primary; revisit if the write share rises.
 
 **Kill criteria (revisit this decision if):**
-- Cache hit-rate falls below ~70% in production
-- No stampede protection before launch
+- Write traffic outgrows what one primary can serve
+- A second service needs write access to the same tables
+
+### Caching — confidence: med
+**Decision:** Reads are shielded by Redis cache (r7g.large).
+
+**Rationale:** The read path dominates, and a cache keeps that volume off the primary.
+
+**Recorded dissent:**
+- YAGNI-skeptic: a cache is a second source of truth and a new failure mode; do not add one before the read path is demonstrably the constraint.
+
+**Kill criteria (revisit this decision if):**
+- Cache hit-rate falls far enough that the primary sees the read storm
+- Stale reads become user-visible in a way the product cannot accept
 
 ### Resilience — confidence: med
-**Decision:** Add a read replica and cache failover before production.
+**Decision:** Single points of failure in this design: Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large).
 
-**Rationale:** A single primary and single cache are single points of failure.
+**Rationale:** Each of these is one instance; losing it takes the system with it.
 
 **Recorded dissent:**
 - YAGNI-skeptic: acceptable to defer for a prototype (Tier-0), but NOT for external traffic (Tier-1).
 
 **Kill criteria (revisit this decision if):**
-- Going to external/production traffic with 1 DB + 1 cache
+- Going to external/production traffic with a single-instance tier
 
 ## What-if interrogation
 
@@ -194,7 +194,7 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
 - Bottleneck = highest rho -> App tier (t4g.medium x12) at rho=0.69 (10,000 / 14,400 rps).
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
-- Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 29 ms.
+- Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 11 ms.
 - Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
 - Monthly cost = compute $1,045.00 = $1,045.00 (integer cents; usage rates GROUNDED (cited)).
 

@@ -36,7 +36,8 @@ from dataclasses import dataclass
 from .model import SystemModel
 from .simulation import SAFE_UTILIZATION, SimulationResult
 
-__all__ = ["K6Plan", "EMITTER_LIMITS", "build_plan", "render_k6"]
+__all__ = [
+    "OverloadedDesignError","K6Plan", "EMITTER_LIMITS", "build_plan", "render_k6"]
 
 # k6 v2 removed the legacy summary mode and `--no-summary`; `handleSummary()` is the documented,
 # stable way to get machine-readable output, so the emitted script writes summary.json itself.
@@ -85,7 +86,24 @@ def _round(x: float, places: int = 2) -> float:
     return float(f"{x:.{places}f}")
 
 
+class OverloadedDesignError(ValueError):
+    """Raised when a load-test plan is requested for a design the engine says is already saturated."""
+
+
 def build_plan(model: SystemModel, sim: SimulationResult, *, duration_s: int = 60) -> K6Plan:
+    # FAIL CLOSED ON AN OVERLOADED DESIGN. Every threshold in this plan is the engine's own latency
+    # prediction turned into an assertion, and preAllocatedVUs is Little's Law over that same
+    # prediction. Above rho = 1 the queue is unstable and the predicted latency is infinite, so there
+    # is no threshold to assert and no finite concurrency to pre-allocate. Emitting a plan anyway
+    # would either crash (int(inf)) or, worse, bake a clamp artifact into a script someone RUNS
+    # against a real system. Scale the design first — `remediation.plan_capacity` computes by how
+    # much — then the plan becomes meaningful.
+    if not math.isfinite(sim.mean_latency_ms) or not math.isfinite(sim.p95_ms):
+        raise OverloadedDesignError(
+            f"cannot build a load-test plan: '{sim.bottleneck_name}' is at "
+            f"{sim.bottleneck_utilization:.0%} utilisation, so the engine's predicted latency is "
+            f"unbounded. A k6 threshold needs a finite prediction to assert. Fix the capacity first "
+            f"(see remediation.plan_capacity), then generate the plan.")
     """Turn an engine result into a k6 plan. Every figure here is read off `sim`."""
     literals: list[Literal] = [
         Literal("DURATION_S", float(duration_s), "NAMED_CONSTANT",

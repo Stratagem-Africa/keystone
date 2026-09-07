@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import math
 import unittest
 
 from keystone.benchmarks.reference_models import REFERENCE_MODELS
@@ -96,9 +97,19 @@ class PrimeDirectiveTest(unittest.TestCase):
         for scenario, target in available(self.model):
             with self.subTest(scenario.id, target=target):
                 r = run_scenario(self.model, scenario.id, target)
-                self.assertAlmostEqual(
-                    r.latency_multiple,
-                    r.perturbed.mean_latency_ms / r.baseline.mean_latency_ms, places=9)
+                # `latency_multiple` is a RATIO OF TWO FINITE LATENCIES or it is nothing. When the
+                # scenario pushes the design past rho=1 the perturbed latency is unbounded and the
+                # ratio is undefined — None, not a number. It used to be a float always, because
+                # the engine clamped rho at 0.999 and manufactured a finite latency; this test
+                # passed on that artifact.
+                if math.isfinite(r.perturbed.mean_latency_ms):
+                    self.assertAlmostEqual(
+                        r.latency_multiple,
+                        r.perturbed.mean_latency_ms / r.baseline.mean_latency_ms, places=9)
+                else:
+                    self.assertIsNone(r.latency_multiple,
+                                      "an overloaded perturbed system has no latency multiple")
+                    self.assertFalse(r.survives)
                 self.assertAlmostEqual(
                     r.utilization_delta,
                     r.perturbed.bottleneck_utilization - r.baseline.bottleneck_utilization,
@@ -205,7 +216,12 @@ class PerturbationSemanticsTest(unittest.TestCase):
         r = run_scenario(self.model, "cache_cold", self.cache)
         self.assertTrue(r.bottleneck_moved)
         self.assertFalse(r.survives)
-        self.assertGreater(r.latency_multiple, 10.0)
+        # Losing the cache drives this design past rho=1, so latency is unbounded and there is no
+        # multiple. That is a STRONGER statement than "more than 10x worse", which is what this
+        # asserted while the engine was clamping. Assert the real finding, not the artifact.
+        self.assertIsNone(r.latency_multiple)
+        self.assertEqual(r.perturbed.mean_latency_ms, math.inf)
+        self.assertGreaterEqual(r.perturbed.bottleneck_utilization, 1.0)
 
     def test_capacity_degraded_scales_the_service_rate(self):
         out = apply_scenario(self.model, "capacity_degraded", self.app, 0.5)
@@ -223,6 +239,10 @@ class PerturbationSemanticsTest(unittest.TestCase):
         """Service time inflates while capacity holds — so rho must not move."""
         r = run_scenario(self.model, "slow_dependency", self.app, 10.0)
         self.assertAlmostEqual(r.utilization_delta, 0.0, places=9)
+        # A slow dependency inflates service time, not capacity, so rho is unchanged and the system
+        # stays stable — which is exactly why a finite multiple is meaningful HERE and is not in the
+        # cache_cold case above.
+        self.assertIsNotNone(r.latency_multiple, "rho did not move, so latency must stay finite")
         self.assertGreater(r.latency_multiple, 1.0)
 
     def test_traffic_scenarios_scale_only_the_workload(self):
@@ -298,28 +318,60 @@ class CompoundTest(unittest.TestCase):
         self.model = url_shortener.build()
 
     def test_compound_is_simulated_once_on_the_composed_model(self):
+        """The composed model carries BOTH perturbations, and is simulated, not combined."""
         both = run_compound(self.model, [
             ScenarioSpec("cache_cold", "cache"),
             ScenarioSpec("slow_dependency", "db", 100.0),
         ])
         self.assertEqual(len(both.applied), 2)
         self.assertIn("+", both.scenario_name)
-        # Strictly worse than either part alone — the composed model carries both perturbations.
         cold = run_scenario(self.model, "cache_cold", "cache")
         slow = run_scenario(self.model, "slow_dependency", "db", 100.0)
-        self.assertGreater(both.perturbed.mean_latency_ms, cold.perturbed.mean_latency_ms)
-        self.assertGreater(both.perturbed.mean_latency_ms, slow.perturbed.mean_latency_ms)
+        # NEVER BETTER than either part alone. This was `assertGreater`, which passed only because
+        # the old rho=0.999 clamp gave every overloaded run a slightly different finite number to
+        # compare. Losing the cache already saturates this design, so the honest relation is
+        # >=: unbounded is not "worse than" unbounded, it is the same statement.
+        self.assertGreaterEqual(both.perturbed.mean_latency_ms, cold.perturbed.mean_latency_ms)
+        self.assertGreaterEqual(both.perturbed.mean_latency_ms, slow.perturbed.mean_latency_ms)
+        self.assertGreaterEqual(both.perturbed.bottleneck_utilization,
+                                cold.perturbed.bottleneck_utilization)
 
-    def test_compound_is_not_the_sum_of_its_parts(self):
-        """Documents WHY composition must be simulated rather than added up."""
-        both = run_compound(self.model, [
-            ScenarioSpec("cache_cold", "cache"),
-            ScenarioSpec("slow_dependency", "db", 100.0),
-        ])
-        base = both.baseline.mean_latency_ms
-        cold = run_scenario(self.model, "cache_cold", "cache").perturbed.mean_latency_ms
-        slow = run_scenario(self.model, "slow_dependency", "db", 100.0).perturbed.mean_latency_ms
-        self.assertNotAlmostEqual(both.perturbed.mean_latency_ms, cold + slow - base, places=2)
+    def test_composition_is_additive_while_stable_and_breaks_at_saturation(self):
+        """WHY composition is simulated rather than added up — stated accurately.
+
+        This test used to claim "compound is NOT the sum of its parts" and assert it with
+        `assertNotAlmostEqual` on cache_cold + slow_dependency(100x). That claim is FALSE for this
+        engine in the stable region, and the test only passed because the old rho=0.999 clamp handed
+        every saturated run a slightly different finite number. Measured across every stable pair in
+        the catalogue, compound latency equals the sum of the parts to the last decimal place — and
+        it must, because path latency here is a SUM of per-component sojourns, so two perturbations
+        aimed at DIFFERENT components that leave rho alone cannot interact.
+
+        The real reason to simulate the composed model is the OTHER regime: perturbations that move
+        rho compose non-linearly through 1/(1-rho), and a compound can cross saturation. Adding
+        stored per-scenario results could never produce "unbounded" from two finite parts. Both
+        halves are asserted below, so neither can rot into the other.
+        """
+        # 1. STABLE + DISJOINT -> additive, exactly. Asserting the true identity documents the limit.
+        base = simulate(self.model).mean_latency_ms
+        a = run_scenario(self.model, "slow_dependency", "app", 10.0)
+        b = run_scenario(self.model, "capacity_degraded", "db", 0.5)
+        both = run_compound(self.model, [ScenarioSpec("slow_dependency", "app", 10.0),
+                                         ScenarioSpec("capacity_degraded", "db", 0.5)])
+        for label, v in (("a", a.perturbed.mean_latency_ms), ("b", b.perturbed.mean_latency_ms),
+                         ("both", both.perturbed.mean_latency_ms), ("base", base)):
+            self.assertTrue(math.isfinite(v), f"{label} must stay stable for this half to mean anything")
+        self.assertAlmostEqual(
+            both.perturbed.mean_latency_ms,
+            a.perturbed.mean_latency_ms + b.perturbed.mean_latency_ms - base, places=6,
+            msg="disjoint perturbations that do not move rho ARE additive in this engine")
+
+        # 2. SATURATING -> the compound is unbounded, which no arithmetic over finite parts reaches.
+        hard = run_compound(self.model, [ScenarioSpec("cache_cold", "cache"),
+                                         ScenarioSpec("slow_dependency", "db", 100.0)])
+        self.assertEqual(hard.perturbed.mean_latency_ms, math.inf)
+        self.assertIsNone(hard.latency_multiple)
+        self.assertFalse(hard.survives)
 
     def test_aiming_twice_at_the_same_component_is_refused(self):
         with self.assertRaises(ValueError):
