@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 
 from keystone.blueprints import payments, ticket_booking, twitter, url_shortener
+from keystone.coverage import declare_coverage_gaps
 from keystone.domains import apply_high_stakes_flags
 from keystone.ingestion import Source, make_ingestor
 from keystone.model import (
@@ -93,7 +94,11 @@ def generate_architecture(intent: str, *, provider: str | None = None,
     # flag could only arrive by being hardcoded on a blueprint, so "a hospital patient records
     # system" and "an election result tallying platform" both returned domain_flags == [] and no
     # expert-review gate — three of docs/03's four mandatory domains failed OPEN. See domains.py.
-    return apply_high_stakes_flags(built, intent)
+    # DISCLOSE what the match dropped. "an app like Uber with video call capabilities" matched
+    # ride_sharing on the word "uber" and returned a design with no media server anywhere — and
+    # said nothing. Matching on a fragment is the library working as intended; staying silent about
+    # the remainder is the defect. See coverage.py.
+    return declare_coverage_gaps(apply_high_stakes_flags(built, intent), intent)
 
 
 def generic_starting_point(intent: str = "") -> SystemModel:

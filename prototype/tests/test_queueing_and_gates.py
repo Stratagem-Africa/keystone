@@ -182,3 +182,54 @@ class StubCouncilDescribesThisDesignTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoverageDisclosureTest(unittest.TestCase):
+    """Traced 2026-09-07: "an app like Uber with video call capabilities" matched ride_sharing on
+    the word "uber" and returned an 8-component design with no media server, no signalling and no
+    TURN — presenting its bottleneck, breakpoint, latency and cost as the answer to the whole
+    question, with no mention that half of it was dropped."""
+
+    def test_the_uber_with_video_case_is_disclosed(self):
+        from keystone.coverage import missing_capabilities
+        intent = "I wanna build an app like Uber with video call capabilities"
+        model = generate_architecture(intent, provider="stub")
+        self.assertEqual([c for c, _ in missing_capabilities(intent, model)],
+                         ["real-time video or voice calling"])
+
+    def test_the_gap_lands_on_the_model_as_a_GAP_assumption(self):
+        """It has to travel with the numbers, not sit in a docstring."""
+        model = generate_architecture(
+            "an app like Uber with video call capabilities", provider="stub")
+        gaps = [a for a in model.assumptions
+                if a.provenance == "GAP" and a.subject == "coverage"]
+        self.assertEqual(len(gaps), 1)
+        self.assertIn("NOT IN THIS DESIGN", gaps[0].statement)
+        self.assertIn("floor", gaps[0].statement)
+
+    def test_it_reaches_the_rendered_report(self):
+        from keystone.report import render
+        model = generate_architecture(
+            "an app like Uber with video call capabilities", provider="stub")
+        text = render(model, [], simulate(model))
+        self.assertIn("NOT IN THIS DESIGN", text)
+        self.assertIn("| GAP |", text)
+
+    def test_a_covered_capability_is_not_reported_missing(self):
+        """Noise is the failure mode that makes the whole section ignorable."""
+        from keystone.coverage import missing_capabilities
+        for intent in ("a payment system", "a url shortener", "a video streaming service",
+                       "a search engine"):
+            with self.subTest(intent):
+                model = generate_architecture(intent, provider="stub")
+                self.assertEqual(missing_capabilities(intent, model), [])
+
+    def test_evidence_terms_are_specific_enough_to_be_evidence(self):
+        """Bare "gateway" used to count as proof of a payment path, so Twitter's "API Gateway
+        (auth + routing)" marked a real payments gap as covered. A generic evidence term is worse
+        than none: it silently clears the flag."""
+        from keystone.coverage import missing_capabilities
+        from keystone.blueprints import twitter
+        self.assertEqual(
+            [c for c, _ in missing_capabilities("a twitter clone with payments", twitter.build())],
+            ["taking payments"])
