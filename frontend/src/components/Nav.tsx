@@ -71,7 +71,7 @@ export function Nav() {
         {!loading && (
           user ? (
             <button
-              onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
+              onClick={async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
               className={`font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
             >
               Sign out

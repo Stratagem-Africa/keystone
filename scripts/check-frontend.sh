@@ -88,8 +88,23 @@ echo; echo "==> frontend: eslint (warnings are errors)"
 npx --no-install eslint src --max-warnings=0 2>&1 | tail -n 5
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
-echo; echo "==> frontend: next build"
-npm run build 2>&1 | grep -E "✓|✗|error|Error|Failed" | tail -n 6
+echo; echo "==> frontend: next build (WITH NO SUPABASE CONFIG — see below)"
+# The gate build deliberately runs with NEXT_PUBLIC_SUPABASE_* unset, and that costs nothing extra
+# while proving something that used to be false: Keystone renders for someone who has not
+# provisioned a Supabase project.
+#
+# `src/lib/supabase.ts` used to `throw` at MODULE LOAD when those vars were missing. It read as a
+# helpful dev guard and was the single biggest barrier to anyone seeing the tool at all: the ROOT
+# layout imports AuthProvider -> auth-context -> supabase, so that throw took down every route,
+# including the PUBLIC /studio page that needs no account. A stranger who cloned the repo had to go
+# and create a third-party account before one architecture would render.
+#
+# Absent auth config is now a reported STATE, fail-closed (no client -> no session -> no user, so
+# everything gated on a user stays gated). If anyone reintroduces a module-load throw, THIS BUILD
+# FAILS — which is the point of running it this way rather than with a populated .env.local.
+( unset NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY
+  NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= npm run build ) 2>&1 \
+  | grep -E "✓|✗|error|Error|Failed" | tail -n 6
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
 echo; echo "==> frontend: tsc --noEmit (gate tsconfig)"
