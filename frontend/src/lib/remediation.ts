@@ -74,7 +74,7 @@ export async function planCapacity(
   });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { detail?: string };
-    throw new Error(err.detail ?? `capacity planning failed (${res.status})`);
+    throw new Error(err.detail ?? `Couldn't work out a plan for this traffic level — the server returned error code ${res.status}. Nothing on your canvas has changed.`);
   }
   return (await res.json()) as RemediationPlan;
 }

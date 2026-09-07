@@ -43,7 +43,7 @@ export function FixPanel({
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
       <h2 className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--cv-muted)" }}>
-        Make it hold
+        Make it handle the traffic
       </h2>
 
       <button
@@ -52,10 +52,10 @@ export function FixPanel({
         className="rounded-full px-3.5 py-2 text-[11.5px] font-semibold transition-transform active:scale-[0.98] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{ background: "var(--cv-blue)", color: "var(--cv-paper)", outlineColor: "var(--cv-blue)" }}
       >
-        {running ? "Sizing…" : `Size this design for ${rps(targetRps)} req/s`}
+        {running ? "Working it out…" : `Plan for ${rps(targetRps)} requests a second`}
       </button>
       <p className="text-[10px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-        Plans for the load currently on the canvas — move the slider first to size for a different one.
+        This plans for the traffic on the canvas right now — to plan for a different amount, move the slider first.
       </p>
 
       {error && (
@@ -75,16 +75,16 @@ export function FixPanel({
                 color: plan.holds ? "var(--cv-green)" : "var(--cv-amber)",
               }}
             >
-              {plan.holds ? "solvable by scaling" : "needs a redesign"}
+              {plan.holds ? "fixable with more copies" : "more copies aren't enough"}
             </span>
             <p className="mt-2 text-[12px] leading-snug" style={{ color: "var(--cv-ink)" }}>{plan.verdict}</p>
 
             <dl className="mt-3 flex flex-col gap-1 text-[11.5px]">
               {[
-                ["Peak utilisation", `${((plan.before.bottleneck_utilization ?? 0) * 100).toFixed(0)}% → ${((plan.after.bottleneck_utilization ?? 0) * 100).toFixed(0)}%`],
-                ["Mean latency", `${plan.before.mean_latency_ms.toFixed(0)} → ${plan.after.mean_latency_ms.toFixed(0)} ms`],
+                ["Busiest part, % of capacity used (utilisation)", `${((plan.before.bottleneck_utilization ?? 0) * 100).toFixed(0)}% → ${((plan.after.bottleneck_utilization ?? 0) * 100).toFixed(0)}%`],
+                ["Average response time (mean latency)", `${plan.before.mean_latency_ms.toFixed(0)} → ${plan.after.mean_latency_ms.toFixed(0)} ms`],
                 ["Monthly cost", `${money(plan.before.monthly_cost_cents)} → ${money(plan.after.monthly_cost_cents)}`],
-                ["Change", `${plan.monthly_cost_delta_cents >= 0 ? "+" : ""}${money(plan.monthly_cost_delta_cents)} / month`],
+                ["Cost difference", `${plan.monthly_cost_delta_cents >= 0 ? "+" : ""}${money(plan.monthly_cost_delta_cents)} / month`],
               ].map(([k, v]) => (
                 <div key={k} className="flex items-baseline justify-between gap-3">
                   <dt style={{ color: "var(--cv-muted)" }}>{k}</dt>
@@ -93,21 +93,21 @@ export function FixPanel({
               ))}
             </dl>
             <p className="mt-2 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-              <b>Confidence after:</b> {plan.after.confidence}
+              <b>How much to trust the numbers after the change (confidence):</b> {plan.after.confidence}
             </p>
           </div>
 
           {plan.remedies.length > 0 && (
             <section className="flex flex-col gap-1.5">
               <h3 className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--cv-muted)" }}>
-                Scale out ({plan.remedies.length})
+                Add more copies ({plan.remedies.length})
               </h3>
               {plan.remedies.map((r) => (
                 <div key={r.component_id} className="cv-panel p-2.5">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[12px] font-semibold" style={{ color: "var(--cv-ink)" }}>{r.component_name}</span>
                     <span className="shrink-0 tabular-nums text-[12px] font-bold" style={{ color: "var(--cv-green)" }}>
-                      ×{r.from_instances} → ×{r.to_instances}
+                      {r.from_instances} → {r.to_instances} copies
                     </span>
                   </div>
                   <p className="mt-1 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>{r.reason}</p>
@@ -126,14 +126,14 @@ export function FixPanel({
           {plan.blockers.length > 0 && (
             <section className="flex flex-col gap-1.5">
               <h3 className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--cv-amber)" }}>
-                Adding instances will not fix these ({plan.blockers.length})
+                Adding more copies won&apos;t fix these ({plan.blockers.length})
               </h3>
               {plan.blockers.map((b) => (
                 <div key={b.component_id} className="cv-panel p-2.5" style={{ borderLeft: "3px solid var(--cv-amber)" }}>
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[12px] font-semibold" style={{ color: "var(--cv-ink)" }}>{b.component_name}</span>
                     <span className="shrink-0 tabular-nums text-[11.5px]" style={{ color: "var(--cv-red)" }}>
-                      {(b.utilization * 100).toFixed(0)}%
+                      {(b.utilization * 100).toFixed(0)}% of capacity
                     </span>
                   </div>
                   <p className="mt-1 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>{b.guidance}</p>
@@ -144,7 +144,7 @@ export function FixPanel({
 
           <div>
             <button onClick={() => setShowLimits((v) => !v)} className="text-[10.5px] font-semibold" style={{ color: "var(--cv-amber)" }}>
-              {showLimits ? "▾" : "▸"} how this sizing can be wrong ({plan.limits.length})
+              {showLimits ? "▾" : "▸"} how this plan could be wrong ({plan.limits.length} known limits)
             </button>
             {showLimits && (
               <ul className="mt-2 flex flex-col gap-2">

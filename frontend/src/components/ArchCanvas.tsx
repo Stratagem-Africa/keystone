@@ -66,9 +66,9 @@ const ZOOM_BTN =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1";
 
 const STATUS_WORD: Record<NodeStatus, string> = {
-  ok: "plenty of headroom",
-  hot: "running hot",
-  saturated: "over capacity",
+  ok: "room to spare",
+  hot: "almost full",
+  saturated: "over its limit — work piles up",
 };
 
 function fmtRps(n: number | null): string {
@@ -79,7 +79,7 @@ function fmtRps(n: number | null): string {
 }
 
 function pct(u: number | null): string {
-  return u === null || !Number.isFinite(u) ? "—" : `${Math.round(u * 100)}%`;
+  return u === null || !Number.isFinite(u) ? "not computed" : `${Math.round(u * 100)}%`;
 }
 
 export interface ArchCanvasProps {
@@ -384,9 +384,9 @@ export function ArchCanvas({
                     <span
                       className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
                       style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}
-                      title="Single point of failure — one instance, no redundancy"
+                      title="Only one of these, with no backup — if it fails, everything that depends on it goes down with it. Engineers call this a single point of failure (SPOF)."
                     >
-                      SPOF
+                      NO BACKUP
                     </span>
                   )}
                 </div>
@@ -396,8 +396,8 @@ export function ArchCanvas({
                 </p>
 
                 <div className="mt-1 flex items-baseline justify-between text-[11px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
-                  <span style={{ color: "var(--cv-ink)" }}>{fmtRps(p.arrival_rps)} rps</span>
-                  <span>{pct(p.utilization)}</span>
+                  <span style={{ color: "var(--cv-ink)" }}>{fmtRps(p.arrival_rps)} requests/sec</span>
+                  <span>{Number.isFinite(p.utilization) ? `${pct(p.utilization)} full` : pct(p.utilization)}</span>
                 </div>
                 <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full" style={{ background: "rgba(150,170,235,.16)" }}>
                   <div
@@ -412,7 +412,7 @@ export function ArchCanvas({
                 <div className="mt-1.5 truncate text-[10.5px] font-semibold" style={{ color: hue }}>
                   {p.status === "ok" ? "\u2713 " : "\u25B2 "}
                   {STATUS_WORD[p.status]}
-                  {p.isBottleneck && <span style={{ color: "var(--cv-muted)" }}> · the limit</span>}
+                  {p.isBottleneck && <span style={{ color: "var(--cv-muted)" }}> · runs out first</span>}
                 </div>
               </div>
             </button>
@@ -438,23 +438,23 @@ export function ArchCanvas({
         </div>
         {showHeader && (<>
         <p className="mt-1 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-          Architecture map · every number is the engine&apos;s, at this load
+          Architecture map · every number here comes from the simulator, never from the AI — and only holds at the traffic level shown
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold" style={{ background: "rgba(150,170,235,.16)", color: "var(--cv-muted)" }}>
-            {arch.meta.accuracy_level}
+            {arch.meta.accuracy_level} · a ballpark, not checked against a real system
           </span>
           <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold tabular-nums" style={{ background: "rgba(150,170,235,.16)", color: "var(--cv-muted)" }}>
-            {fmtRps(frame?.load_rps ?? arch.meta.offered_load_rps)} req/s offered
+            {fmtRps(frame?.load_rps ?? arch.meta.offered_load_rps)} requests/sec coming in
           </span>
           {arch.meta.high_stakes && (
             <span className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider" style={{ background: "rgba(251,191,36,.16)", color: "var(--cv-amber)" }}>
-              expert review required
+              high stakes — have an expert review this before you build
             </span>
           )}
         </div>
         <p className="mt-1.5 text-[9.5px] leading-snug" style={{ color: "var(--cv-amber)" }}>
-          confidence: {arch.meta.confidence}
+          how far to trust these numbers: {arch.meta.confidence}
         </p>
         </>)}
       </div>
@@ -468,7 +468,7 @@ export function ArchCanvas({
           className={ZOOM_BTN}
           style={{ color: "var(--cv-ink)", outlineColor: "var(--cv-blue)" }}
         >
-          Fit
+          Fit to screen
         </button>
         <button
           onClick={() => zoom(-0.15)}
@@ -487,7 +487,7 @@ export function ArchCanvas({
           +
         </button>
         <span className="px-1.5 text-[10px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
-          {Math.round(scale * 100)}%
+          zoom {Math.round(scale * 100)}%
         </span>
       </div>
     </div>

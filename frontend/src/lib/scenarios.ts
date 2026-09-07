@@ -82,8 +82,8 @@ export type Unmodelled = Record<string, string>;
 export const CATEGORY_LABEL: Record<ScenarioCategory, string> = {
   traffic: "Traffic",
   capacity: "Capacity",
-  data: "Data layer",
-  dependency: "Dependency",
+  data: "Database and cache",
+  dependency: "Services your app waits on",
 };
 
 export const CATEGORY_ORDER: ScenarioCategory[] = ["traffic", "capacity", "data", "dependency"];
@@ -134,7 +134,7 @@ export async function runScenario(
   });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { detail?: string };
-    throw new Error(err.detail ?? `scenario failed (${res.status})`);
+    throw new Error(err.detail ?? `Couldn't run this test — the server returned an error (code ${res.status}).`);
   }
   return (await res.json()) as ScenarioRun;
 }

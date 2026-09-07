@@ -39,7 +39,7 @@ const EXAMPLES = [
   "A platform like Twitter",
   "An online store checkout with payments",
   "A flash-sale ticket booking site",
-  "A URL shortener, mostly reads",
+  "A link shortener — far more clicks than new links",
 ];
 
 const API = process.env.NEXT_PUBLIC_API_URL;
@@ -80,8 +80,8 @@ export function ArchStudio() {
     if (!brief) return;
     if (!API) {
       setErrorMsg(
-        "The API URL was not configured at build time — NEXT_PUBLIC_API_URL is baked into the bundle at " +
-          "`next build`, not read at runtime. Set it (e.g. http://localhost:8000) and rebuild.",
+        "Keystone doesn't know where its API is. The address is baked in when the app is built, not read while it runs — " +
+          "so set NEXT_PUBLIC_API_URL (for example http://localhost:8000) and build again.",
       );
       setState("error");
       return;
@@ -102,7 +102,7 @@ export function ArchStudio() {
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
-        throw new Error(detail?.detail ?? `the generator returned ${res.status}`);
+        throw new Error(detail?.detail ?? `Keystone's design service could not build this design (error ${res.status})`);
       }
       const data: GenerateResponse = await res.json();
       if (controller.signal.aborted) return;
@@ -148,9 +148,9 @@ export function ArchStudio() {
   const busy = state === "generating";
   const liveMessage =
     state === "generating"
-      ? "Designing a layered architecture and simulating it on the engine…"
+      ? "Designing your system and running it through the simulator…"
       : state === "done" && result
-        ? `Ready. ${result.nodes.length} components, ${result.flows.length} request journeys.`
+        ? `Ready. ${result.nodes.length} parts, and ${result.flows.length} paths a request can take through them.`
         : "";
 
   // Seed the editable canvas from the current design (positioned nodes + edges + engine verdict).
@@ -213,7 +213,7 @@ export function ArchStudio() {
       setFixApplied(false);
     } catch (err) {
       if (controller.signal.aborted) return;
-      setFixError(err instanceof Error ? err.message : "could not size this design");
+      setFixError(err instanceof Error ? err.message : "could not work out what to add to carry that much traffic");
     } finally {
       if (!controller.signal.aborted) setFixRunning(false);
     }
@@ -349,7 +349,7 @@ export function ArchStudio() {
 
       {state === "generating" && (
         <p className="font-mono text-provenance text-ink-muted animate-pulse">
-          designing a layered architecture · simulating on the deterministic engine…
+          designing your system · running it through the simulator — same description in, same numbers out, every time…
         </p>
       )}
 
@@ -374,7 +374,7 @@ export function ArchStudio() {
               <span className="font-mono text-[11px] text-[var(--cv-muted)] truncate">
                 {intent}
                 {result.matched == null && (
-                  <span className="text-[var(--cv-amber)]"> · no reference matched — placeholder shape</span>
+                  <span className="text-[var(--cv-amber)]"> · no match found — this is a generic shape, not your design</span>
                 )}
               </span>
             </div>
@@ -383,7 +383,7 @@ export function ArchStudio() {
                 <button
                   onClick={() => void saveSpec()}
                   disabled={specBusy}
-                  title="Save this design as a spec file you can commit, diff and re-open"
+                  title="Save this design to a file you can keep, share, compare with later versions and open again"
                   className="font-sans text-label px-2.5 py-1 rounded-full text-[var(--cv-muted)] transition-colors hover:text-[var(--cv-ink)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
                 >
                   ⭳ Save
@@ -391,7 +391,7 @@ export function ArchStudio() {
                 <button
                   onClick={() => fileRef.current?.click()}
                   disabled={specBusy}
-                  title="Open a Keystone spec file"
+                  title="Open a design you saved earlier"
                   className="font-sans text-label px-2.5 py-1 rounded-full text-[var(--cv-muted)] transition-colors hover:text-[var(--cv-ink)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cv-blue)]"
                 >
                   ⭱ Open
@@ -440,15 +440,15 @@ export function ArchStudio() {
                       className="px-4 py-2 font-mono text-[10.5px]"
                       style={{ borderTop: "1px solid var(--cv-line)", color: "var(--cv-muted)" }}
                     >
-                      showing the <b style={{ color: "var(--cv-ink)" }}>{chaos.scenario.name}</b> counterfactual —
-                      the load axis returns with the design
+                      you are looking at a what-if: <b style={{ color: "var(--cv-ink)" }}>{chaos.scenario.name}</b> —
+                      the traffic slider comes back when you go back to the design
                     </p>
                   )}
                 </div>
                 <aside
                   className="flex w-[320px] shrink-0 flex-col overflow-hidden"
                   style={{ borderLeft: "1px solid var(--cv-line)", background: "var(--cv-paper)" }}
-                  aria-label="Design verdict and chaos scenarios"
+                  aria-label="Verdict, Break it and Fix it panels for this design"
                 >
                   <div className="flex shrink-0 gap-1 p-2" style={{ borderBottom: "1px solid var(--cv-line)" }}>
                     <button onClick={() => setRail("verdict")} className={railBtn(rail === "verdict")}>

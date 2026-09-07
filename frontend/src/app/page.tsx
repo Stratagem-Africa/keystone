@@ -24,8 +24,7 @@ export default function Home() {
 
           {/* Sub-copy — serif signals model-reasoned prose. Competence framing. */}
           <p className="font-serif text-body max-w-[52ch]">
-            A grounded consensus of AI architects designs your system, justifies every
-            decision, and validates it with a deterministic engine.
+            A panel of AI architects designs your system and gives a reason for every choice. A separate maths engine — never the AI — works out the numbers, and gets the same answer every time. Where an input rests on a published measurement we cite it; where we&apos;re guessing, we say so.
           </p>
 
           {/* Living sim (docs/09 §4.1 Act 1) — a real LB→App→Cache→DB stack. "Push it to 10×" floods
@@ -45,7 +44,7 @@ export default function Home() {
           {/* Stub honesty, demoted to a small note (docs/09 §11 stub-honesty). The sim above is real
               engine output; the full council/ingestion pipeline is still scaffold. */}
           <p className="font-mono text-provenance text-ink-muted/70">
-            one real worked example · full pipeline still scaffold
+            one real worked example · the rest of the tool is still being built
           </p>
         </div>
       </section>
@@ -55,39 +54,36 @@ export default function Home() {
         {/* Warm zone — serif, paper ground — model-reasoned prose */}
         <div className="bg-paper text-slate-ink px-8 py-12 flex flex-col gap-4">
           <p className="font-mono text-provenance text-ink-muted-strong uppercase tracking-widest">
-            reasoning zone · model
+            the thinking · done by AI
           </p>
           <div className="w-8 h-px bg-mist" />
           {/* Serif = the model reasoned this. Bounded to a comfortable reading measure (docs/09 §8). */}
           <p className="font-serif text-body max-w-[60ch]">
-            The council of AI architects deliberates on your system design,
-            proposes ADRs, and records dissent. Serif typeface signals the source:
-            a language model reasoned this — not the engine.
+            The AI architects argue out your design, write down each decision with the reason behind it (an ADR — an architecture decision record, which you&apos;ll meet in real engineering teams), and keep any objection they couldn&apos;t settle. Text in this typeface always means an AI wrote it — not the maths engine.
           </p>
           <p className="font-serif text-body text-ink-muted-strong italic max-w-[60ch]">
-            &ldquo;A cache here reduces read latency by avoiding repeated DB
-            round-trips, at the cost of eventual consistency…&rdquo;
+            &ldquo;Keeping a copy of the popular data in a cache means most reads never travel to the database, so they come back faster. The trade-off: that copy can be a moment out of date, so a reader may briefly see an old value…&rdquo;
           </p>
         </div>
 
         {/* Cool zone — mono, slate-ink ground — engine-computed numbers */}
         <div className="bg-slate-ink text-paper px-8 py-12 flex flex-col gap-4">
           <p className="font-mono text-provenance text-ink-muted uppercase tracking-widest">
-            computation zone · engine
+            the numbers · done by the maths engine
           </p>
           <div className="w-8 h-px bg-steel" />
           <p className="font-mono text-provenance text-ink-muted">
-            parameters → engine → metric
+            your design → maths engine → a number
           </p>
           {/* Mono = the engine computed these */}
           <div className="flex flex-col gap-6 mt-2">
             <Metric
               value={4200}
-              unit="req/s"
+              unit=" requests/sec"
               low={2800}
               high={6000}
               provenance="ASSUMPTION"
-              model="placeholder"
+              model="an example number — not from your system"
             />
             <Metric
               value={94}
@@ -95,7 +91,7 @@ export default function Home() {
               low={91}
               high={97}
               provenance="GROUNDED"
-              model="placeholder"
+              model="an example number — not from your system"
             />
           </div>
         </div>
@@ -111,16 +107,13 @@ export default function Home() {
           <h2 className="font-sans text-h1 font-semibold tracking-tight">Where this is wrong</h2>
           <ul className="flex flex-col gap-4 mt-1">
             <li className="font-serif text-body max-w-[62ch]">
-              This is <span className="font-mono text-mono-data">L0 · Directional</span> — every number is
-              modelled from your design, <span className="italic">not yet calibrated</span> to your real stack.
+              These numbers are <span className="font-mono text-mono-data">L0 · Directional</span> — a rough first estimate, worked out from the design you described and <span className="italic">never yet checked against</span> a system of yours that&apos;s actually running. They point in the right direction; they are not measurements.
             </li>
             <li className="font-serif text-body max-w-[62ch]">
-              Each figure ships with a confidence band. A <span className="text-assumption-amber">wide amber band</span>{" "}
-              means we are guessing; grounded evidence narrows it toward green.
+              Every number comes with a confidence band — a bar showing how sure we are. A <span className="text-assumption-amber">wide amber band</span>{" "}means we guessed the inputs. When we can point to a published measurement instead, the bar gets narrower and turns green.
             </li>
             <li className="font-serif text-body max-w-[62ch]">
-              The AI council <span className="italic">reasons</span>; it never produces a number — the
-              deterministic engine does. But reasoning can still be wrong, so we show it and record dissent.
+              The AI does the <span className="italic">thinking</span>; it never produces a number — the maths engine works those out, and gets the same answer every time. Thinking can still be wrong, so we show you the reasoning and keep any objection the architects couldn&apos;t settle.
             </li>
           </ul>
         </div>
@@ -143,7 +136,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="bg-slate-ink border-t border-steel px-6 py-8 text-center">
         <p className="font-mono text-provenance text-ink-muted">
-          keystone · every number ships with its doubts · &copy; 2026
+          keystone · every number comes with its doubts · &copy; 2026
         </p>
       </footer>
     </>

@@ -35,7 +35,7 @@ function usePrefersReducedMotion() {
 //     [print(k, round(v.utilization,3)) for k,v in r.components.items()]"
 // The UI only ANIMATES and reveals these values; it re-derives nothing.
 const ENGINE = {
-  model: "M/M/1 · app-tier 85% safe ceiling",
+  model: "the traffic that fills the app tier to 85%; the range runs to 100%",
   baselineRps: 10_000,
   pushMultiple: 10, // the "Push it to 10×" target — the load axis runs ×1 → ×10
   bottleneckId: "app",
@@ -110,7 +110,7 @@ function SimNode({
         <span className="font-mono text-[10px] text-ink-muted leading-relaxed">{tech}</span>
         {bottleneck && (
           <span className="font-mono text-[10px] uppercase tracking-wider text-signal-red">
-            {saturated ? "◂ saturated — this tier sets the ceiling" : "◂ the bottleneck at this load"}
+            {saturated ? "◂ full — this is the part capping your whole app" : "◂ the bottleneck at this traffic level — it fills up first"}
           </span>
         )}
       </span>
@@ -155,7 +155,7 @@ export function LivingSim() {
   return (
     <div className="mt-2 w-full max-w-md p-6 bg-graphite border border-steel rounded-lg text-left">
       <p className="font-mono text-provenance text-ink-muted mb-4 uppercase tracking-wider">
-        a real stack · simulated by the engine
+        a real four-part design · run through the maths engine
       </p>
 
       {/* The stack. A local red wash sits behind the App tier and blooms in when it saturates. */}
@@ -189,31 +189,31 @@ export function LivingSim() {
         )}
 
         <SimNode
-          label="LB" Icon={Network} util={tiers.lb}
+          label="Balancer" Icon={Network} util={tiers.lb}
           name="Application Load Balancer"
-          what="Spreads incoming requests across the app instances so none is overwhelmed, health-checks them, and routes around failures."
-          tech="L7 · AWS ALB / NGINX / Envoy · a single instance is a SPOF — run it multi-AZ"
+          what="Splits incoming traffic across the copies of your app so no single copy gets overloaded. It keeps checking that each copy is still answering, and stops sending traffic to any that aren't."
+          tech="AWS ALB / NGINX / Envoy · L7 — it reads the web request itself, not just the packets · run just one and it's a single point of failure (SPOF): when it dies, your whole app is down — run it across two availability zones (multi-AZ), which are separate data centres"
         />
-        <Track name="HTTP request" detail="The load balancer forwards the client's request to a chosen app instance." />
+        <Track name="HTTP request" detail="The balancer hands one visitor's request to one copy of your app." />
         <SimNode
           label="App" Icon={Server} util={tiers.app} bottleneck saturated={pushed}
-          name="App tier (compute)"
-          what="Runs your request-handling code. Scales horizontally behind the load balancer; usually the first tier to saturate, so its instance count sets your safe throughput."
-          tech="stateless · autoscaling group · CPU / latency-bound"
+          name="Your app servers"
+          what="Runs the code you wrote. You add capacity by running more copies behind the balancer. This is usually the first part to fill up, so the number of copies you run is what decides how much traffic you can safely take."
+          tech="stateless — keeps nothing between requests, so any copy can serve anyone · autoscaling group — adds and removes copies on its own as traffic changes · CPU / latency-bound: limited by processor power and by how long each request takes"
         />
-        <Track name="Cache lookup" detail="The app checks Redis first — a hit returns in under a millisecond and never touches the database." />
+        <Track name="Cache lookup" detail="Your app looks in Redis first. If the answer is already there it comes back in under a millisecond, and the database is never asked." />
         <SimNode
           label="Cache" Icon={Zap} util={tiers.cache}
           name="Cache (Redis)"
-          what="An in-memory store in front of the database. Absorbs hot reads — at a 90% hit rate only 1 in 10 reads reaches Postgres — with sub-millisecond lookups."
-          tech="Redis / Memcached · LRU eviction · a cold cache sends every read to the DB (a classic stampede)"
+          what="Keeps copies of frequently-read data in memory, in front of the database. At a 90% hit rate — 9 of every 10 reads finding what they need here — only 1 in 10 has to reach Postgres. Each lookup takes well under a millisecond."
+          tech="Redis / Memcached · LRU eviction — when it's full, whatever was used least recently gets dropped · an empty (cold) cache sends every read straight to the database at once: a stampede that can take the database down"
         />
-        <Track name="DB query (on miss)" detail="Only the reads the cache misses reach Postgres — the fewer, the healthier. Writes always land here." />
+        <Track name="DB query (on a cache miss)" detail="Only the reads the cache couldn't answer reach Postgres — the fewer of these, the better it copes. Every save comes here regardless." />
         <SimNode
           label="DB" Icon={Database} util={tiers.db}
-          name="PostgreSQL (primary)"
-          what="The durable source of truth, with ACID guarantees. Cache-shielded for reads; every write lands here. The hardest tier to scale out."
-          tech="primary + read replicas · connection-pooled · disk / IO-bound on writes"
+          name="PostgreSQL (the primary copy)"
+          what="The permanent record — the one copy that's definitely correct. It won't lose a save or leave one half-finished; those guarantees are part of what engineers mean by ACID. The cache shields it from most reads, but every save comes here. It's the hardest part to spread across more machines."
+          tech="one primary plus read replicas — read-only copies · connection-pooled: connections are shared from a pool, not opened per request · writes are IO-bound, limited by how fast the disk keeps up"
         />
       </div>
 
@@ -222,8 +222,8 @@ export function LivingSim() {
           ×10 axis, you can SEE the design break far short of the ×10 you asked for. */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-1.5 font-mono text-[10px] uppercase tracking-wider text-ink-muted">
-          <span>offered load</span>
-          <span>×1 → ×10</span>
+          <span>traffic you&apos;re sending</span>
+          <span>×1 → ×10 of 10,000/sec</span>
         </div>
         <div className="relative h-2 w-full rounded-full bg-slate-ink border border-steel overflow-hidden">
           <div
@@ -244,7 +244,7 @@ export function LivingSim() {
             className="absolute -translate-x-1/2 font-mono text-[9px] uppercase tracking-wider text-assumption-amber whitespace-nowrap"
             style={{ left: `${BREAKPOINT_AXIS_FRAC * 100}%` }}
           >
-            ↑ safe ceiling
+            ↑ safe limit
           </span>
         </div>
       </div>
@@ -253,11 +253,11 @@ export function LivingSim() {
           emphasises and gains its verdict caption once the load is pushed past the ceiling. */}
       <div className="flex flex-col gap-2">
         <span className="font-mono text-provenance text-ink-muted uppercase tracking-wider">
-          engine verdict · safe breakpoint
+          the engine&apos;s answer · safe limit before it breaks
         </span>
         <Metric
           value={ENGINE.breakpointSafeRps}
-          unit="rps"
+          unit=" requests/sec"
           low={ENGINE.breakpointSafeRps}
           high={ENGINE.breakpointTheoreticalRps}
           provenance="ASSUMPTION"
@@ -265,9 +265,7 @@ export function LivingSim() {
         />
         {pushed && (
           <p key={run} className="animate-snap font-serif text-provenance text-paper leading-relaxed">
-            The App tier saturates first — at roughly <span className="font-mono text-signal-red">1.2×</span> the
-            baseline, long before the <span className="font-mono">10×</span> you asked for. That gap is the
-            point: the engine finds the ceiling you can&apos;t eyeball.
+            Your app servers fill up first — at about <span className="font-mono text-signal-red">1.2×</span> the baseline load, nowhere near the <span className="font-mono">10×</span> you asked for. That gap is the point: the engine finds the limit you&apos;d never spot by eye.
           </p>
         )}
       </div>
@@ -288,7 +286,7 @@ export function LivingSim() {
           disabled={!pushed}
           className="font-sans text-label px-4 py-2 rounded-full text-ink-muted border border-steel transition-all ease-settle duration-ui enabled:hover:text-paper enabled:hover:border-ink-muted disabled:opacity-40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-graphite"
         >
-          ↺ reseed
+          ↺ run it again
         </button>
       </div>
 
@@ -297,15 +295,15 @@ export function LivingSim() {
           on the first run nothing has been replayed yet, so it would be a false claim. */}
       {!pushed ? (
         <p className="mt-3 font-mono text-provenance text-ink-muted">
-          push the load — then reseed to watch it replay identically
+          turn the traffic up — then run it again and watch it land on the exact same number
         </p>
       ) : run === 1 ? (
         <p className="mt-3 font-mono text-provenance text-ink-muted">
-          run #1 · seeded &amp; deterministic — press reseed to replay it
+          run #1 · nothing here is random — press run it again and you&apos;ll get the identical result
         </p>
       ) : (
         <p className="mt-3 font-mono text-provenance text-grounded-green">
-          run #{run} · replayed byte-identical ✓
+          run #{run} · identical to the last run, digit for digit ✓
         </p>
       )}
     </div>

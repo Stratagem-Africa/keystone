@@ -38,13 +38,13 @@ function fmtMetric(m: ArchMapMetric): string {
 }
 
 const METRIC_LABEL: Record<string, string> = {
-  bottleneck_utilization: "Peak utilisation",
-  breakpoint_rps_safe: "Safe breakpoint",
-  breakpoint_rps_theoretical: "Theoretical breakpoint",
-  mean_latency_ms: "Mean latency",
-  p50_ms: "p50 latency",
-  p95_ms: "p95 latency",
-  p99_ms: "p99 latency",
+  bottleneck_utilization: "How full the busiest part is (utilisation)",
+  breakpoint_rps_safe: "Safe limit — stay under this",
+  breakpoint_rps_theoretical: "Breaking point — no safety margin",
+  mean_latency_ms: "Average response time",
+  p50_ms: "Typical response time (p50 — half are slower)",
+  p95_ms: "Slow response time (p95 — 5 in 100 are slower)",
+  p99_ms: "Slowest response time (p99 — 1 in 100 is still slower)",
   monthly_cost: "Monthly cost",
 };
 
@@ -77,6 +77,14 @@ function Section({ title, count, children }: { title: string; count?: number; ch
       {children}
     </section>
   );
+}
+
+// Flow names arrive as backend ids ("driver_ping", "trip_update", "check_availability") and were
+// rendered raw, so the panel showed snake_case to people who have never seen snake_case. Display
+// only — `f.name` stays the key everywhere else, so nothing downstream shifts.
+function humanFlow(name: string): string {
+  const words = name.replace(/[_-]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 interface DesignPanelProps {
@@ -115,10 +123,10 @@ export function DesignPanel({
           </div>
           <dl className="mt-3 flex flex-col gap-1 text-[11.5px]">
             {[
-              ["Receives", `${fmtRps(selected.arrival_rps)} req/s`],
-              ["Capacity", `${fmtRps(cap)} req/s (${selected.instances} × ${fmtRps(selected.per_instance_rps)})`],
-              ["Utilisation", selected.utilization === null ? "—" : `${(selected.utilization * 100).toFixed(1)}%`],
-              ["Service time", `${selected.base_latency_ms.toFixed(1)} ms`],
+              ["Receives", `${fmtRps(selected.arrival_rps)} requests per second`],
+              ["Capacity", `${fmtRps(cap)} requests per second (${selected.instances} copies × ${fmtRps(selected.per_instance_rps)} each)`],
+              ["How full it is (utilisation)", selected.utilization === null ? "—" : `${(selected.utilization * 100).toFixed(1)}%`],
+              ["Time to do its work (not counting waiting in line)", `${selected.base_latency_ms.toFixed(1)} ms`],
               ["Cost", `${fmtMoneyFromCents(selected.monthly_cost_cents * selected.instances)} / mo`],
             ].map(([k, v]) => (
               <div key={k} className="flex items-baseline justify-between gap-3">
@@ -130,7 +138,7 @@ export function DesignPanel({
         </div>
 
         {selected.evidence.length > 0 ? (
-          <Section title="Cited evidence" count={selected.evidence.length}>
+          <Section title="Published figures we found" count={selected.evidence.length}>
             {selected.evidence.map((e, i) => (
               <div key={i} className="cv-panel p-2.5">
                 <div className="flex items-baseline justify-between gap-2">
@@ -138,11 +146,11 @@ export function DesignPanel({
                   <Chip text={e.status} />
                 </div>
                 <p className="mt-1 text-[10.5px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
-                  yours {e.your_value} {e.unit} · cited {e.central} (band {e.low}–{e.high})
+                  your number: {e.your_value} {e.unit} · published elsewhere: {e.central} (published range {e.low}–{e.high})
                 </p>
                 {e.measured_on && (
                   <p className="mt-1 text-[10px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-                    measured on: {e.measured_on}
+                    the setup behind that figure: {e.measured_on}
                   </p>
                 )}
                 {e.sources.map((s, j) => (
@@ -155,8 +163,8 @@ export function DesignPanel({
           </Section>
         ) : (
           <p className="text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-            No cited benchmark backs this component&apos;s capacity yet — it is a seed default carrying the
-            <b> ASSUMPTION</b> label, not a measurement of your stack.
+            We found no published figure for how much this part can handle. The number above is a starting default, labelled
+            <b> ASSUMPTION</b> — meaning we guessed it. Nobody measured your setup.
           </p>
         )}
       </div>
@@ -176,9 +184,9 @@ export function DesignPanel({
           </p>
           <p className="mt-1.5 text-[11.5px] leading-snug" style={{ color: "var(--cv-ink)" }}>
             Nothing in the reference library matched your description, so this is a neutral
-            three-tier starting point. The shape, the component sizes and the load are placeholders —
+            starting layout — a load balancer, app servers, a cache and one database. The parts, their sizes and the traffic figure are all placeholders —
             every figure below is correct arithmetic on <em>those placeholders</em>, and describes
-            this generic shape rather than your system. Edit it on the canvas, then re-simulate.
+            this generic layout, not your app. Change it on the canvas, then run the numbers again.
           </p>
         </div>
       )}
@@ -194,7 +202,7 @@ export function DesignPanel({
             {meta.domain_flags.length > 0 && (
               <> (<span className="font-mono">{meta.domain_flags.join(", ")}</span>)</>
             )}
-            . These figures are directional and must not be treated as production-safe or certified.
+            . These numbers are directional — the right ballpark, not a safe basis for launching. Nothing here is certified and no expert has reviewed it: have someone who has run a system like this check it first.
           </p>
         </div>
       )}
@@ -209,35 +217,35 @@ export function DesignPanel({
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>What it handles</p>
+            <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>Where it starts to strain</p>
             <p className="text-[19px] font-semibold tabular-nums" style={{ color: "var(--cv-ink)" }}>
               ~{fmtRps(verdict.breakpoint_rps_safe)}
-              <span className="text-[12px] font-normal" style={{ color: "var(--cv-muted)" }}> req/s</span>
+              <span className="text-[12px] font-normal" style={{ color: "var(--cv-muted)" }}> requests per second</span>
             </p>
             <p className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-              before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_name}</b> becomes the limit
+              before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_name}</b> runs out of room — the first part to give way
               {verdict.bottleneck_utilization !== null && (
-                <> — now at {(verdict.bottleneck_utilization * 100).toFixed(0)}%</>
+                <>. It is already {(verdict.bottleneck_utilization * 100).toFixed(0)}% full</>
               )}
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>Latency</p>
+            <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>Response time (latency)</p>
             <p className="text-[12.5px] tabular-nums" style={{ color: "var(--cv-ink)" }}>
-              {verdict.latency.mean_ms.toFixed(1)} ms mean
+              {verdict.latency.mean_ms.toFixed(1)} ms on average
               <span style={{ color: "var(--cv-muted)" }}>
-                {" "}· p95 {verdict.latency.p95_ms.toFixed(0)} · p99 {verdict.latency.p99_ms.toFixed(0)}
+                {" "}· p95 {verdict.latency.p95_ms.toFixed(0)} ms — 5 in 100 are slower · p99 {verdict.latency.p99_ms.toFixed(0)} ms — 1 in 100 is slower
               </span>
             </p>
           </div>
           <p className="text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-            <b>Confidence:</b> {meta.confidence} · accuracy level {meta.accuracy_level}
+            <b>Confidence:</b> {meta.confidence} · accuracy grade {meta.accuracy_level} — the right ballpark only, not safe to build on
           </p>
         </div>
       </Section>
 
       {verdict.spofs.length > 0 && (
-        <Section title="Single points of failure" count={verdict.spofs.length}>
+        <Section title="Single points of failure — nothing takes over if one fails" count={verdict.spofs.length}>
           <ul className="flex flex-col gap-1">
             {verdict.spofs.map((s) => (
               <li key={s} className="text-[11.5px]" style={{ color: "var(--cv-ink)" }}>
@@ -248,7 +256,7 @@ export function DesignPanel({
         </Section>
       )}
 
-      <Section title="Request journeys" count={arch.flows.length}>
+      <Section title="What people actually do (request journeys)" count={arch.flows.length}>
         {arch.flows.map((f, i) => (
           <button
             key={f.name}
@@ -261,17 +269,17 @@ export function DesignPanel({
           >
             <span className="flex items-baseline gap-2">
               <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: f.color }} />
-              <span className="text-[12px] font-semibold" style={{ color: "var(--cv-ink)" }}>{f.name}</span>
+              <span className="text-[12px] font-semibold" style={{ color: "var(--cv-ink)" }}>{humanFlow(f.name)}</span>
             </span>
             <span className="mt-0.5 block text-[10.5px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
               {(f.share * 100).toFixed(0)}% of traffic
-              {f.latency && <> · p99 {f.latency.p99_ms.toFixed(0)} ms</>}
+              {f.latency && <> · p99 {f.latency.p99_ms.toFixed(0)} ms (1 in 100 is slower)</>}
             </span>
           </button>
         ))}
       </Section>
 
-      <Section title="Headline metrics" count={arch.metrics.length}>
+      <Section title="The main numbers" count={arch.metrics.length}>
         <div className="cv-panel divide-y" style={{ borderColor: "var(--cv-line)" }}>
           {arch.metrics.map((m) => (
             <div key={m.key} className="p-2.5" style={{ borderTopColor: "var(--cv-line)" }}>
@@ -285,9 +293,9 @@ export function DesignPanel({
               </div>
               <p className="mt-1 text-[10px] leading-snug" style={{ color: "var(--cv-muted)" }}>
                 {m.low !== null && m.high !== null ? (
-                  <>band {m.low.toFixed(1)}–{m.high.toFixed(1)} · </>
+                  <>estimated range {m.low.toFixed(1)}–{m.high.toFixed(1)} · worked out with </>
                 ) : (
-                  <span style={{ color: "var(--cv-amber)" }}>no band — the cited inputs do not support one · </span>
+                  <span style={{ color: "var(--cv-amber)" }}>no range — the cited evidence is not precise enough to give one; unknown, not zero · worked out with </span>
                 )}
                 <span className="font-mono">{m.model}</span>
               </p>
@@ -307,7 +315,7 @@ export function DesignPanel({
         </ul>
       </Section>
 
-      <Section title="Assumptions" count={arch.assumptions.length}>
+      <Section title="Where these numbers came from" count={arch.assumptions.length}>
         <ul className="flex flex-col gap-1.5">
           {arch.assumptions.map((a, i) => (
             <li key={i} className="flex items-start gap-2">
@@ -334,8 +342,8 @@ export function DesignPanel({
       </div>
 
       <p className="pt-1 text-[9.5px] leading-snug" style={{ color: "var(--cv-muted)", opacity: 0.8 }}>
-        Engine {meta.engine_version} · {fmtRps(meta.offered_load_rps)} req/s offered. Every figure above is
-        the deterministic engine&apos;s; no language model produced a number on this page.
+        Engine {meta.engine_version} · {fmtRps(meta.offered_load_rps)} requests per second going in. Every figure above came from
+        Keystone&apos;s own simulation engine, which gives the same answer every time it runs. No AI wrote any number on this page.
       </p>
     </div>
   );

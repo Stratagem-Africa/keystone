@@ -47,6 +47,18 @@ function DeltaRow({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
+// Plain-English names for the failure kinds Keystone deliberately does NOT model. Keyed on the
+// real backend ids in `prototype/keystone/scenarios.py` UNMODELLED. The `??` fallback keeps any
+// future key visible (as its raw name) rather than blank — a missing label must never hide a
+// disclosure about what the tool cannot do.
+const UNMODELLED_LABEL: Record<string, string> = {
+  hard_node_failure: "a part dying outright",
+  network_partition: "the network splitting, so parts cannot reach each other",
+  burst_and_recovery: "a sudden spike, and the recovery right after it",
+  partial_degradation_over_time: "something getting slowly worse over hours or days",
+  orchestration_and_provisioning_failures: "servers failing to start, scale or deploy",
+};
+
 export function ChaosPanel({
   scenarios, unmodelled, active, running, error, onRun, onClear,
 }: ChaosPanelProps) {
@@ -91,7 +103,7 @@ export function ChaosPanel({
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
       <div className="flex items-center justify-between">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--cv-muted)" }}>
-          Break it on purpose
+          Break the design on purpose
         </h2>
         {active && (
           <button onClick={onClear} className="rounded px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: "var(--cv-blue)" }}>
@@ -114,7 +126,7 @@ export function ChaosPanel({
                 color: active.delta.survives ? "var(--cv-green)" : "var(--cv-red)",
               }}
             >
-              {active.delta.survives ? "holds" : "breaks"}
+              {active.delta.survives ? "still works" : "breaks"}
             </span>
             <span className="text-[12.5px] font-semibold" style={{ color: "var(--cv-ink)" }}>
               {active.scenario.name}
@@ -127,7 +139,7 @@ export function ChaosPanel({
                 <li key={i} className="text-[10.5px]" style={{ color: "var(--cv-muted)" }}>
                   · {a.name}
                   {a.target_name && ` — ${a.target_name}`}
-                  {a.magnitude !== null && ` @ ${fmtMagnitude(a.magnitude, a.magnitude_unit)}`}
+                  {a.magnitude !== null && ` at ${fmtMagnitude(a.magnitude, a.magnitude_unit)}`}
                 </li>
               ))}
             </ul>
@@ -137,25 +149,25 @@ export function ChaosPanel({
 
           <div className="mt-3 flex flex-col gap-1">
             <DeltaRow
-              label="Mean latency"
+              label="Average response time (latency)"
               value={`${active.delta.baseline_latency_ms.toFixed(0)} → ${active.delta.perturbed_latency_ms.toFixed(0)} ms`}
               tone={active.delta.latency_multiple > 1.5 ? "var(--cv-red)" : undefined}
             />
-            <DeltaRow label="Change" value={`${active.delta.latency_multiple.toFixed(1)}×`} />
+            <DeltaRow label="Response time vs normal (1.0× = no change)" value={`${active.delta.latency_multiple.toFixed(1)}×`} />
             <DeltaRow
-              label="Constraint"
+              label="First part to hit its limit"
               value={active.delta.bottleneck_moved
-                ? `moves → ${active.delta.perturbed_bottleneck}`
-                : `stays on ${active.delta.perturbed_bottleneck}`}
+                ? `changes to ${active.delta.perturbed_bottleneck}`
+                : `still ${active.delta.perturbed_bottleneck}`}
               tone={active.delta.bottleneck_moved ? "var(--cv-amber)" : undefined}
             />
           </div>
 
           <p className="mt-3 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-            <b>Confidence:</b> {active.delta.perturbed_confidence}
+            <b>Confidence — how much to trust these numbers:</b> {active.delta.perturbed_confidence}
           </p>
           <p className="mt-1.5 text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-            <b>This does not model:</b> {active.scenario.caveat}
+            <b>What this test leaves out:</b> {active.scenario.caveat}
           </p>
 
           <button onClick={() => setShowWorking((v) => !v)} className="mt-2 text-[10.5px] font-semibold" style={{ color: "var(--cv-blue)" }}>
@@ -187,10 +199,10 @@ export function ChaosPanel({
           {running
             ? "Running…"
             : selectedKeys.length === 0
-              ? "Pick what fails"
+              ? "Choose a failure to test"
               : selectedKeys.length === 1
                 ? "Run this failure"
-                : `Run ${selectedKeys.length} together`}
+                : `Run all ${selectedKeys.length} at once`}
         </button>
         {selectedKeys.length > 0 && (
           <button onClick={() => setSelected({})} className="shrink-0 text-[10.5px] font-semibold" style={{ color: "var(--cv-muted)" }}>
@@ -200,8 +212,7 @@ export function ChaosPanel({
       </div>
       {selectedKeys.length > 1 && (
         <p className="text-[10px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-          These run as one compound failure — composed into a single model and simulated once, because
-          the combined result is not the sum of the individual verdicts.
+          These all happen at the same time, in one run. Failures that land together are not the same as each one on its own, so we test the combination itself instead of adding up the separate results.
         </p>
       )}
 
@@ -279,13 +290,13 @@ export function ChaosPanel({
       {/* ── what we deliberately do not model ── */}
       <div className="mt-1">
         <button onClick={() => setShowLimits((v) => !v)} className="text-[10.5px] font-semibold" style={{ color: "var(--cv-muted)" }}>
-          {showLimits ? "▾" : "▸"} what this engine will not fake ({Object.keys(unmodelled).length})
+          {showLimits ? "▾" : "▸"} failures this tool refuses to fake ({Object.keys(unmodelled).length})
         </button>
         {showLimits && (
           <ul className="mt-2 flex flex-col gap-2">
             {Object.entries(unmodelled).map(([key, why]) => (
               <li key={key} className="text-[10.5px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-                <b style={{ color: "var(--cv-ink)" }}>{key.replace(/_/g, " ")}</b> — {why}
+                <b style={{ color: "var(--cv-ink)" }}>{UNMODELLED_LABEL[key] ?? key.replace(/_/g, " ")}</b> — {why}
               </li>
             ))}
           </ul>

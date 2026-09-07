@@ -51,7 +51,7 @@ export function LoadTransport({ frames, index, baseIndex, onIndex, disabled = fa
         className="shrink-0 rounded-full px-3.5 py-1.5 text-[11.5px] font-semibold transition-transform active:scale-[0.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{ background: "var(--cv-blue)", color: "var(--cv-paper)", outlineColor: "var(--cv-blue)" }}
       >
-        {atTarget ? "↺ Back to design load" : `▶ Push to ${fmt(frames[target].load_rps)} rps`}
+        {atTarget ? "↺ Back to design load" : `▶ Push it to ${fmt(frames[target].load_rps)} requests/sec`}
       </button>
 
       <input
@@ -68,7 +68,7 @@ export function LoadTransport({ frames, index, baseIndex, onIndex, disabled = fa
       />
 
       <div className="flex shrink-0 items-baseline gap-3 font-mono text-[11.5px] tabular-nums">
-        <span style={{ color: "var(--cv-ink)" }}>{fmt(frame.load_rps)} rps</span>
+        <span style={{ color: "var(--cv-ink)" }}>{fmt(frame.load_rps)} requests/sec</span>
         <span style={{ color: "var(--cv-muted)" }}>{frame.multiple}×</span>
         <span style={{ color: tone }}>
           peak {peak === null || !Number.isFinite(peak) ? "—" : `${Math.round(peak * 100)}%`}
@@ -76,7 +76,7 @@ export function LoadTransport({ frames, index, baseIndex, onIndex, disabled = fa
       </div>
 
       <p className="hidden shrink-0 text-[10px] leading-tight lg:block" style={{ color: "var(--cv-muted)", maxWidth: "20ch" }}>
-        every stop is its own engine run — nothing between them is interpolated
+        every stop on this slider is a real run of the simulator — we never guess the steps in between
       </p>
     </div>
   );

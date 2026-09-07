@@ -48,13 +48,13 @@ export function IntentForm() {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`polling job status returned ${res.status}`);
+      if (!res.ok) throw new Error(`checking on your design failed (error ${res.status})`);
       const status: JobStatusResponse = await res.json();
       if (status.status === "done") return;
-      if (status.status === "error") throw new Error(status.error ?? "the pipeline failed");
+      if (status.status === "error") throw new Error(status.error ?? "the design run failed on Keystone's servers");
       // still queued/processing — keep polling
     }
-    throw new Error("timed out waiting for the design to finish (10 min) — the job may still be running server-side");
+    throw new Error("gave up waiting after 10 minutes — your design may still be running on Keystone's servers");
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -77,7 +77,7 @@ export function IntentForm() {
       });
       if (!submitRes.ok) {
         const detail = await submitRes.json().catch(() => null);
-        throw new Error(detail?.detail ?? `submitting the intent returned ${submitRes.status}`);
+        throw new Error(detail?.detail ?? `Keystone could not accept your description (error ${submitRes.status})`);
       }
       const { job_id } = await submitRes.json();
 
@@ -89,7 +89,7 @@ export function IntentForm() {
         `${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/report?fmt=markdown`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (!reportRes.ok) throw new Error(`fetching the report returned ${reportRes.status}`);
+      if (!reportRes.ok) throw new Error(`your design finished, but the report could not be downloaded (error ${reportRes.status})`);
       const text = await reportRes.text();
       if (cancelledRef.current) return;
       setReport(text);
@@ -114,7 +114,7 @@ export function IntentForm() {
   if (authLoading) {
     return (
       <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">
-        checking your session…
+        checking whether you&apos;re signed in…
       </p>
     );
   }
@@ -128,7 +128,7 @@ export function IntentForm() {
           sign in required
         </p>
         <p className="font-serif text-body text-slate-ink max-w-[60ch]">
-          Designs are generated per signed-in user.{" "}
+          Each design belongs to the account that created it.{" "}
           <Link href="/auth" className="underline">Sign in</Link> to submit one.
         </p>
       </div>
@@ -190,11 +190,11 @@ export function IntentForm() {
           rows={5}
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
-          placeholder="e.g. a URL shortener, ~10k req/s, mostly reads, Postgres + Redis"
+          placeholder="e.g. a link shortener, about 10,000 requests a second, far more clicks than new links, on Postgres + Redis"
           className="w-full rounded-lg border border-assumption-amber bg-paper text-slate-ink font-serif text-body px-4 py-3 placeholder:text-ink-muted-strong/60 resize-none transition-all ease-settle duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-assumption-amber"
         />
         <p className="font-mono text-provenance text-ink-muted-strong">
-          ASSUMPTION · everything you write is treated as unverified until the engine grounds it
+          ASSUMPTION · nothing you type here is checked. It stays labelled a guess until Keystone can back it with measured, cited evidence (that label is GROUNDED)
         </p>
       </div>
 
@@ -233,7 +233,7 @@ export function IntentForm() {
         disabled={(!brief.trim() && !file) || isBusy}
         className="self-start font-sans text-label font-medium px-6 py-3 rounded-full bg-slate-ink text-paper transition-all ease-settle duration-ui hover:bg-graphite hover:shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
       >
-        {formState === "submitting" ? "Sending…" : formState === "polling" ? "Designing…" : "Send to ingestion →"}
+        {formState === "submitting" ? "Sending…" : formState === "polling" ? "Designing…" : "Design it →"}
       </button>
 
     </form>
