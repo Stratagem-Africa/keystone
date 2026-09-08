@@ -114,12 +114,39 @@ def _grounded_evidence(comp) -> list[dict]:
 _PROV_VOCAB = frozenset({"GROUNDED", "RECONCILE", "ASSUMPTION", "GAP"})
 
 
+# The metrics the ENGINE actually reads. Capacity and service time decide the bottleneck, the
+# breakpoint and every latency figure; cost decides none of them. Citing the price of a box tells
+# you nothing about whether it can serve 8,000 requests a second.
+_ENGINE_DRIVING_METRICS = frozenset({"per_instance_rps", "base_latency_ms"})
+
+
 def _node_provenance(comp, evidence: list[dict]) -> str:
-    """Node-level provenance label. RECONCILE if any grounded metric fell outside its cited band, else
-    GROUNDED if anything is grounded, else the component's own default (clamped to the known vocabulary)."""
+    """Node-level provenance label, decided by the metrics that DRIVE the engine.
+
+    THIS USED TO RETURN "GROUNDED IF ANYTHING IS GROUNDED", and across the 56-blueprint library that
+    meant 298 of 406 components rendered GROUNDED-green on the strength of ONE cited field —
+    `monthly_cost_per_instance`, from the AWS price list — while `per_instance_rps` and
+    `base_latency_ms` were uncited `llm_inferred` guesses on every single one of them. Those two are
+    the inputs the engine reads to produce the bottleneck, the breakpoint and every latency number.
+    So the badge said "measured" about the half nobody computes with, and said nothing about the
+    half that decides the answer.
+
+    CLAUDE.md: "Never present an ASSUMPTION as GROUNDED." That was a straight violation, and a
+    one-of-three promotion is exactly how a design gets trusted for the wrong reason.
+
+    A node is GROUNDED only when EVERY engine-driving metric it has is cited. Otherwise it keeps its
+    own honest label — and the cost citation it does have still appears in the evidence list, so
+    nothing is hidden; it just stops being counted as proof of something it is not proof of.
+    """
     if any(e["status"] == "RECONCILE" for e in evidence):
         return "RECONCILE"
-    if evidence:
+    grounded = {e["metric"] for e in evidence if e["status"] == "GROUNDED"}
+    # Only the driving metrics this component actually USES. A base_latency_ms of 0 contributes
+    # nothing to any figure, so demanding a citation for it would withhold the GROUNDED label from a
+    # component that is genuinely, fully evidenced. Requiring evidence for a number nobody computes
+    # with is as dishonest in the other direction.
+    required = {m for m in _ENGINE_DRIVING_METRICS if getattr(comp, m, 0)}
+    if required and required <= grounded:
         return "GROUNDED"
     p = (comp.provenance or "ASSUMPTION").upper()
     return p if p in _PROV_VOCAB else "ASSUMPTION"

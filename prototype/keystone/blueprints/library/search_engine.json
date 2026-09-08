@@ -36,7 +36,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 7008.0,
@@ -71,7 +71,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 15038.0,
@@ -106,7 +106,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 14016.0,
@@ -141,7 +141,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 16425.0,
@@ -176,7 +176,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 3329.0,
@@ -308,7 +308,7 @@
     },
     {
       "subject": "index",
-      "statement": "Tail latency, not throughput, is what actually breaks scatter-gather search: a query is as slow as its slowest shard, so p99 across 10 shards is far worse than a single shard's p99. The engine composes per-component M/M/c sojourn times along a path and has NO fan-out/join model, so the latency it reports for this design is optimistic — and the M/M/c fix of 2026-09-07 made it MORE so, because correcting the multi-server queueing lowered every per-component waiting term. The missing slowest-shard effect is unchanged and still dominates. Treat the utilisation and instance count as the usable output and measure tail latency for real.",
+      "statement": "Tail latency, not throughput, is what actually breaks scatter-gather search: a query is as slow as its slowest shard, so p99 across 10 shards is far worse than a single shard's p99. The engine composes per-component M/M/c sojourn times along a path and has NO fan-out/join model, so the latency it reports for this design is optimistic \u2014 and the M/M/c fix of 2026-09-07 made it MORE so, because correcting the multi-server queueing lowered every per-component waiting term. The missing slowest-shard effect is unchanged and still dominates. Treat the utilisation and instance count as the usable output and measure tail latency for real.",
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"

@@ -285,3 +285,50 @@ class TailModelIsHonestlyLabelledTest(unittest.TestCase):
             with self.subTest(name):
                 self.assertNotIn("M/M/1 per component", text)
                 self.assertNotIn("M/M/1 sojourn", text)
+
+
+class GroundedMeansTheEngineInputsAreCitedTest(unittest.TestCase):
+    """`_node_provenance` returned "GROUNDED if ANYTHING is grounded", and `run_blueprint_tool price`
+    set `comp.provenance = "GROUNDED"` after attaching an AWS price. Between them, 298 of the
+    library's 406 components rendered GROUNDED-green on the strength of one cited field — the
+    monthly price — while `per_instance_rps` and `base_latency_ms` were uncited `llm_inferred`
+    guesses on every one. Those two are what the engine reads to produce the bottleneck, the
+    breakpoint and every latency figure. CLAUDE.md: "Never present an ASSUMPTION as GROUNDED."
+    """
+
+    def test_a_priced_but_unmeasured_component_is_not_badged_grounded(self):
+        from keystone.arch_map import build_arch_map
+        from keystone.blueprint_library import library
+        entry = next(e for e in library() if e.key == "ride_sharing")
+        model = entry.build()
+        nodes = build_arch_map(model, simulate(model))["nodes"]
+        for n in nodes:
+            with self.subTest(n["name"]):
+                cited = {e["metric"] for e in n["evidence"] if e["status"] == "GROUNDED"}
+                if n["provenance"] == "GROUNDED":
+                    self.assertIn("per_instance_rps", cited)
+                    self.assertIn("base_latency_ms", cited)
+
+    def test_the_cost_citation_is_still_shown_not_deleted(self):
+        """Downgrading the badge must not hide the evidence we DO have."""
+        from keystone.arch_map import build_arch_map
+        from keystone.blueprint_library import library
+        entry = next(e for e in library() if e.key == "ride_sharing")
+        model = entry.build()
+        nodes = build_arch_map(model, simulate(model))["nodes"]
+        priced = [n for n in nodes
+                  if any(e["metric"] == "monthly_cost_per_instance" for e in n["evidence"])]
+        self.assertTrue(priced, "the AWS price citations must still reach the map")
+
+    def test_no_library_component_claims_grounded_without_cited_capacity(self):
+        """Across all 56 — the label is a claim, and it has to be earned per component."""
+        import json
+        from keystone.blueprint_library import LIBRARY_DIR
+        for path in sorted(LIBRARY_DIR.glob("*.json")):
+            for c in json.loads(path.read_text())["components"]:
+                if (c.get("provenance") or "").upper() != "GROUNDED":
+                    continue
+                g = set((c.get("groundings") or {}).keys())
+                with self.subTest(f"{path.stem}/{c['id']}"):
+                    self.assertIn("per_instance_rps", g)
+                    self.assertIn("base_latency_ms", g)

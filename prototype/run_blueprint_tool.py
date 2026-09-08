@@ -45,7 +45,14 @@ def _price(path: pathlib.Path) -> int:
         comp.monthly_cost_per_instance = row.monthly_cents
         comp.match_context = {**comp.match_context, "instance_class": row.instance_class}
         comp.groundings = {**comp.groundings, "monthly_cost_per_instance": grounding_for(row)}
-        comp.provenance = "GROUNDED"
+        # NOT `comp.provenance = "GROUNDED"`. Pricing a component grounds its PRICE and nothing
+        # else. Its capacity and service time — the two fields the engine actually reads to produce
+        # the bottleneck, the breakpoint and every latency figure — remain uncited guesses. Setting
+        # the component-level label here promoted 298 of the library's 406 components to GROUNDED
+        # on the strength of an AWS price-list lookup, which is exactly the "never present an
+        # ASSUMPTION as GROUNDED" rule in CLAUDE.md, violated by a single assignment.
+        # The citation still attaches (above) and still renders in the evidence list. It simply
+        # stops being counted as proof of something it is not proof of.
         priced += 1
 
     out = to_dict(model)

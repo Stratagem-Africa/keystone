@@ -53,7 +53,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 7008.0,
@@ -88,7 +88,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 4745.0,
@@ -123,7 +123,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 12994.0,
@@ -175,7 +175,7 @@
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
-      "provenance": "GROUNDED",
+      "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
           "value": 5293.0,

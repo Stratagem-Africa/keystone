@@ -192,13 +192,34 @@ class TestProvenanceAndEvidence(unittest.TestCase):
                            workload=Workload(system_rps=100.0))
 
     def test_grounded_in_band_is_GROUNDED_with_citation(self):
-        g = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/ref"),))
-        m = self._model_with(g)
+        """A node is GROUNDED only when EVERY engine-driving metric it uses is cited.
+
+        This used to ground `per_instance_rps` alone and assert GROUNDED, because the rule was
+        "GROUNDED if anything is grounded". Under that rule 298 of the library's 406 components
+        badged GROUNDED on the strength of an AWS price lookup while their capacity and latency
+        were guesses. `base_latency_ms` defaults to 1.0 — non-zero, so it drives the latency figure
+        and needs its own citation before the node can claim to be evidenced.
+        """
+        cap = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/ref"),))
+        lat = Grounding(1.0, "ms", 0.8, 1.3, citations=(Citation("Redis bench", "http://ex/ref"),))
+        m = self._model_with(cap)
+        m.components["app"].groundings = {**m.components["app"].groundings, "base_latency_ms": lat}
         arch = build_arch_map(m, simulate(m))
         app = next(n for n in arch["nodes"] if n["id"] == "app")
         self.assertEqual(app["provenance"], "GROUNDED")
         self.assertEqual(app["evidence"][0]["status"], "GROUNDED")
         self.assertEqual(app["evidence"][0]["sources"][0]["source"], "Redis bench")
+
+    def test_capacity_cited_but_latency_guessed_is_NOT_grounded(self):
+        """The partial case, asserted on its own so it cannot quietly drift back to GROUNDED."""
+        cap = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/r"),))
+        m = self._model_with(cap)                       # base_latency_ms defaults to 1.0, uncited
+        arch = build_arch_map(m, simulate(m))
+        app = next(n for n in arch["nodes"] if n["id"] == "app")
+        self.assertEqual(app["provenance"], "ASSUMPTION")
+        # and the evidence it DOES have is still shown — downgrading the badge must not hide it
+        self.assertEqual(app["evidence"][0]["metric"], "per_instance_rps")
+        self.assertEqual(app["evidence"][0]["status"], "GROUNDED")
 
     def test_value_outside_band_is_RECONCILE_not_overwritten(self):
         # per_instance_rps=1000 sits OUTSIDE the cited band 400–600 → RECONCILE, and the modeler value is kept.
