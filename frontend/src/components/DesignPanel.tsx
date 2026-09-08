@@ -29,6 +29,12 @@ function fmtRps(n: number | null): string {
   return n.toFixed(0);
 }
 
+// Latency is null when a component is over capacity (rho >= 1): the engine returns inf rather than a
+// fake number, so we show "—", never crash. Mirrors fmtRps — an absent number is a finding, not a blank.
+function fmtMs(n: number | null, digits = 0): string {
+  return n === null || !Number.isFinite(n) ? "—" : n.toFixed(digits);
+}
+
 function fmtMetric(m: ArchMapMetric): string {
   if (m.unit === "usd_minor_per_month") return `${fmtMoneyFromCents(m.value)} / mo`;
   if (m.unit === "ratio") return `${(m.value * 100).toFixed(1)}%`;
@@ -232,9 +238,9 @@ export function DesignPanel({
           <div>
             <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>Response time (latency)</p>
             <p className="text-[12.5px] tabular-nums" style={{ color: "var(--cv-ink)" }}>
-              {verdict.latency.mean_ms.toFixed(1)} ms on average
+              {fmtMs(verdict.latency.mean_ms, 1)} ms on average
               <span style={{ color: "var(--cv-muted)" }}>
-                {" "}· p95 {verdict.latency.p95_ms.toFixed(0)} ms — 5 in 100 are slower · p99 {verdict.latency.p99_ms.toFixed(0)} ms — 1 in 100 is slower
+                {" "}· p95 {fmtMs(verdict.latency.p95_ms)} ms — 5 in 100 are slower · p99 {fmtMs(verdict.latency.p99_ms)} ms — 1 in 100 is slower
               </span>
             </p>
           </div>
@@ -273,7 +279,7 @@ export function DesignPanel({
             </span>
             <span className="mt-0.5 block text-[10.5px] tabular-nums" style={{ color: "var(--cv-muted)" }}>
               {(f.share * 100).toFixed(0)}% of traffic
-              {f.latency && <> · p99 {f.latency.p99_ms.toFixed(0)} ms (1 in 100 is slower)</>}
+              {f.latency && <> · p99 {fmtMs(f.latency.p99_ms)} ms (1 in 100 is slower)</>}
             </span>
           </button>
         ))}

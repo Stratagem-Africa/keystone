@@ -99,10 +99,12 @@ export interface ArchMapFlowStep {
 }
 
 export interface LatencyStats {
-  mean_ms: number;
-  p50_ms: number;
-  p95_ms: number;
-  p99_ms: number;
+  // null when the queue is unstable (rho >= 1): the engine returns inf → null on the wire rather
+  // than a fake finite number. The UI must render "—", never crash on it (see fmtMs).
+  mean_ms: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  p99_ms: number | null;
 }
 
 export interface ArchMapFlow {

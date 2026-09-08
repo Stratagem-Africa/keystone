@@ -49,6 +49,12 @@ function simpleStat(status: NodeStatus): string {
   return "✓ plenty of headroom";
 }
 
+// Latency is null when a flow crosses an over-capacity component (rho >= 1): the engine returns inf,
+// not a fake number. Show "—", never crash on it.
+function fmtMs(n: number | null): string {
+  return n === null || !Number.isFinite(n) ? "—" : n.toFixed(1);
+}
+
 interface ComponentNodeData extends Record<string, unknown> {
   kind: ComponentKind;
   name: string;
@@ -574,8 +580,8 @@ function CanvasInner({ seed, onSimulated }: { seed?: CanvasSeed; onSimulated?: (
               ))}
               {activeFlow?.latency && (
                 <span className="font-mono text-[10px] text-[var(--cv-muted)] ml-2">
-                  p50 {activeFlow.latency.p50_ms.toFixed(1)}ms · p95 {activeFlow.latency.p95_ms.toFixed(1)}ms · p99{" "}
-                  {activeFlow.latency.p99_ms.toFixed(1)}ms
+                  p50 {fmtMs(activeFlow.latency.p50_ms)}ms · p95 {fmtMs(activeFlow.latency.p95_ms)}ms · p99{" "}
+                  {fmtMs(activeFlow.latency.p99_ms)}ms
                 </span>
               )}
             </div>
