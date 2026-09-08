@@ -102,6 +102,14 @@ echo; echo "==> frontend: next build (WITH NO SUPABASE CONFIG — see below)"
 # Absent auth config is now a reported STATE, fail-closed (no client -> no session -> no user, so
 # everything gated on a user stays gated). If anyone reintroduces a module-load throw, THIS BUILD
 # FAILS — which is the point of running it this way rather than with a populated .env.local.
+# COLD CACHE, ALWAYS. `next build` type-checks incrementally, and on 2026-09-08 that let a real
+# type error (`activeFlow.latency.p50_ms` is possibly null, introduced when overload started
+# reporting unbounded) survive THREE consecutive green gate runs. It only surfaced because running
+# `npm run dev` happened to invalidate the cache. A gate whose result depends on what you did in
+# your terminal beforehand is not a gate. Deleting the dist dir costs a few seconds and buys a
+# result that means the same thing every time.
+rm -rf "$NEXT_DIST_DIR" 2>/dev/null || true
+
 ( unset NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY
   NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= npm run build ) 2>&1 \
   | grep -E "✓|✗|error|Error|Failed" | tail -n 6
