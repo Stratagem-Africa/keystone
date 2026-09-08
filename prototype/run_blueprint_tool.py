@@ -20,7 +20,6 @@ import sys
 
 from keystone.blueprint_library import LIBRARY_DIR, library, validate_library_entry
 from keystone.export import from_dict, to_dict
-from keystone.model import ComponentKind
 from keystone.pricing_catalogue import (
     KINDS_WITHOUT_PER_INSTANCE_PRICE, default_price_for_kind, grounding_for, price_for,
 )

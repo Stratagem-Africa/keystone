@@ -89,7 +89,8 @@ def _derive_flows(comp_ids: list[str], edges: list, client_ids: set[str]) -> lis
     indeg: dict[str, int] = {c: 0 for c in served}
     for a, b in edges:
         if a in adj and b in adj:            # component->component edge
-            adj[a].append(b); indeg[b] += 1
+            adj[a].append(b)
+            indeg[b] += 1
         elif a in client_ids and b in adj:   # client->component: b is an entry
             indeg.setdefault(b, indeg.get(b, 0))
     fed_by_client = {b for a, b in edges if a in client_ids and b in adj}
@@ -102,7 +103,8 @@ def _derive_flows(comp_ids: list[str], edges: list, client_ids: set[str]) -> lis
         acc = acc + [node]
         nxts = [n for n in adj[node] if n not in seen]
         if not nxts:
-            paths.append(acc); return
+            paths.append(acc)
+            return
         for n in nxts:
             walk(n, acc, seen | {node})
     for e in entries:

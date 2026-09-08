@@ -15,7 +15,6 @@ from unittest import mock
 
 from keystone.blueprints import url_shortener
 from keystone.claude_council import PERSONAS
-from keystone.llm import LLMError
 from keystone.panel_council import PANEL_CAVEAT, PanelCouncil, build_agents_payload
 
 
@@ -29,8 +28,13 @@ def _panel_json(decision="Use cache-aside", rationale="Reads dominate.", dissent
 
 class _FakeLLM:
     """Captures what the panel would send, and returns a canned panel reply."""
-    def __init__(self, reply): self.reply = reply; self.calls = []
-    def complete(self, **kw): self.calls.append(kw); return self.reply
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def complete(self, **kw):
+        self.calls.append(kw)
+        return self.reply
 
 
 class AgentsPayloadTest(unittest.TestCase):

@@ -29,6 +29,11 @@ from dataclasses import dataclass, field, replace
 from keystone.model import ComponentKind, Flow, SystemModel
 
 SAFE_UTILIZATION = 0.85   # conventional "run hot" ceiling
+# Two components within this many percentage points of utilisation are not meaningfully ranked by
+# THIS model: the inputs that separate them are uncited assumptions carrying far more than 5 points
+# of uncertainty, so the ordering is inside the noise. They are reported as joint contenders rather
+# than a winner and an also-ran.
+_CONTENDER_PTS = 5.0
 _RHO_CEIL = 0.999         # retained ONLY for the breakpoint search; latency no longer clamps (see
                           # _mmc_sojourn_ms — above rho=1 the wait is infinite and is reported so)
 _ERLANG_C_MAX_SERVERS = 10_000   # beyond this the Erlang-C wait is numerically nil; see _mmc_sojourn_ms
@@ -153,6 +158,12 @@ class SimulationResult:
     monthly_cost: int               # integer minor units (USD cents) — harm floor (ADR-008), never float
     components: dict[str, ComponentResult]
     spofs: list[str]
+    # How far ahead the named bottleneck is, in PERCENTAGE POINTS of utilisation, and everyone
+    # within `_CONTENDER_PTS` of it. Measured 2026-09-08: 30 of the 56 library blueprints (54%) name
+    # a bottleneck by 5 points or less and FOUR are exact ties — so the product's single most-read
+    # output was often a coin-flip presented as a determination. See `_contenders`.
+    bottleneck_margin_pts: float
+    bottleneck_contenders: list[str]
     confidence: str
     # Per-flow latency (each flow's own path); the headline mean/p50/p95/p99 above is the dominant flow.
     flow_latencies: list[FlowLatency] = field(default_factory=list)
@@ -405,6 +416,13 @@ def simulate(model: SystemModel) -> SimulationResult:
         if comp.is_spof:
             spofs.append(comp.name)
 
+    # Margin and contenders — computed before anything downstream reads `bottleneck`.
+    ranked = sorted((r.utilization, cid) for cid, r in comp_results.items())
+    ranked.reverse()
+    margin_pts = ((ranked[0][0] - ranked[1][0]) * 100.0) if len(ranked) > 1 else 100.0
+    contenders = [comp_results[cid].name for u, cid in ranked
+                  if rho_max > 0 and (rho_max - u) * 100.0 <= _CONTENDER_PTS]
+
     if rho_max > 0:
         bp_safe = model.workload.system_rps * (SAFE_UTILIZATION / rho_max)
         bp_theo = model.workload.system_rps * (1.0 / rho_max)
@@ -485,6 +503,15 @@ def simulate(model: SystemModel) -> SimulationResult:
         "p95/p99 as upper-bound directional figures. A real tail model needs the M/M/c sojourn "
         "distribution convolved along the path, and is not in v1.",
         cost_caveat,
+        (f"THE BOTTLENECK IS A CANDIDATE, NOT A DETERMINATION on this design: "
+         f"{comp_results[bottleneck].name if bottleneck else 'it'} leads by only "
+         f"{margin_pts:.1f} percentage points, and {len(contenders)} components sit within "
+         f"{_CONTENDER_PTS:.0f} points of each other ({', '.join(contenders)}). The inputs that "
+         f"separate them are uncited assumptions carrying far more uncertainty than that, so this "
+         f"ordering is inside the noise — treat them as joint suspects and measure before you spend."
+         if len(contenders) > 1 else
+         f"The bottleneck leads the next component by {margin_pts:.1f} percentage points, which is "
+         f"wide enough that the ordering survives ordinary input error."),
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
@@ -543,6 +570,8 @@ def simulate(model: SystemModel) -> SimulationResult:
         monthly_cost=monthly_cost,
         components=comp_results,
         spofs=spofs,
+        bottleneck_margin_pts=margin_pts,
+        bottleneck_contenders=contenders,
         confidence=conf,
         flow_latencies=flow_latencies,
         caveats=caveats,

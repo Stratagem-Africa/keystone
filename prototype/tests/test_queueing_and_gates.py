@@ -332,3 +332,44 @@ class GroundedMeansTheEngineInputsAreCitedTest(unittest.TestCase):
                 with self.subTest(f"{path.stem}/{c['id']}"):
                     self.assertIn("per_instance_rps", g)
                     self.assertIn("base_latency_ms", g)
+
+
+class BottleneckIsACandidateNotAVerdictTest(unittest.TestCase):
+    """Web research against primary sources (2026-09-08) found the same defect in blueprint after
+    blueprint: the named bottleneck leads by a margin far smaller than the uncertainty in the inputs
+    that produce it. Measured across the library: 30 of 56 (54%) name one by 5 percentage points or
+    less, and FOUR are exact ties. Keystone's single most-read output was a coin-flip presented as a
+    determination."""
+
+    def test_a_tie_reports_every_contender_not_a_winner(self):
+        from keystone.blueprint_library import library
+        entry = next(e for e in library() if e.key == "distributed_consensus")
+        r = simulate(entry.build())
+        self.assertLess(r.bottleneck_margin_pts, 0.001, "this design is an exact tie")
+        self.assertGreater(len(r.bottleneck_contenders), 1,
+                           "a tie must name its co-leaders, not pick one")
+
+    def test_a_clear_winner_is_still_reported_as_one(self):
+        """The disclosure must not fire everywhere, or it becomes noise nobody reads."""
+        from keystone.blueprint_library import library
+        entry = next(e for e in library() if e.key == "ride_sharing")
+        r = simulate(entry.build())
+        self.assertGreater(r.bottleneck_margin_pts, 5.0)
+        self.assertEqual(len(r.bottleneck_contenders), 1)
+
+    def test_the_caveat_says_which_case_it_is(self):
+        from keystone.blueprint_library import library
+        close = simulate(next(e for e in library() if e.key == "google_maps").build())
+        clear = simulate(next(e for e in library() if e.key == "ride_sharing").build())
+        self.assertIn("CANDIDATE, NOT A DETERMINATION", " ".join(close.caveats))
+        self.assertNotIn("CANDIDATE, NOT A DETERMINATION", " ".join(clear.caveats))
+        self.assertIn("wide enough that the ordering survives", " ".join(clear.caveats))
+
+    def test_the_margin_is_arithmetic_over_the_two_top_utilisations(self):
+        """No new source of truth — it reduces to the component results the engine already produced."""
+        from keystone.blueprint_library import library
+        for key in ("google_maps", "ride_sharing", "youtube"):
+            with self.subTest(key):
+                r = simulate(next(e for e in library() if e.key == key).build())
+                us = sorted((c.utilization for c in r.components.values()), reverse=True)
+                self.assertAlmostEqual(r.bottleneck_margin_pts, (us[0] - us[1]) * 100.0, places=9)

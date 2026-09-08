@@ -392,9 +392,12 @@ def run_chaos_scenario(req: ScenarioRequest) -> dict:
             model = build_model_from_topology(
                 {"name": req.name, "system_rps": req.system_rps,
                  "nodes": req.nodes, "edges": req.edges})
-        specs = ([chaos.ScenarioSpec(s.scenario_id, s.target_id, s.magnitude) for s in req.specs]
-                 if req.specs
-                 else [chaos.ScenarioSpec(req.scenario_id, req.target_id, req.magnitude)])
+        if req.specs:
+            specs = [chaos.ScenarioSpec(s.scenario_id, s.target_id, s.magnitude) for s in req.specs]
+        elif req.scenario_id is not None:   # narrows str | None -> str for mypy; the validator guarantees it
+            specs = [chaos.ScenarioSpec(req.scenario_id, req.target_id, req.magnitude)]
+        else:   # unreachable — the model_validator requires exactly one of scenario_id / specs
+            raise HTTPException(status_code=400, detail="provide exactly one of `scenario_id` or `specs`")
         result = chaos.run_compound(model, specs)
         perturbed_model = model
         for spec in specs:

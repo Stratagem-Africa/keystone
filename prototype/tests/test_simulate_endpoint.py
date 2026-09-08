@@ -50,7 +50,8 @@ class TestSimulateEndpoint(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_nonpositive_rps_rejected_at_edge(self):
-        bad = dict(_TOPO); bad["system_rps"] = 0
+        bad = dict(_TOPO)
+        bad["system_rps"] = 0
         r = client.post("/simulate", json=bad)
         self.assertEqual(r.status_code, 422)   # pydantic gt=0 rejects before the handler
 
