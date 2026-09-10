@@ -3,7 +3,7 @@
   "name": "Kafka (Message Broker)",
   "workload": {
     "system_rps": 200000,
-    "description": "200k msg/s durable log; partitioned brokers with RF=3, a KRaft controller quorum and tiered storage"
+    "description": "200k client-visible msg/s durable log; partitioned brokers with RF=3 (leader append + 2 follower fetches charged to the broker), a KRaft controller quorum and tiered storage"
   },
   "components": [
     {
@@ -28,7 +28,7 @@
       "kind": "app_server",
       "name": "Producer tier (idempotent, batched, acks=all)",
       "per_instance_rps": 20000,
-      "instances": 8,
+      "instances": 4,
       "base_latency_ms": 1.5,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -61,9 +61,9 @@
     {
       "id": "broker",
       "kind": "queue",
-      "name": "Kafka broker cluster (partitioned topics, RF=3)",
+      "name": "Kafka broker cluster (partitioned topics, RF=3 - leader append + 2 follower fetches)",
       "per_instance_rps": 20000,
-      "instances": 14,
+      "instances": 18,
       "base_latency_ms": 4.0,
       "monthly_cost_per_instance": 15330,
       "egress_gb_per_month": 0,
@@ -133,7 +133,7 @@
       "kind": "app_server",
       "name": "Consumer group tier (stream processors)",
       "per_instance_rps": 8000,
-      "instances": 16,
+      "instances": 25,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -168,7 +168,7 @@
       "kind": "app_server",
       "name": "Schema Registry (Avro/Protobuf id resolution)",
       "per_instance_rps": 4000,
-      "instances": 4,
+      "instances": 2,
       "base_latency_ms": 2.0,
       "monthly_cost_per_instance": 4906,
       "egress_gb_per_month": 0,
@@ -220,7 +220,7 @@
       "kind": "sql_db",
       "name": "Downstream sink (Postgres) - materialised consumer state",
       "per_instance_rps": 8000,
-      "instances": 1,
+      "instances": 2,
       "base_latency_ms": 6.0,
       "monthly_cost_per_instance": 12994,
       "egress_gb_per_month": 0,
@@ -254,7 +254,7 @@
   "flows": [
     {
       "name": "produce",
-      "share": 0.55,
+      "share": 0.25,
       "path": [
         {
           "component_id": "lb",
@@ -266,11 +266,11 @@
         },
         {
           "component_id": "schema",
-          "visit_prob": 0.05
+          "visit_prob": 0.001
         },
         {
           "component_id": "broker",
-          "visit_prob": 1.0
+          "visit_prob": 3.0
         },
         {
           "component_id": "ctrl",
@@ -280,7 +280,7 @@
     },
     {
       "name": "consume_hot",
-      "share": 0.4,
+      "share": 0.7,
       "path": [
         {
           "component_id": "lb",
@@ -296,7 +296,7 @@
         },
         {
           "component_id": "schema",
-          "visit_prob": 0.05
+          "visit_prob": 0.001
         },
         {
           "component_id": "store",
@@ -318,7 +318,7 @@
         },
         {
           "component_id": "tier",
-          "visit_prob": 1.0
+          "visit_prob": 0.001
         },
         {
           "component_id": "cons",
@@ -339,12 +339,12 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "ctrl",
+          "component_id": "broker",
           "visit_prob": 1.0
         },
         {
-          "component_id": "broker",
-          "visit_prob": 1.0
+          "component_id": "ctrl",
+          "visit_prob": 0.1
         }
       ]
     }
@@ -352,42 +352,77 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "200,000 messages/s. 55% produce, 40% hot consume from page cache, 4% backfill replayed from tiered storage, 1% metadata/admin. Messages ~1 KB.",
+      "statement": "200,000 client-visible messages/s of ~1 KB. Mix: 25% produce, 70% hot consume from page cache, 4% backfill replayed from tiered storage, 1% metadata/admin - so consume (hot + backfill) outweighs produce ~3.0:1. This CORRECTS an earlier 55% produce / 40% consume mix, which was backwards: a Kafka log is a fan-out device, and the earlier mix understated the consumer tier by about 3x. LinkedIn's own write-up reports 'over 800 billion messages per day which amounts to over 175 terabytes of data' produced against 'Over 650 terabytes of messages are then consumed daily' (engineering.linkedin.com, 'Running Kafka At Scale', 2015-03-20) - 3.7:1 out:in by bytes. Those figures are eleven years old, and LinkedIn's 2019 update (7 trillion messages/day, 'over 100 Kafka clusters', 'more than 4,000 brokers', '7 million partitions') does not restate the byte ratio, so the ratio is treated as DIRECTIONAL. This model lands slightly below the published 3.7:1 because backfill and admin also take share.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "broker",
-      "statement": "~20,000 msg/s per kafka.m5.large broker, counting BOTH produce and consume traffic on the same node. 14 brokers is the binding constraint in this design - which is the correct shape for a Kafka reference: the log, not the clients, is the bottleneck.",
+      "statement": "REPLICATION IS CHARGED TO THE BROKER - this is the fix that matters most here. AWS's right-sizing equation is verbatim 'tEC2network = tcluster/#brokers * (#consumer groups + r-1)' (AWS Big Data Blog, 'Best practices for right-sizing your Apache Kafka clusters to optimize performance and cost', 2022-03-17, reviewed Nov 2025). At RF=3 one produced message costs the cluster THREE broker-side operations: the leader's append plus two follower fetches. The produce flow therefore visits the broker with visit_prob 3.0, and each consumer group's fetch is charged separately by the consume flows. The previous version of this blueprint charged one broker visit per client-visible message and reported a comfortable 71% on 14 brokers; the same cluster carrying its own replication is over 100%. Sizing a Kafka cluster from client-visible msg/s is the most common way to under-provision it, and it is why the broker - not the clients - is the binding constraint here.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "broker",
+      "statement": "~20,000 message OPERATIONS/s per kafka.m5.large broker, where one operation is one message crossing the broker's network/CPU path: a leader append, a follower fetch, or a consumer fetch. Note the accounting: the old figure spent 20,000 on produce and consume with no replication, which is a different (and smaller) quantity than what the broker really carries. Published anchors bracket this number rather than pin it. AWS's guidance holds a three-node m7g.large cluster at RF=3 with two consumer groups to '63 MB/sec' of CLUSTER ingress (~21 MB/s ~= 21,000 1 KB msg/s of ingress per broker), which under AWS's own equation implies roughly 84,000 total ops/s of per-broker network budget; Confluent's OpenMessaging run on 3 x i3en.2xlarge (1 KB messages, 100 partitions, RF=3, acks=all, min.insync.replicas=2, 2020-08-21) reached 605 MB/s peak with 'p99 Latency (ms) 5 ms (200 MB/s load)' on far larger nodes. As a fleet cross-check, LinkedIn's 7 trillion messages/day over 'more than 4,000 brokers' averages ~20,000 msg/s per broker, though that post does not say whether the count is produce-side or total handled. 20,000 ops/s is therefore a stated MODELLING CHOICE - deliberately well under the NIC ceiling - not a published per-broker rate; see the partition assumption for why a reference this size should not be sized to its network limit.",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "broker",
-      "statement": "RF=3 means every produced message is written three times inside the cluster. The engine's arrival model counts a client-visible message once, so the broker figure here understates the internal replication write amplification by ~3x on the disk path. Disk/IO capacity is NOT modelled by the v1 analytical engine - size disks from retention x throughput x RF separately.",
+      "statement": "DISK, RETENTION AND STORAGE COST ARE STILL NOT MODELLED. Charging (RF-1) follower fetches covers the NETWORK and CPU path that AWS's equation sizes; it does not cover bytes at rest. Every produced message is also written to disk three times, and the v1 analytical engine has no disk-capacity, no retention and no storage-cost dimension - size disks from retention x throughput x RF separately, and note that MSK bills broker storage and data transfer apart from the broker-hour priced here.",
       "confidence": "high",
       "source": "engineering",
-      "provenance": "ASSUMPTION"
+      "provenance": "GAP"
+    },
+    {
+      "subject": "broker",
+      "statement": "PARTITION COUNT IS THE OTHER HALF OF KAFKA SIZING AND THE ENGINE CANNOT EXPRESS IT. MSK's sizing table gives 1,000 recommended partitions (1,500 maximum for update operations) per kafka.m5.large / kafka.m7g.large broker. The 18 brokers here therefore hold on the order of 18,000 partition-REPLICAS, i.e. ~6,000 partitions at RF=3 - the practical ceiling on topic and consumer-group parallelism in this design, and in a real cluster of this shape the limit that forces broker count before the NIC does. That is the reason this reference sizes brokers at 20,000 ops/s rather than at their network budget. Partition count is a stated input for the reader; it appears nowhere in the model's arithmetic.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "GAP"
     },
     {
       "subject": "ctrl",
-      "statement": "The KRaft controller quorum is sized for quorum safety (3 nodes), not throughput - it carries only metadata traffic, so its utilisation is low by design.",
+      "statement": "The KRaft controller quorum is sized for quorum safety (3 nodes), not throughput - it carries only metadata traffic, so its utilisation is low by design. THE ADMIN FLOW DIRECTION IS CORRECTED: clients do not address the controller. Confluent's CFK docs describe the client 'finds the address of the broker it is interested in and connects directly to the broker to produce or consume data', and the KRaft docs state 'The active controller handles all RPCs made from the brokers' and that 'Client configurations are not impacted by Confluent Platform moving to KRaft'. The admin flow therefore runs lb -> broker -> ctrl (it previously ran lb -> ctrl -> broker, which is backwards), and only a fraction of those RPCs reach the controller at all: a broker answers metadata from its own replica of the metadata log and forwards only cluster-mutating operations (topic/partition/ACL changes). No public figure exists for the admin-op share of metadata traffic; the 10% forward rate used here is an ASSUMPTION.",
       "confidence": "high",
       "source": "engineering",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "store",
-      "statement": "Consumers commit materialised state in batches of ~20 messages, so the Postgres sink is visited on 5% of consumed messages rather than every one.",
+      "subject": "schema",
+      "statement": "The Schema Registry is visited on ~0.1% of messages, not 5%. Confluent's client caches schema ids in process: CachedSchemaRegistryClient holds 'private final Cache<String, Cache<Integer, Schema>> idToSchemaCache' and short-circuits with 'Schema cachedSchema = idSchemaMap.getIfPresent(id); if (cachedSchema != null) { return cachedSchema; }' before any REST call, so steady-state registry traffic is near zero - what remains is cold start, schema evolution and cache eviction. The registry is consequently sized for AVAILABILITY (2 nodes), like the controller quorum, not for throughput; the previous 4 instances at ~59% utilisation were provisioning for load that does not exist. The 0.1% miss rate is an ASSUMPTION - no published registry miss-rate figure exists.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "tier",
-      "statement": "S3 is modelled as 4 prefixes at ~5,500 GET/s each, which is the documented per-prefix request ceiling. Object storage has no per-instance price in Keystone's catalogue, so tiered storage reports $0 compute - the real cost is per-GB-month plus per-request and is a stated GAP here.",
+      "statement": "Tiered storage is read by the BROKER in whole segments, not by consumers one message at a time. AWS MSK states 'Data between brokers and the tiered storage moves within the VPC' and that after the first bytes 'you can expect latencies that are similar to the primary storage tier' - a consumer never addresses S3. The backfill flow therefore issues roughly one GET per ~1,000 replayed messages (one multi-MB segment part at ~1 KB per message), which is a handful of GETs per second against the documented 5,500 GET/s per-prefix ceiling. That is the point of the change: at this scale the number of S3 prefixes is NOT a design variable, and the earlier model - one GET per replayed message, spread over 4 prefixes at ~36% utilisation - made it look like one. The 1,000-messages-per-fetch figure is an ASSUMPTION derived from segment/part sizing, not a published number. Object storage has no per-instance price in Keystone's catalogue, so tiered storage reports $0 compute - the real cost is per-GB-month plus per-request and is a stated GAP here.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "tier",
+      "statement": "COLD-READ LATENCY IS A TAIL, NOT A MEAN. Because one segment fetch is amortised across ~1,000 replayed messages, the engine's arithmetic spreads the object store's first-byte latency across all of them, so the backfill flow's mean latency barely moves. The first consumer to touch a cold segment really does wait the whole fetch. The engine reports means and cannot express that step - read backfill latency as an average, not as what a replay feels like.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "lb",
+      "statement": "The load balancer is charged one visit per message, which OVERSTATES it. Confluent's operator load-balancer docs describe the bootstrap pattern: the client uses the load balancer to discover the cluster, then connects directly to the broker it needs. Steady-state produce and consume traffic does not traverse the LB at all - only bootstrap and advertised-listener discovery do. The visit is left at 1.0 because the v1 engine has no 'connection setup only' concept and the LB is nowhere near binding either way, but do not read its utilisation as a real load.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "store",
+      "statement": "Consumers commit materialised state in batches of ~20 messages, so the Postgres sink is visited on 5% of consumed messages rather than every one. Correcting the traffic mix multiplies consumed volume about 3x, which pushed a single sink instance past the engine's 85% ceiling, so the sink is now 2 shards. The engine models those as two independent capacity units; it cannot express cross-shard consistency, and a sharded materialised view is a real design commitment, not a free scaling knob.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"

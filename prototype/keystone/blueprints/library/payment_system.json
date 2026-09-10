@@ -132,7 +132,7 @@
       "id": "ledger",
       "kind": "sql_db",
       "name": "Double-entry ledger (single ACID primary)",
-      "per_instance_rps": 9000,
+      "per_instance_rps": 5000,
       "instances": 1,
       "base_latency_ms": 4.0,
       "monthly_cost_per_instance": 16425,
@@ -394,10 +394,24 @@
     },
     {
       "subject": "ledger",
-      "statement": "ONE PostgreSQL primary is deliberate, not a sizing miss: a double-entry ledger needs a single writer for correctness. It is a single point of failure and the scaling wall of this design \u2014 sharding a ledger costs you cross-shard atomicity.",
+      "statement": "ONE PostgreSQL writer is a deliberate SIMPLIFICATION, not a law of double-entry bookkeeping. What correctness actually requires is that each posting be atomic \u2014 not that the whole ledger live on one machine. Production ledgers at this scale shard: Uber's LedgerStore, \"an immutable, ledger-style database storing business transactions\" behind its payment platform, runs on sharded Docstore after migrating ~250 billion records / ~300 TB off DynamoDB (Uber engineering blog, 2021-11-10), and supports over 2 trillion indexes across tens of billions of financial transactions per quarter (Uber engineering blog, 2024-04-04); Stripe's transaction store DocDB runs \"more than 2,000 database shards\" serving \"more than 5 million database queries per second\" (Jimmy Morzaria, Stripe, QCon SF \u2014 read via the InfoQ transcript, a SECONDARY source; the talk is the primary). So: one writer buys you cross-shard atomicity for free and costs you a hard ceiling plus a single point of failure. Read this row as THE TIER YOU CANNOT SCALE BY ADDING INSTANCES \u2014 not as the tier that is busiest, which is a different question. Every other tier in this design, the acquirer-bound authorisation service included, is priced per instance and grows by adding instances; this one is `instances: 1` by construction and grows only by re-architecting into shards, which is the change Uber and Stripe above actually made.",
       "confidence": "high",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ledger",
+      "statement": "POSTINGS PER MONEY EVENT = 1.0, stated here because it is the single choice that decides this row's headroom, and the file used to leave it implicit. Every money flow (authorise, refund, settlement) visits the ledger exactly once: one money event = one ACID transaction. The double-entry PAIR of rows, and the uniqueness check on the idempotency key, are priced INTO the capacity figure rather than counted as extra visits. That is why this row is now sized at 5,000 tx/s and no longer 9,000: the identical component in the sibling blueprint digital_wallet.json (\"Ledger primary (PostgreSQL, single writer, ACID)\") is sized at 5,000 and states the reason \u2014 \"every posting is a multi-row double-entry transaction with a uniqueness constraint on the idempotency key\" \u2014 and one corpus must not price one component two ways. The 9,000 was a plain-OLTP number applied to a workload that is not plain OLTP.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ledger",
+      "statement": "NOT MODELLED \u2014 ledger fan-out beyond the money event. A real processor writes more than one posting per payment: scheme and interchange fees, reserves, payouts to the merchant, chargeback and adjustment entries. This model carries only two ledger transactions per payment (one on the authorise flow, one on the settlement flow) and NO fee, reserve, payout or chargeback postings at all. I looked for a published postings-per-payment figure for a card processor and found none, so NO multiplier is applied here \u2014 inventing one would be worse than admitting the gap. Act on it this way: if your ledger writes N postings per payment, divide this row's headroom by N before you copy the design, because a single writer is the one row you cannot buy your way out of.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     },
     {
       "subject": "cache",
@@ -408,10 +422,10 @@
     },
     {
       "subject": "webhook",
-      "statement": "Merchant webhooks block on the merchant's own endpoint (~200 ms, ~40 concurrent per instance). A slow merchant is a real back-pressure source; retries and dead-lettering are required and not modelled here.",
+      "statement": "Merchant webhooks block on the merchant's own endpoint (~200 ms, ~40 concurrent per instance). A slow merchant is a real back-pressure source; retries and dead-lettering are required and not modelled here. Stripe's webhook documentation puts a floor under how much that understates the tier: live-mode deliveries are retried \"for up to three days with an exponential back off\", Stripe \"doesn't guarantee the delivery of events in the order that they're generated\", and receivers are told to \"process incoming events with an asynchronous queue\". So ONE event is more than one outbound HTTP call whenever a merchant endpoint is slow or down, and this blueprint counts exactly one. There is no public retry or endpoint-failure rate to size the multiplier with, so none is applied: treat the load on this row as a FLOOR, not a measurement. It does not change which tier binds \u2014 it changes how far this one really is from its own ceiling.",
       "confidence": "med",
       "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
+      "provenance": "GAP"
     },
     {
       "subject": "headroom",
@@ -422,8 +436,15 @@
     },
     {
       "subject": "compliance",
-      "statement": "Money movement: PCI-DSS scope, chargebacks, fraud rules, reconciliation and exactly-once idempotency are REQUIRED and out of scope for this model. Expert review is mandatory before any production use.",
+      "statement": "Money movement: PCI-DSS scope, chargebacks, fraud rules, reconciliation and exactly-once idempotency are REQUIRED and out of scope for this model. Expert review is mandatory before any production use. Two shape divergences are named rather than modelled, so the reader is not surprised by them. (a) SCA/3DS: strong customer authentication has been mandatory in the EEA since 2019-09-14 (Stripe's SCA documentation), and a challenge turns the single synchronous authorise call modelled here into an out-of-band \"requires_action\" step the cardholder completes elsewhere \u2014 a different latency shape entirely, not a slower version of this one. (b) AUTHORISE IS NOT CAPTURE: Stripe documents holds of about 7 days for online card customer-initiated transactions (Visa: 5 days, quoted as exactly 4 days 18 hours; most card-present brands: 2 days), with funds moving at CAPTURE. The \"authorise\" flow here conflates the authorisation with the money movement and writes the ledger in one step; a design that splits them has a second, much later money path this file does not draw. Neither changes the binding constraint, which is why they are disclosed instead of drawn.",
       "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "refund",
+      "statement": "Refunds are 5% of ALL operations, i.e. ~150 refunds/s against ~900 authorisations/s \u2014 about one refund per six payments, which is high for card payments. I found NO public card-refund-rate figure and am not implying one exists; the share is left as authored and flagged instead. It matters because refunds take the same authorisation tier and the same single-writer ledger as payments, so this ratio inflates the arrival rate at both. A processor with a lower refund rate loads both tiers less than this file shows.",
+      "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     }

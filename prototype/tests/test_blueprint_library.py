@@ -154,13 +154,31 @@ class ByteGapDisclosureTest(unittest.TestCase):
     """An incomplete cost must reach the REPORT, not just the validator's console output."""
 
     def test_every_gate_warning_is_declared_on_the_model_it_came_from(self):
-        """The gate and the report must never disagree about what is missing."""
+        """Every byte gap the gate finds must be declared on the model. SUBSET, not equality.
+
+        This asserted `count(GAP assumptions) == count(byte_gaps())`, which was true only while
+        `byte_gaps()` was the ONLY thing that could ever produce a GAP. The moment authors started
+        declaring other honest shortfalls — "this design does not model the ledger", "media delivery
+        is out of scope" — the test turned an equality into a PROHIBITION on disclosure: ten
+        blueprints went red for saying MORE about what they do not cover.
+
+        CLAUDE.md makes GAP the correct provenance for any "state shortfall + fix", not just a byte
+        volume. So the test was wrong, not the blueprints. Fixing it by downgrading those
+        assumptions to ASSUMPTION would have bought a green suite by deleting disclosures, which is
+        the exact trade this repo exists to refuse.
+
+        What actually has to hold: the gate and the report never disagree about a byte gap. Every
+        warning the gate raises appears on the model. Extra GAPs are a feature.
+        """
         for entry in library():
             with self.subTest(entry.key):
-                warned = len(validate_library_entry(entry.path).warnings)
-                declared = sum(1 for a in entry.build().assumptions if a.provenance == "GAP")
-                self.assertEqual(declared, warned,
-                                 f"{entry.key}: gate warns {warned}x, model declares {declared}")
+                warnings = validate_library_entry(entry.path).warnings
+                declared = [a.statement for a in entry.build().assumptions
+                            if a.provenance == "GAP"]
+                for w in warnings:
+                    self.assertIn(w, declared,
+                                  f"{entry.key}: the gate warns about this and the model does not "
+                                  f"declare it — {w[:90]}")
 
     def test_the_disclosure_survives_into_the_rendered_report(self):
         """The end the user actually reads. Asserting on the model would not prove this."""

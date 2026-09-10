@@ -2,8 +2,8 @@
   "spec_version": 1,
   "name": "Search Engine",
   "workload": {
-    "system_rps": 20000,
-    "description": "20k queries/s over an inverted index; 93% search, 5% autocomplete, 2% indexing"
+    "system_rps": 19000,
+    "description": "19k requests/s: 98% full searches (~18,620/s), 2% document indexing (~380 docs/s). Keystroke/autocomplete traffic is sized in the `typeahead` blueprint, not here."
   },
   "components": [
     {
@@ -131,13 +131,13 @@
     {
       "id": "db",
       "kind": "sql_db",
-      "name": "Document store (titles, snippets, metadata)",
-      "per_instance_rps": 10000,
-      "instances": 1,
-      "base_latency_ms": 3.0,
+      "name": "Doc-server fleet (titles, snippets, metadata; sharded by doc id, replicated)",
+      "per_instance_rps": 600,
+      "instances": 14,
+      "base_latency_ms": 8.0,
       "monthly_cost_per_instance": 16425,
       "egress_gb_per_month": 0,
-      "storage_gb": 6000,
+      "storage_gb": 12000,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
@@ -219,7 +219,7 @@
   "flows": [
     {
       "name": "search_query",
-      "share": 0.93,
+      "share": 0.98,
       "path": [
         {
           "component_id": "lb",
@@ -240,24 +240,6 @@
         {
           "component_id": "db",
           "visit_prob": 0.35
-        }
-      ]
-    },
-    {
-      "name": "autocomplete",
-      "share": 0.05,
-      "path": [
-        {
-          "component_id": "lb",
-          "visit_prob": 1.0
-        },
-        {
-          "component_id": "api",
-          "visit_prob": 1.0
-        },
-        {
-          "component_id": "cache",
-          "visit_prob": 1.0
         }
       ]
     },
@@ -287,15 +269,15 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "20,000 queries/s at peak. 93% full searches, 5% autocomplete (served entirely from cache), 2% document indexing \u2014 ~400 docs/s of continuous index updates.",
+      "statement": "19,000 requests/s at peak: 98% full searches (~18,620/s) and 2% document indexing (~380 docs/s). The search rate is unchanged from the previous version of this file (~18,600/s); what left is the autocomplete slice, which is now DELIBERATELY NOT MODELLED here. It was sized at 5% of traffic, i.e. 0.054 autocomplete requests per search, while Keystone's own `typeahead` blueprint states the opposite in its workload assumption ('a user typing an eight-character query issues five or six requests') \u2014 the two files in one library disagreed by ~102x on the same ratio. Monaco (WTMC 2019) measured directly that on Google, Baidu and Yandex 'an HTTP GET request is made upon each key press that results in a visible change to the query input field'. At five requests per search, keystroke traffic alone is several times this query frontend's entire fleet capacity, so modelling it here would make the front door the constraint and bury the search path. It is a different system with a different shape (per-keystroke arrival rate, ~40% edge absorption, a sub-100 ms p99 requirement) and it is sized in the `typeahead` blueprint. Read the two together.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "cache",
-      "statement": "Query-result cache hit-rate 65%. Search traffic is heavily Zipfian \u2014 a small head of popular queries repeats constantly \u2014 so 65% is achievable with a short TTL. Only the 35% that miss pay for a scatter-gather. This single number is the difference between 22 index machines and 63 of them.",
-      "confidence": "med",
+      "statement": "Query-result cache hit-rate 65% (miss path visit_prob 0.35). Search traffic is heavily Zipfian \u2014 a small head of popular queries repeats constantly \u2014 so a high hit rate is achievable with a short TTL, and only the misses pay for a scatter-gather. BE CAREFUL WITH THIS NUMBER: 65% is ABOVE the top of the only band Google has published. Dean's WSDM 2009 keynote (Google) says the cache servers 'cache both index results and doc snippets - hit rates typically 30-60%', and names level of personalization as one of the three drivers. It is kept at 65% because it is the input the rest of this design was sized against, but treat it as optimistic and uncited, not as evidence. It is the largest single lever in the file: at Dean's 45% midpoint the miss traffic rises ~1.6x, which is roughly 34 index nodes and 21 doc-server nodes at the same headroom instead of 22 and 14. If your queries are personalised, size against the LOW end of Dean's band, not this number.",
+      "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
@@ -315,8 +297,29 @@
     },
     {
       "subject": "db",
-      "statement": "Snippet and metadata fetch is a point lookup by document id, which is why a single PostgreSQL node at ~10,000 rps carries the 6,910 rps the miss path generates. It is a keyed read, not a scan \u2014 if snippet generation moves to a scan, this row is the first to fail.",
+      "statement": "The snippet phase is one document fetch PER RESULT, not one per query. A results page carries ~10 results, so a cache-missing query fans out to ~10 doc lookups. The previous version of this file modelled it as 'a point lookup by document id' \u2014 k = 1 \u2014 served by a SINGLE PostgreSQL node, and that is the defect this revision fixes: the doc tier overtakes the index fleet at only k = 1.14 and a single node saturates at k = 1.47, so one node is unsound for any k above ~1.5 and at k = 10 it is many times past its capacity. Capacity is therefore stated in QUERIES/s with the fan-out folded in \u2014 the same convention the index row already declares \u2014 so a node sustaining ~6,000 snippet fetches/s contributes ~600 queries/s of fleet throughput. That 6,000 is REASONED, not published: no vendor publishes a per-node docserver rate. It is below the ~10,000 bare keyed reads/s this file previously assumed, because generating a snippet means reading the stored document text and marking the query terms, which is materially more work per row than returning a value by key. It is still a keyed read, not a scan \u2014 if snippet generation moves to a scan, this row is the first to fail.",
       "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "Fleet shape: sharded by doc id and replicated \u2014 14 nodes read as ~7 doc-id shards x 2 replicas, which is why this row is no longer a single point of failure. Barroso, Dean and H\u00f6lzle (IEEE Micro, Mar-Apr 2003, 'Web Search for a Planet') describe the docservers as 'partition[ed] ... by randomly distributing documents into smaller shards', with 'multiple server replicas responsible for handling each shard' behind 'a load balancer', and note that 'Index servers typically have less disk space than document servers' \u2014 the doc fleet is the BIG fleet in a real search engine, not one database box. storage_gb is set to 2x the ~6 TB logical corpus for the two replicas; the real fleet keeps 'dozens of copies of the Web across its clusters', so read the storage line as a floor. Google's docservers are a custom store; this row is priced as a comparable managed PostgreSQL node class because that is the price the catalogue can actually cite \u2014 the citation grounds the PRICE, not the capacity.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "GAP \u2014 unit mismatch on the write path: the indexing flow visits this tier at visit_prob 1.0, so one document write is charged as a whole ~10-result fan-out unit. That over-states the write cost by roughly 10x (~380 units where ~38 is the truth, about 5% of the tier's arrivals). The error is CONSERVATIVE \u2014 it makes the fleet look busier than it is \u2014 and the index row carries the same wart for the same reason, but a reader sizing a write-heavy corpus refresh should know the model cannot express two different service units for one component.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "bottleneck",
+      "statement": "Read the tier ranking as a near-tie, not a verdict. Once the snippet fan-out is modelled honestly, the doc-server fleet and the index fleet carry the same miss traffic and land within a few points of each other, and both are sized to the same 85% headroom target \u2014 whichever one the engine names first is decided by a small margin. The teaching point is that they are CO-EQUAL constraints and the doc fleet is the larger, hotter one; the previous version's claim that a single database node sat comfortably below the index fleet was an artefact of dropping the per-result fan-out on the doc side while declaring it on the index side.",
+      "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
@@ -329,7 +332,7 @@
     },
     {
       "subject": "q",
-      "statement": "Indexing runs continuously at ~400 docs/s through a 3-broker bus. Near-real-time indexing means a new document is searchable within a refresh interval (seconds), not instantly; the engine models neither the refresh interval nor index-freshness lag.",
+      "statement": "Indexing runs continuously at ~380 docs/s (2% of 19,000 rps) through a 3-broker bus. Near-real-time indexing means a new document is searchable within a refresh interval (seconds), not instantly; the engine models neither the refresh interval nor index-freshness lag.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"

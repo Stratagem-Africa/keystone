@@ -2,8 +2,8 @@
   "spec_version": 1,
   "name": "Web Crawler",
   "workload": {
-    "system_rps": 3000,
-    "description": "3,000 pages/s (~260M pages/day) through frontier, fetch, parse, dedupe and store"
+    "system_rps": 2600,
+    "description": "2,600 pages/s (~225M pages/day) through frontier, fetch, parse, dedupe and store"
   },
   "components": [
     {
@@ -150,7 +150,7 @@
       "id": "dedupe",
       "kind": "cache",
       "name": "URL + content dedupe set (Redis, Bloom-filtered)",
-      "per_instance_rps": 10000,
+      "per_instance_rps": 1616,
       "instances": 2,
       "base_latency_ms": 0.3,
       "monthly_cost_per_instance": 15038,
@@ -190,7 +190,7 @@
       "base_latency_ms": 40.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
-      "storage_gb": 800000,
+      "storage_gb": 278000,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
@@ -261,7 +261,7 @@
         },
         {
           "component_id": "store",
-          "visit_prob": 1.0
+          "visit_prob": 0.00005
         },
         {
           "component_id": "db",
@@ -309,7 +309,7 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "3,000 pages/s sustained, about 260 million pages/day. NOTE THE UNIT: a crawler is not user-driven, so 'system_rps' here is pages per second moving through the pipeline and each flow is a PIPELINE PATH, not a user journey. Nothing in this design is latency-sensitive to a human.",
+      "statement": "2,600 pages/s sustained, about 225 million pages/day. That rate is SET BY the seen-set tier, not chosen: correcting dedupe to IRLbot's measured 61.9 link-checks per page (see the dedupe assumption) drops the drawn 2-node Redis tier from ~20,000 to ~3,230 pages/s, and 2,600 pages/s is what this fleet, exactly as drawn, sustains inside that ceiling. The earlier 3,000 pages/s headline rested on an un-cited '~10 checks per page' and would leave the same seen-set above 90% utilised. Nothing else in the fleet was resized to reach this number, so the correct reading is: to crawl faster, add Redis nodes FIRST \u2014 fetchers, parsers and brokers all still have headroom here. NOTE THE UNIT: a crawler is not user-driven, so 'system_rps' here is pages per second moving through the pipeline and each flow is a PIPELINE PATH, not a user journey. Nothing in this design is latency-sensitive to a human.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
@@ -323,16 +323,16 @@
     },
     {
       "subject": "q",
-      "statement": "Frontier capacity is stated in PAGES/s, not messages/s. Each crawled page costs ~11 frontier operations (1 dequeue plus ~10 newly discovered URLs enqueued); a broker sustaining ~30,000 msg/s therefore carries ~2,700 pages/s. Same convention as the dedupe row: the engine's visit_prob is a probability in [0,1] and cannot express a >1 visit ratio, so fan-out is carried in the capacity input and declared, not hidden.",
+      "statement": "Frontier capacity is stated in PAGES/s, not messages/s. Each crawled page costs ~11 frontier operations (1 dequeue plus ~10 newly discovered URLs enqueued); a broker sustaining ~30,000 msg/s therefore carries ~2,700 pages/s. The ~10 enqueues is the right quantity here and is deliberately conservative: the frontier only ever enqueues URLs that turned out to be NEW, and IRLbot measured 41,502,195,631 unique pages found from 6,380,051,942 crawled = 6.5 new URLs per page. Do NOT confuse this with the dedupe row's 61.9, which counts every link CHECKED. Same convention as that row: the engine does support a >1 visit ratio (visit_prob is expected visits per request, and youtube.json uses 6.0), but this file carries frontier and dedupe fan-out in the capacity input instead, so that every tier's number reads in pages/s \u2014 declared here, not hidden.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "dedupe",
-      "statement": "Dedupe capacity is likewise in PAGES/s: ~10 URL-seen checks per page against a 100,000 ops/s Redis node gives ~10,000 pages/s per node. The set is Bloom-filtered, so it can report a URL as seen when it was not (a false positive silently drops a page); it never re-crawls one it has truly seen.",
+      "statement": "Dedupe capacity is likewise in PAGES/s, and THIS is the tier that binds this design. Every link extracted from a page must be checked against the seen-set before you know whether it is new. IRLbot (Lee, Leonard, Wang & Loguinov, WWW 2008) parsed 394,619,023,142 links out of 6,380,051,942 unique HTML pages in a 41-day single-server crawl = 61.9 links checked per page (the paper's own analytical model uses l = 59), and names 'the complexity of verifying uniqueness of URLs' as the first performance bottleneck it hit. At 61.9 checks/page a 100,000 ops/s Redis node carries ~1,616 pages/s, not the ~10,000 that an un-cited '~10 checks per page' implied. That was a 6.2x error and it mattered: it parked this tier at ~15% utilisation and sent the reader off to optimise the fetcher fleet, when the seen-set is what a real crawler runs out of first. The 100,000 ops/s per node is NOT a cited measurement \u2014 it is a conservative single-node Redis rule of thumb, and it is the weaker half of this row; only the 61.9 checks/page is measured. The set is Bloom-filtered, so it can report a URL as seen when it was not (a false positive silently drops a page); it never re-crawls one it has truly seen.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
@@ -344,10 +344,17 @@
     },
     {
       "subject": "store",
-      "statement": "S3 sustains ~3,500 PUT/s per prefix, so raw pages are written across 2 hashed prefixes. 800 TB is roughly one month of crawl at ~100 KB/page compressed \u2014 storage, not compute, is this architecture's dominant cost, and it grows every month rather than plateauing.",
+      "statement": "S3 PUTs are NOT a constraint for a crawler, because pages are batched into WARC files before they are written. Common Crawl's CC-MAIN-2026-34 (August 2026) packs 2.14 billion pages into 100,000 WARC files = ~21,400 pages per object, so the crawl flow charges one PUT per 20,000 pages (visit_prob 0.00005, rounded conservatively against the measured 21,400) and this row sits near 0% of the ~3,500 PUT/s-per-prefix S3 ceiling across 2 hashed prefixes. The previous model charged one PUT per PAGE and showed 41.6%, contradicting its own 'WARC batches' label. What the object store actually costs you is STORAGE: the same crawl publishes 84.78 TiB of compressed WARC for those 2.14 billion pages = 42.5 KB per page, so ~2,522 pages/s stored for 30 days is ~278 TB/month, not the ~778 TB the un-cited '~100 KB/page' implied \u2014 the old figure overstated this design's single largest cost line by ~2.3x. Storage, not compute, is still this architecture's dominant cost, and it grows every month rather than plateauing.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "dns",
+      "statement": "GAP \u2014 DNS resolution is NOT modelled as a tier. It is folded into the fetch row's 250 ms. Omitting it is a defensible L0 simplification; omitting it silently is not, because it is the classic way a crawler misses its own fetch numbers. Najork & Heydon (Mercator, Compaq SRC Research Report 173, 26 Sep 2001) record that 'DNS name resolution is a well-documented bottleneck of most web crawlers' and that before they wrote a custom multithreaded resolver, 'performing DNS lookups accounted for 70% of each thread's elapsed time. Using our custom resolver reduced that elapsed time to 14%.' On a stock blocking resolver the fetch row is wrong by roughly that factor and nothing in this model will warn you \u2014 size a caching, multithreaded resolver before you trust it.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
     },
     {
       "subject": "engine",
