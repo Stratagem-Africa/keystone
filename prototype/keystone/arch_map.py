@@ -295,6 +295,12 @@ def build_arch_map(model: SystemModel, sim: SimulationResult, *, sweep: bool = F
             "bottleneck_id": sim.bottleneck_id,
             "bottleneck_name": sim.bottleneck_name,
             "bottleneck_utilization": sim.bottleneck_utilization,
+            # How far ahead the named component is, and everyone tied with it. Without these the
+            # headline said "your bottleneck is X" with full confidence while the correction — that
+            # four components sit inside the noise — was buried in "Where this is wrong". A caveat
+            # that contradicts the headline it sits under is not a disclosure; it is a footnote.
+            "bottleneck_margin_pts": sim.bottleneck_margin_pts,
+            "bottleneck_contenders": list(sim.bottleneck_contenders),
             "breakpoint_rps_safe": sim.breakpoint_rps_safe,
             "breakpoint_rps_theoretical": sim.breakpoint_rps_theoretical,
             "spofs": list(sim.spofs),

@@ -228,12 +228,25 @@ export function DesignPanel({
               ~{fmtRps(verdict.breakpoint_rps_safe)}
               <span className="text-[12px] font-normal" style={{ color: "var(--cv-muted)" }}> requests per second</span>
             </p>
-            <p className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
-              before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_name}</b> runs out of room — the first part to give way
-              {verdict.bottleneck_utilization !== null && (
-                <>. It is already {(verdict.bottleneck_utilization * 100).toFixed(0)}% full</>
-              )}
-            </p>
+            {/* When several components are within a few points of each other, naming ONE of them
+                here is a coin-flip printed as a determination — the inputs that separate them carry
+                far more uncertainty than the gap does. Say "joint suspects" in the headline rather
+                than leaving the correction to a caveat further down the page that contradicts it. */}
+            {(verdict.bottleneck_contenders?.length ?? 1) > 1 ? (
+              <p className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
+                before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_contenders!.length} parts</b> run out of room together —{" "}
+                {verdict.bottleneck_contenders!.join(", ")}. They are within{" "}
+                {(verdict.bottleneck_margin_pts ?? 0).toFixed(1)} points of each other, which is closer
+                than we can tell apart. Treat them as joint suspects and measure before you spend.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
+                before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_name}</b> runs out of room — the first part to give way
+                {verdict.bottleneck_utilization !== null && (
+                  <>. It is already {(verdict.bottleneck_utilization * 100).toFixed(0)}% full</>
+                )}
+              </p>
+            )}
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--cv-muted)" }}>Response time (latency)</p>

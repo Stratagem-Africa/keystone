@@ -141,6 +141,10 @@ export interface ArchMapLayer {
 export interface ArchMapVerdict {
   bottleneck_id: string | null;
   bottleneck_name: string;
+  // How far ahead the named component is (percentage points of utilisation) and everyone tied with
+  // it. Optional: an older cached payload will not carry them.
+  bottleneck_margin_pts?: number;
+  bottleneck_contenders?: string[];
   bottleneck_utilization: number | null;
   breakpoint_rps_safe: number | null;
   breakpoint_rps_theoretical: number | null;
