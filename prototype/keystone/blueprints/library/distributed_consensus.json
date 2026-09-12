@@ -2,8 +2,8 @@
   "spec_version": 1,
   "name": "Distributed Consensus (Raft)",
   "workload": {
-    "system_rps": 15000,
-    "description": "15k ops/s strongly-consistent KV store; single Raft leader, 2 followers, fsync-bound write path"
+    "system_rps": 13000,
+    "description": "13k ops/s strongly-consistent KV store with watch streams; single Raft leader, 2 followers, fsync-bound write path, committed entries applied on every member"
   },
   "components": [
     {
@@ -134,7 +134,7 @@
       "name": "Leader write-ahead log + state machine (fsync-bound)",
       "per_instance_rps": 3000,
       "instances": 1,
-      "base_latency_ms": 8.0,
+      "base_latency_ms": 0.8,
       "monthly_cost_per_instance": 16425,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -254,7 +254,7 @@
   "flows": [
     {
       "name": "serialisable_read",
-      "share": 0.6,
+      "share": 0.5,
       "path": [
         {
           "component_id": "lb",
@@ -267,6 +267,24 @@
         {
           "component_id": "store",
           "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "watch_stream",
+      "share": 0.1,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "router",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 0.25
         }
       ]
     },
@@ -322,11 +340,15 @@
         },
         {
           "component_id": "peers",
-          "visit_prob": 1.0
+          "visit_prob": 2.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 2.0
         },
         {
           "component_id": "snap",
-          "visit_prob": 0.001
+          "visit_prob": 0.00001
         }
       ]
     },
@@ -356,14 +378,14 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "15,000 ops/s: 60% serialisable (stale-tolerant) reads served by any member, 20% linearizable reads via ReadIndex, 15% writes, 5% lease keepalives. Deliberately modest - a Raft group is a coordination primitive, not a throughput tier.",
+      "statement": "13,000 ops/s: 50% serialisable (stale-tolerant) reads served by any member, 20% linearizable reads via ReadIndex, 15% writes, 10% client watch operations, 5% lease keepalives. The load was lowered from the 15,000 ops/s this file used to claim, for two stated reasons. First, etcd's own hardware guide puts a cluster serving 'more than 10,000 of requests per second' (with more than 1,500 clients) in its xLarge tier, and 15,000 sat past that line for a SINGLE Raft group without ever saying so. Second, this revision counts the state-machine apply on the followers (see the `store` note), which the earlier version left out entirely; once that work is counted the follower state machines were over the safe ceiling at the old load. 13,000 ops/s is still deliberately above etcd's Large-tier line - this is one group pushed hard on purpose - but it is a point the shape actually holds at. No public figure exists for the read/write/watch split of a real coordination cluster, so the mix itself is a stated assumption, not a measurement.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "wal",
-      "statement": "Writes are fsync-bound: ~3,000 committed entries/s on an NVMe-backed node. This is the real ceiling of a Raft cluster and it does NOT improve by adding members - adding members makes writes slower, because the quorum waits for more acknowledgements.",
+      "statement": "Writes are fsync-bound, and ~3,000 committed entries/s is a deliberately conservative LOW-CONCURRENCY, small-batch operating point for one Raft group - NOT a fixed ceiling. etcd's own published benchmark, on ONE unchanged 3-member cluster (8 vCPU / 16 GB / 50 GB SSD per member, etcd 3.2.0), spans 583 writes/s at a single connection and single client up to 44,341 writes/s at 100 connections and 1,000 clients - roughly a 76x range on identical hardware - so a write number means nothing without its concurrency and batch size attached. The mechanism is batching: Ongaro's Raft thesis (Stanford, 2014) 10.2.2 notes it is much faster to send two entries in one packet, or write two entries to disk at once, than separately; LogCabin's leader packs up to one megabyte into a single AppendEntries and the follower writes all of that request's entries to disk in one go. The 3,000 figure is supported at the conservative end by Spanner (Corbett et al., ACM TOCS 31(3), 2013, Table III: 1.8 Kops/s of writes at 3 replicas on 4-core/4 GB spanservers). What does NOT improve is cluster size: adding members makes writes SLOWER, not faster - Spanner Table III measures 4.2 / 1.8 / 1.2 Kops/s at 1 / 3 / 5 replicas, and Ongaro p.144 states performance degrades with larger clusters because the leader has to send each entry to a larger number of followers.",
       "confidence": "high",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
@@ -377,7 +399,7 @@
     },
     {
       "subject": "peers",
-      "statement": "MODELLING LIMITATION, stated plainly: Raft FANS OUT every log entry to every follower, but the engine treats instances as a load-balanced pool and DIVIDES arrivals across them. Follower utilisation shown here is therefore optimistic by about the follower count (~2x). The followers are sized with 2x headroom so the true fan-out figure (~66%) is still under the safe ceiling.",
+      "statement": "Raft FANS OUT every log entry to every follower, while the engine treats instances as a load-balanced pool and DIVIDES arrivals across them. This file used to leave that as a stated optimism of about the follower count; it is now modelled directly instead - the write flow's visit to `peers` is set to the follower count, which cancels the engine's division exactly, so each follower is charged for every replicated entry rather than half of them. What remains unmodelled is the quorum rule itself: the leader waits for a MAJORITY, not for everyone, so one slow follower does not block a commit and the engine cannot express that. The ReadIndex heartbeat on the linearizable flow is deliberately left at a single visit rather than the follower count: real etcd batches one heartbeat round across all linearizable reads in flight, so the per-read heartbeat cost is BELOW one full round to each follower. One visit is a middle, stated simplification, not a measurement.",
       "confidence": "high",
       "source": "engineering",
       "provenance": "ASSUMPTION"
@@ -395,6 +417,76 @@
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "wal",
+      "statement": "The log's service time is 0.8 ms, for the NVMe/SSD-backed member this file describes. It was 8.0 ms, which is not an NVMe figure at all: Ongaro (p.146) measured a durable 1 KB disk write at about 0.25 ms, and end-to-end LogCabin 1 KB write latency at about 0.7 ms on a single server and about 1.0 ms across two-to-five servers, while etcd's performance guide puts fdatasync 'often lower than 1ms' on SSD and around 10 ms on a SPINNING disk. 8 ms therefore sat in sight of etcd's spinning-disk regime - a figure an operator should read as a sign the disk is in trouble, not as a baseline to calibrate 'normal' against. 0.8 ms covers the fsync plus the log append and apply work around it, and is still an ASSUMPTION: the cited measurements are other people's hardware.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "Every committed entry is applied to EVERY member's state machine, so the write flow now visits `store` as well as `wal` and `peers`. The earlier version had committed writes never touch the follower state machines at all, which is why those machines looked like a pure read tier. The visit is set to the follower count rather than one because the apply is a fan-out, not a shared load: the engine divides a component's arrivals across its instances, so a visit of two over two followers is what makes each follower see every entry - which is what Raft does. Reads genuinely ARE shared (a serialisable read is answered by one member), so they stay at a single visit. Consul's architecture guide describes exactly this split: 'Servers are generally I/O bound for writes because the underlying Raft log store performs a sync to disk every time an entry is appended. Servers are generally CPU bound for reads since reads work from a fully in-memory data store.' Counting the apply is what moves the binding constraint onto the state machines.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "The per-member read capacity (8,000 req/s) and the 3.0 ms service time are left exactly as they were, on purpose. They sit inside etcd's published serialisable-read span for a 3-member cluster - 2,909 QPS at 0.3 ms with one client, rising to 185,758 QPS at 2.2 ms with 1,000 clients, on 8 vCPU / 16 GB / SSD members - so they are defensible, and editing them to change which component gets named would be fitting the inputs to a wanted verdict. They remain an ASSUMPTION rather than a grounded value: the cited span is cluster-wide and strongly concurrency-dependent, and this file pins one mid-range point inside it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "router",
+      "statement": "The gRPC proxy tier now carries the traffic it exists for. etcd's gRPC proxy documentation says its job is to coalesce multiple client watchers (c-watchers) on the same key or range into a single server-side watcher (s-watcher), reducing the stream load on the etcd server 'from N to 1' - and this file previously had no watch flow at all, so the component's entire justification carried nothing. The new watch flow is counted in CLIENT watch operations (stream setup plus event deliveries): the proxy sees all of them, the members behind it see a quarter. That 4:1 coalescing ratio is an ASSUMPTION - etcd publishes the mechanism but no typical N - and it is set at a deliberately pessimistic end. It is load-bearing rather than decorative: with no coalescing at all the member state machines would be pushed above the safe ceiling at this load, which is precisely the argument for running the proxy tier. The 10% watch share is likewise assumed, not measured; the nearest published anchor is the Kubernetes API-machinery KEP reporting that 'more than 80% of LISTs served by apiserver are consistent reads from cache', which shows watch/cache traffic is first-class in the canonical etcd consumer but gives no share.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "sharding",
+      "statement": "GAP - the single most important architectural move in production consensus systems is NOT modelled here: sharding into many Raft groups. This blueprint is ONE group, so its write path is one leader, one log and one fsync stream, and no amount of hardware moves that ceiling far. Real systems shard instead: TiKV's design divides the keyspace so that 'Raft group is divided into multiple Raft groups in terms of partitions, namely, Region', and Spanner's published benchmark database 'was created with 50 Paxos groups'. Read the single-group ceiling in this file as the moment you shard, not as a fact about consensus. A sharded multi-group variant is not in this file, and it is the obvious next reference architecture to add.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "engine",
+      "statement": "GAP, and it is why this file changed: before this revision the log and the follower state machines came out at IDENTICAL utilisation, purely because two independently hand-chosen constants happened to land on the same value, and the verdict still named one of them the bottleneck. Naming a winner across a zero-width margin is an artefact of sort order, not a finding. With the state-machine apply and the watch traffic modelled, the two are separated by a margin the engine computes, and the component named is the one carrying the most work. If a future edit puts two components back within noise of each other, the honest output is 'these are indistinguishable at these inputs' rather than a pick - that is an engine/report obligation this blueprint cannot discharge on its own.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "leader",
+      "statement": "LATENCY ONLY, and it makes the modelled write path PESSIMISTIC: this file charges the leader's own disk write in series ahead of replication, which is Ongaro's unoptimised pipeline (10.2.1, Figure 10.2(a)). A real Raft leader writes to its own disk in PARALLEL with sending AppendEntries, and 'may even commit an entry before it has been written to its own disk, if a majority of followers have written it to their disks'. Expect real write latency to be better than the sum along this path. It changes no utilisation: the work still happens, it just overlaps.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "snap",
+      "statement": "The snapshot visit ratio is one in 100,000 committed writes, matching etcd's --snapshot-count default of 100000 ('Number of committed transactions to trigger a snapshot to disk'). It was one in 1,000 - snapshotting a hundred times more often than the shipped default. This is immaterial to every utilisation at this load; it is fixed for operational intuition, because snapshots are rare and BURSTY, and a per-request average cannot represent a burst. Ongaro 5.1.2 notes snapshotting 'still creates a burst of CPU and disk bandwidth usage', so read the snapshot store's steady-state figure here as saying nothing at all about that burst.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "snap",
+      "statement": "GAP, and it must be stated by hand here: the snapshot store declares zero egress and zero storage, so its BYTES are absent from the cost figure and that figure is a floor for this component, not an estimate. The library gate discloses this automatically only for byte-carrying components handling at least one request per second, and correcting the snapshot frequency to etcd's shipped default drops this one far below that line - so the automatic disclosure stops firing while the missing bytes remain missing. Snapshots are large and retained: size them from your own keyspace and retention before treating the total below as a budget.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "engine",
+      "statement": "GAP, and it is the price paid for modelling the replication fan-out honestly: setting the write flow's visit count to the follower count on `peers` and `store` makes each follower's UTILISATION right, because the engine divides arrivals across a pool and the extra visits cancel that division. It also makes the LATENCY wrong in the other direction, because the engine sums service time along a path: the followers replicate and apply in PARALLEL, but each extra visit adds that component's service time again in series. So read the write flow's latency here as inflated by the fan-out, on top of the separate quorum problem noted below (a commit waits for the slowest of a MAJORITY - a max() over parallel round trips - which an open queueing network cannot express at all). The utilisation figures and the bottleneck ordering are the trustworthy output of this blueprint; the write-path latency number is not.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

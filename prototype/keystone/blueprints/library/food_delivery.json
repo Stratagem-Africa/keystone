@@ -2,8 +2,8 @@
   "spec_version": 1,
   "name": "Food Delivery System",
   "workload": {
-    "system_rps": 15000,
-    "description": "65% live location traffic, 20% browse/search, 15% ordering, dispatch and status"
+    "system_rps": 14822,
+    "description": "89% live-tracking traffic (courier GPS pings + customer map polls), 9% browse/search, the rest ordering, order status and courier assignment. The mix is DERIVED from 52 orders/s by Little's Law, not asserted."
   },
   "components": [
     {
@@ -28,7 +28,7 @@
       "kind": "app_server",
       "name": "Live tracking service (courier GPS ingest, ETA reads)",
       "per_instance_rps": 3500,
-      "instances": 4,
+      "instances": 5,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -63,7 +63,7 @@
       "kind": "app_server",
       "name": "Discovery / menu search service",
       "per_instance_rps": 800,
-      "instances": 6,
+      "instances": 3,
       "base_latency_ms": 25.0,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -131,10 +131,10 @@
     {
       "id": "dispatch",
       "kind": "app_server",
-      "name": "Courier matching and assignment engine",
-      "per_instance_rps": 350,
-      "instances": 3,
-      "base_latency_ms": 40.0,
+      "name": "Courier assignment optimiser (periodic batch solve, one run per zone)",
+      "per_instance_rps": 0.5,
+      "instances": 6,
+      "base_latency_ms": 2000.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -272,7 +272,7 @@
   "flows": [
     {
       "name": "courier-location-ping",
-      "share": 0.4,
+      "share": 0.2631224,
       "path": [
         {
           "component_id": "gw",
@@ -290,7 +290,7 @@
     },
     {
       "name": "customer-tracking-poll",
-      "share": 0.25,
+      "share": 0.6314937,
       "path": [
         {
           "component_id": "gw",
@@ -312,7 +312,7 @@
     },
     {
       "name": "browse-search",
-      "share": 0.2,
+      "share": 0.0877075,
       "path": [
         {
           "component_id": "gw",
@@ -334,7 +334,7 @@
     },
     {
       "name": "place-order",
-      "share": 0.06,
+      "share": 0.0035083,
       "path": [
         {
           "component_id": "gw",
@@ -359,12 +359,12 @@
       ]
     },
     {
-      "name": "dispatch-assign",
-      "share": 0.05,
+      "name": "dispatch-solve",
+      "share": 0.0001349,
       "path": [
         {
           "component_id": "q",
-          "visit_prob": 1.0
+          "visit_prob": 27.0
         },
         {
           "component_id": "dispatch",
@@ -372,17 +372,17 @@
         },
         {
           "component_id": "cache",
-          "visit_prob": 1.0
+          "visit_prob": 27.0
         },
         {
           "component_id": "db",
-          "visit_prob": 0.5
+          "visit_prob": 26.0
         }
       ]
     },
     {
       "name": "order-status",
-      "share": 0.04,
+      "share": 0.0140332,
       "path": [
         {
           "component_id": "gw",
@@ -406,10 +406,45 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "15,000 ops/s at peak (a Friday dinner rush), counted across all flows. Only ~900/s are actual orders: 65% of the traffic is courier GPS pings and customers watching the map, which is the thing people underestimate about this product.",
+      "statement": "14,822 ops/s at peak (a Friday dinner rush in one large market), of which 52/s are actual orders. The order rate is DERIVED from the request budget, not asserted: the previous version claimed 900 orders/s at 15,000 rps, which contradicted its own stated ping/poll cadences by one to two orders of magnitude (900 orders/s x a 15-minute delivery is 810,000 deliveries in flight, which at one customer poll per 5 s is 162,000 polls/s alone \u2014 43x the 3,750 it allocated). We kept the ~15,000 rps budget and solved for the order rate, because that keeps every component size in this file teachable; the alternative (keep 900 orders/s and let system_rps rise to 150,000-400,000) describes a different, much larger system.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "mix-derivation",
+      "statement": "The flow shares are Little's Law on the cadences, not a guess. 52 orders/s x 900 s door-to-door = 46,800 deliveries in flight. At one customer poll per 5 s that is 9,360 polls/s. At 3 orders batched per courier trip those deliveries are carried by 15,600 couriers on-job, and at one ping per 4 s that is 3,900 pings/s. Add 25 browse/search requests and 4 status reads per order (1,300/s and 208/s), the 52 order placements themselves, and 2 dispatch solves/s: 14,822 rps. Tracking is therefore ~89% of all requests. That shape is corroborated by Uber Engineering's real-time push platform post (uber.com/blog/real-time-push-platform): 'At some point, 80% of requests made to the backend API gateway were polling calls.'",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "scale",
+      "statement": "52 orders/s in a single market is LARGE \u2014 DoorDash's Q4-2023 8-K (SEC EDGAR, 15 Feb 2024) reports 'Total Orders increased 23% Y/Y to 574 million' for the quarter, about 72 orders/s worldwide on average and perhaps 220-360/s at global peak. Read this blueprint as a deliberately big single-metro teaching case, not as a company-wide figure.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "delivery-duration",
+      "statement": "15 minutes door-to-door (order placed -> delivered) is an ASSUMPTION; no operator publishes this distribution. It is the single most load-bearing input in the mix: at 30 minutes every in-flight count, and therefore every poll and ping rate, doubles for the same order rate.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "courier-batching",
+      "statement": "3 orders carried simultaneously per courier trip is an ASSUMPTION \u2014 no public figure exists for stacked-order rates. Courier ping volume moves inversely with it: unbatched (1 order per trip) the same 52 orders/s would offer 11,700 pings/s instead of 3,900.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "browse-per-order",
+      "statement": "25 browse/search requests and 4 status reads per completed order are ASSUMPTIONS, not measured figures; they stand in for the majority of sessions that browse and never convert. No food-delivery operator publishes a session-to-order request ratio.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     },
     {
       "subject": "track",
@@ -420,9 +455,30 @@
     },
     {
       "subject": "dispatch",
-      "statement": "Assignment is expensive (~40 ms: geo query over available couriers, then a scoring pass), so each instance handles only ~350 assignments/s. It runs off the event bus rather than in the customer's request path, so a slow match delays the courier, not the checkout.",
-      "confidence": "low",
+      "statement": "Assignment is a PERIODIC BATCH SOLVE on a timer, not a per-request service. DoorDash's deployed dispatch paper (Wu, Hou & Xie, arXiv:2606.13604v1) describes 'a combinatorial assignment optimizer' covering 'approximately 4,000 geographic regions', 'serving hundreds of millions of daily inferences at a 20-second cadence', where 'The system executes approximately three runs per minute'. This single metro is modelled as 40 zones x 3 solves per minute = 2 solves/s. One unit of load on this component is ONE ZONE SOLVE covering every pending order in that zone \u2014 at 52 orders/s over 2 solves/s that is ~26 assignments per solve, which is why the solve fans out 26 writes to the database and 26 assignment events to the bus rather than making one request each.",
+      "confidence": "med",
       "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "dispatch-model",
+      "statement": "HONESTY CAVEAT, same class as the streaming one below: assignment is modelled here as a request service because that is the only shape this engine has. Real dispatch is a periodic combinatorial solve whose cost tracks REGION COUNT and QUEUE DEPTH, not arrival rate \u2014 so the lever a reader reaches for on this component should be the solve cadence, the zone size and how long assignment is deliberately delayed to batch, NOT the instance count. Delay is a feature, not a fault: the same DoorDash paper's switchback test measured batching at +0.495 percentage points (p<0.001) all-day and +0.600 pp (p=0.010) at dinner. Treat this component's utilisation as 'are there enough solver workers to finish every zone within one cadence', and nothing more.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "dispatch-solve-time",
+      "statement": "~2 s per zone solve is an ASSUMPTION and the weakest number in this file. NO public per-solve time exists for any production assignment optimiser, because real ones are not sized in requests per second at all. The previous version's 350 assignments/s per instance at 40 ms is the one figure here that a primary source actively contradicts, and it was what made dispatch the named bottleneck.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "dispatch-cost",
+      "statement": "Dispatch is the largest compute line in this design while being a rounding error in request count (2 solves/s out of 14,822). That is the point: the optimiser is bought in worker-hours to hold a cadence, not in capacity to absorb traffic.",
+      "confidence": "med",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -441,17 +497,31 @@
     },
     {
       "subject": "search-headroom",
-      "statement": "Discovery is held near 62% utilisation rather than the 85% ceiling: at 85% the same 25 ms query would sit ~167 ms in queue, and search latency is what customers experience as the app being slow.",
+      "statement": "Discovery is deliberately left with headroom instead of being sized to the 85% ceiling: at the ceiling the same 25 ms query would spend several times its own service time waiting in queue, and search latency is what customers experience as the app being slow.",
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "db",
-      "statement": "Single PostgreSQL primary for orders and reference data \u2014 a single point of failure. Menus and courier positions are cached, so it only sees ~2,200 rps of the 15,000.",
+      "statement": "Single PostgreSQL primary for orders and reference data \u2014 a single point of failure. Menus and courier positions are cached, so it sees only a small fraction of total request volume: courier pings never reach it at all, and the 9,360 polls/s reach it only on a 5% cache-miss path.",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "bottleneck-naming",
+      "statement": "Before this correction the engine named the dispatch engine over the tracking tier by a margin far smaller than the uncertainty on either component's per_instance_rps \u2014 both of which are uncited guesses, because no operator publishes app-tier capacity figures. A named bottleneck is only worth acting on when it leads by more than that error bar; the engine reports its own margin and lists joint contenders, so read that line before spending money on the component it names.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "capacity-provenance",
+      "statement": "The per_instance_rps and base_latency_ms values for gw, track, search, order and dispatch are ASSUMPTIONS. Only the Redis figure has outside support \u2014 Lyft's RedisConf17 deck (Daniel Hochman) reports 10-15M QPS across '50 clusters with a total of 750 instances', roughly 15-20k rps per instance, and the geo-index pattern modelled here is literally theirs ('pipeline.zset(geohash, user_id, now_seconds())' with a zremrangebyscore expiry). Every component in this file keeps provenance ASSUMPTION for exactly that reason: a priced component is not a measured one.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

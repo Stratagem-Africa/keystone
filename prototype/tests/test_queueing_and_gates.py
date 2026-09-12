@@ -343,7 +343,10 @@ class BottleneckIsACandidateNotAVerdictTest(unittest.TestCase):
 
     def test_a_tie_reports_every_contender_not_a_winner(self):
         from keystone.blueprint_library import library
-        entry = next(e for e in library() if e.key == "distributed_consensus")
+        entry = next(e for e in library() if e.key == "mcp_starter")
+        # distributed_consensus was the exact-tie fixture until the round-2 reality-check fix gave
+        # it a real leader (margin 18.28). mcp_starter is the remaining exact tie. Repoint rather
+        # than loosen: if a future fix cures this one too, that is the whole point of the exercise.
         r = simulate(entry.build())
         self.assertLess(r.bottleneck_margin_pts, 0.001, "this design is an exact tie")
         self.assertGreater(len(r.bottleneck_contenders), 1,
@@ -358,12 +361,12 @@ class BottleneckIsACandidateNotAVerdictTest(unittest.TestCase):
         self.assertEqual(len(r.bottleneck_contenders), 1)
 
     def test_the_caveat_says_which_case_it_is(self):
-        # google_maps was the near-tie fixture here (2.7 pts, 4 contenders) until the reality-check
-        # fixes cured it — it now leads by 6.43 pts with a single contender, which is the outcome
-        # this whole exercise was for. `kv_store` is the current tightest non-tie. If a future fix
-        # cures that too, repoint it again rather than loosening the assertion.
+        # This fixture has now been cured TWICE by reality-check fixes: google_maps (2.7 pts, 4
+        # contenders) -> kv_store -> iot_platform, the current tightest non-tie. Each repoint is a
+        # blueprint that stopped presenting a coin-flip as a determination, so repoint again rather
+        # than ever loosening the assertion.
         from keystone.blueprint_library import library
-        close = simulate(next(e for e in library() if e.key == "kv_store").build())
+        close = simulate(next(e for e in library() if e.key == "iot_platform").build())
         clear = simulate(next(e for e in library() if e.key == "ride_sharing").build())
         self.assertIn("CANDIDATE, NOT A DETERMINATION", " ".join(close.caveats))
         self.assertNotIn("CANDIDATE, NOT A DETERMINATION", " ".join(clear.caveats))

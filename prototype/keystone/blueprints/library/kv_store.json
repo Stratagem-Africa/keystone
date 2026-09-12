@@ -3,7 +3,7 @@
   "name": "Key-Value Store",
   "workload": {
     "system_rps": 250000,
-    "description": "250k rps peak against a partitioned, replicated KV store: 80% gets behind a row cache, 18% puts replicated to two followers, plus scans and snapshot backup"
+    "description": "250k rps peak against a partitioned, replicated KV store: 80% gets served behind a row cache with a QUORUM read fan-out to two replicas on a miss, 18% puts replicated to two followers (RF=3), plus multi-partition scans and snapshot backup/restore"
   },
   "components": [
     {
@@ -96,9 +96,9 @@
     {
       "id": "primary",
       "kind": "sql_db",
-      "name": "Partition leaders (write path, 8 shards)",
+      "name": "Partition leaders (write path, 16 shards)",
       "per_instance_rps": 8000,
-      "instances": 8,
+      "instances": 16,
       "base_latency_ms": 5.0,
       "monthly_cost_per_instance": 16425,
       "egress_gb_per_month": 0,
@@ -133,7 +133,7 @@
       "kind": "replica",
       "name": "Follower replicas (quorum reads)",
       "per_instance_rps": 8000,
-      "instances": 26,
+      "instances": 32,
       "base_latency_ms": 5.0,
       "monthly_cost_per_instance": 12994,
       "egress_gb_per_month": 0,
@@ -161,41 +161,6 @@
       },
       "match_context": {
         "instance_class": "db.m6i.large"
-      }
-    },
-    {
-      "id": "q",
-      "kind": "queue",
-      "name": "Replication log / hinted handoff + CDC",
-      "per_instance_rps": 30000,
-      "instances": 2,
-      "base_latency_ms": 2.0,
-      "monthly_cost_per_instance": 15330,
-      "egress_gb_per_month": 0,
-      "storage_gb": 0,
-      "requests_per_month": 0,
-      "llm_input_tokens_per_month": 0,
-      "llm_output_tokens_per_month": 0,
-      "provenance": "ASSUMPTION",
-      "groundings": {
-        "monthly_cost_per_instance": {
-          "value": 15330.0,
-          "unit": "usd_minor_per_month",
-          "confidence_low": 15330.0,
-          "confidence_high": 15330.0,
-          "provenance": "GROUNDED",
-          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
-          "citations": [
-            {
-              "source": "AWS first-party pricing",
-              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
-              "note": "$0.21/broker-hour x 730 = 15330c/month."
-            }
-          ]
-        }
-      },
-      "match_context": {
-        "instance_class": "kafka.m5.large"
       }
     },
     {
@@ -235,7 +200,7 @@
         },
         {
           "component_id": "replica",
-          "visit_prob": 0.25
+          "visit_prob": 0.5
         }
       ]
     },
@@ -253,10 +218,6 @@
         },
         {
           "component_id": "primary",
-          "visit_prob": 1.0
-        },
-        {
-          "component_id": "q",
           "visit_prob": 1.0
         },
         {
@@ -312,9 +273,9 @@
     },
     {
       "subject": "replication",
-      "statement": "Replication factor 3. A put is modelled as one leader write plus TWO follower writes (replica visit_prob 2.0), which is why the follower tier carries more load than the leaders. A scan touches ~4 partitions (visit_prob 4.0).",
+      "statement": "Replication factor 3, and the fan-out is now modelled on BOTH paths. WRITE: one leader write plus TWO follower writes (replica visit_prob 2.0) \u2014 Cassandra's architecture doc: \"Write operations are always sent to all replicas, regardless of consistency level\". READ: a cache miss is fanned out to the TWO replicas a QUORUM at RF=3 requires, so the get hop is 25% miss x 2 replicas = replica visit_prob 0.5 \u2014 Cassandra: \"For read operations, the coordinator generally only issues read commands to enough replicas to satisfy the consistency level\". This hop was previously 0.25, i.e. ONE replica (CL=ONE), on a tier named \"quorum reads\": the name and the number disagreed and the read work was understated 2x. Dynamo (SOSP'07) is heavier still \u2014 \"for a get() request, the coordinator requests all existing versions of data for that key from the N highest-ranked reachable nodes in the preference list for that key, and then waits for R responses\" \u2014 which is N=3, i.e. visit_prob 0.75 at the same hit rate. We model the CONSERVATIVE Cassandra QUORUM figure, so the read tier here is if anything still under-loaded relative to Dynamo's (3,2,2) default. A scan touches ~4 partitions (visit_prob 4.0). Sources: cassandra.apache.org/doc/stable/cassandra/architecture/dynamo.html; allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
@@ -326,17 +287,52 @@
     },
     {
       "subject": "cache",
-      "statement": "75% row-cache hit rate on gets (replica visit_prob 0.25). Cache is 3 nodes at ~100k ops/s; losing the cache tier puts 200k rps straight onto the replicas, which are sized for 208k \u2014 that is the cold-cache scenario worth running.",
+      "statement": "75% row-cache hit rate on gets \u2014 an ASSUMPTION, not a measurement; no benchmark is cited for it. It is LOAD-BEARING rather than headroom: the cache absorbs three quarters of the read fan-out before it reaches the replicas, so the cold-cache case is the what-if worth running, not a footnote \u2014 set the get hop's replica visit_prob to the full quorum fan-out (2.0, i.e. a 0% hit rate times two replicas) and re-run the engine for the number. DynamoDB's ATC'22 paper published the warning from operating exactly this shape: \"Since the configuration information about partition replicas rarely changes, the cache hit rate was approximately 99.75 percent. The downside is that caching introduces bimodal behavior. In the case of a cold start where request routers have empty caches, every DynamoDB request would result in a metadata lookup, and so the service had to scale to serve requests at the same rate as DynamoDB.\" Two honest limits on that analogy: theirs was a METADATA cache on the request routers, not a row cache; and a shared centralised row cache in front of a partitioned store is not native to either system \u2014 DAX is an optional bolt-on and Cassandra's row cache is off by default. Cache is 3 nodes at ~100k ops/s each. Source: usenix.org/system/files/atc22-elhemali.pdf.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "sharding",
-      "statement": "8 leader shards at ~8k writes/s each. The engine treats a shard set as ONE pooled component, so it assumes a PERFECTLY EVEN key distribution. A hot key or a hot partition \u2014 the most common real failure of a KV store \u2014 is invisible in this model.",
+      "statement": "16 leader shards at ~8k ops/s each, and the follower count is DERIVED from the RF=3 stated above rather than picked: 16 partitions x 3 replicas = 48 node-roles = 16 leaders + 32 followers. The previous 8 leaders / 26 followers is a ratio no replication factor produces \u2014 RF=3 over 8 shards is 16 followers, not 26, and nothing in the file explained the extra. 16 is the smallest RF-consistent shard count at which the CORRECTED quorum read fan-out still clears the engine's safe-utilisation gate; the write path alone would not have needed it. That is the lesson: you grow a Dynamo-lineage store by adding partitions and nodes (which adds leader AND follower capacity together at the fixed RF ratio), not by bolting on read replicas independently \u2014 so the READ path sets the node count and the leader tier ends up well below its own write ceiling. The engine treats a shard set as ONE pooled component, so it assumes a PERFECTLY EVEN key distribution. A hot key or a hot partition \u2014 the most common real failure of a KV store \u2014 is invisible in this model.",
       "confidence": "high",
       "source": "user",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "replication_log",
+      "statement": "There is NO shared replication-log tier on the put path, and the 2-node Kafka-style \"Replication log / hinted handoff + CDC\" component this blueprint used to carry has been REMOVED. It was the engine's named bottleneck, so a reader was being sent to shard a message bus that the systems being taught deliberately do not have. Three primary sources, three different mechanisms, none of them a central queue: Cassandra \u2014 \"If a hint is stored, the coordinator will later attempt to replay the hint and deliver the mutation to the replicas\" (coordinator-local); Dynamo SOSP'07 \u2014 \"Nodes that receive hinted replicas will keep them in a separate local database that is scanned periodically\" (node-local), with the coordinator replicating \"these keys at the N-1 clockwise successor nodes\"; DynamoDB ATC'22 \u2014 \"Upon receiving a write request, the leader of the replication group for the key being written generates a write-ahead log record and sends it to its peer (replicas)\", with log replicas that \"do not store key-value data\" living inside the replication group. The commitlog and hinted-handoff work therefore sits INSIDE the per-node rate of the leader and follower tiers. Consequence to be honest about: it is not separately costed or separately capacity-checked here, which makes those per-node rates slightly optimistic. Sources: cassandra.apache.org/doc/stable/cassandra/architecture/dynamo.html; allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf; usenix.org/system/files/atc22-elhemali.pdf.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "change_data_capture",
+      "statement": "NOT MODELLED: the downstream change-data-capture / streams bus (DynamoDB Streams, Cassandra CDC). It is real, and it does have to keep up with the write rate \u2014 but it is ASYNCHRONOUS and sits OFF the put critical path, and this engine has no notion of an async consumer. Putting it back on the flow would add its service time to every put and let it be named the bottleneck, which is precisely the defect this revision removes. Consequence: neither its cost nor its replication lag appears in the figures below, so the bill is a floor and the \"how stale can a consumer be\" question is unanswered here. Fix: model the CDC pipeline as its own design, fed by this one's computed write rate.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "per_shard_rate",
+      "statement": "8,000 ops/s per shard node is an ASSUMPTION for a self-hosted Cassandra/Scylla-class node. No benchmark is cited for it in this file and none should be inferred. The nearest PUBLISHED figure is a different thing and is worth putting beside it so the comparison informs rather than alarms: AWS documents that for DynamoDB \"throttling will occur if a single partition receives more than 3000 read operation or more than 1000 write operations\", and that adaptive capacity can deliver \"up to the partition maximum of 3,000 RCUs and 1,000 WCUs\" to one key. That is ADMISSION CONTROL on a multi-tenant managed service \u2014 a quota, not a hardware limit \u2014 so it neither confirms nor refutes 8k on your own node. But if you are sizing on DynamoDB rather than self-hosting, that quota, not this 8k, is your per-partition ceiling, and the node counts here would have to be re-derived from it. Source: docs.aws.amazon.com/amazondynamodb/latest/developerguide/burst-adaptive-capacity.html.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "node_model",
+      "statement": "GAP in the shape, not the arithmetic: leaders and followers are modelled here as two SEPARATE pools on two different instance classes. In Cassandra and in Dynamo every node is identical and hosts a mix of leader/coordinator and follower partitions, so the real failure domain and the real cost unit is \"a node\", not \"a leader tier\" and \"a follower tier\". DynamoDB is the partial exception \u2014 it does elect a leader per replication group, and it does run log replicas that \"do not store key-value data\" \u2014 but even there the roles move between machines on failure. Read the two tiers as one fleet of 48 node-roles split by the work each does, and do not infer that you should buy two different instance families.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "bottleneck_margin",
+      "statement": "READ THE CONTENDER LIST, NOT JUST THE HEADLINE. Before this revision five tiers of this design sat within a few percentage points of one another and the engine named one of them on a fraction of a point \u2014 a coin flip presented as a determination, and it named the invented queue tier at that. Correcting the read fan-out and deriving the node counts from RF=3 gives the follower tier a genuine lead, but that lead is still small next to the uncertainty in the two inputs that produce it: the 75% cache hit rate and the 8k ops/s per node are both assumptions, and either moving by a few percent re-orders the top of the table. Under key skew \u2014 which this pooled-component model cannot see at all \u2014 the coordinator or the leader tier can bind first. Treat the named bottleneck as the leading candidate and re-run with your own hit rate and node rate before you buy hardware.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],
@@ -352,7 +348,7 @@
   "_library": {
     "category": "infrastructure",
     "difficulty": "advanced",
-    "summary": "Partitioned, replicated key-value store with a coordinator tier, row cache, and replication-factor-3 fan-out on writes.",
+    "summary": "Partitioned, replicated key-value store with a coordinator tier, a row cache, and replication-factor-3 fan-out on writes AND on quorum reads; node counts derived from RF.",
     "keywords": [
       "key-value store",
       "key value store",

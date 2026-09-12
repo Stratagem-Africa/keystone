@@ -3,7 +3,7 @@
   "name": "Google Docs (Collaborative)",
   "workload": {
     "system_rps": 30000,
-    "description": "88% live editing and cursor traffic over WebSocket; 12% document open, save and listing"
+    "description": "56% edit ops and 40% presence heartbeats over WebSocket; 4% document open, listing and export over HTTP"
   },
   "components": [
     {
@@ -78,9 +78,9 @@
     {
       "id": "collab",
       "kind": "app_server",
-      "name": "Editing session servers (OT/CRDT transform + broadcast)",
-      "per_instance_rps": 2500,
-      "instances": 14,
+      "name": "Editing session servers (sticky per document: sockets + in-memory doc state)",
+      "per_instance_rps": 1920,
+      "instances": 20,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -111,9 +111,44 @@
       }
     },
     {
+      "id": "docreg",
+      "kind": "sql_db",
+      "name": "Document ownership registry (lease: which instance owns this document)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
       "id": "cache",
       "kind": "cache",
-      "name": "Redis cluster (presence, cursors, hot document state)",
+      "name": "Redis cluster (presence, cursors, session routing)",
       "per_instance_rps": 100000,
       "instances": 2,
       "base_latency_ms": 0.4,
@@ -181,12 +216,47 @@
       }
     },
     {
+      "id": "journal",
+      "kind": "queue",
+      "name": "Durable edit journal (append-only, batched writes)",
+      "per_instance_rps": 8000,
+      "instances": 2,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
       "id": "store",
       "kind": "object_store",
       "name": "Object store (document snapshots, revision log)",
       "per_instance_rps": 30000,
       "instances": 1,
-      "base_latency_ms": 30.0,
+      "base_latency_ms": 150.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -236,7 +306,7 @@
   "flows": [
     {
       "name": "edit-op",
-      "share": 0.82,
+      "share": 0.56,
       "path": [
         {
           "component_id": "lb",
@@ -247,8 +317,8 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "cache",
-          "visit_prob": 1.0
+          "component_id": "journal",
+          "visit_prob": 0.2
         },
         {
           "component_id": "q",
@@ -262,7 +332,7 @@
     },
     {
       "name": "presence-cursor",
-      "share": 0.06,
+      "share": 0.4,
       "path": [
         {
           "component_id": "lb",
@@ -280,7 +350,7 @@
     },
     {
       "name": "open-doc",
-      "share": 0.06,
+      "share": 0.01,
       "path": [
         {
           "component_id": "cdn",
@@ -292,6 +362,10 @@
         },
         {
           "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "docreg",
           "visit_prob": 1.0
         },
         {
@@ -310,7 +384,7 @@
     },
     {
       "name": "list-and-permissions",
-      "share": 0.04,
+      "share": 0.02,
       "path": [
         {
           "component_id": "lb",
@@ -332,7 +406,7 @@
     },
     {
       "name": "save-export",
-      "share": 0.02,
+      "share": 0.01,
       "path": [
         {
           "component_id": "lb",
@@ -356,28 +430,105 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "30,000 ops/s at peak. An op is a single character-level edit or cursor move, so the rate is far higher than the page-view rate: ~88% of traffic never touches the HTTP API at all.",
+      "statement": "30,000 messages/s at peak, and the MIX is now DERIVED rather than asserted. Start from 300 document opens/s (1% of traffic). At the assumed 10-minute average editing session, Little's law gives 300 x 600 = 180,000 concurrent open sessions. Each session sends one presence heartbeat every 15 s, which is 12,000 presence messages/s (40% of traffic). The remaining edit traffic, 16,800 ops/s (56%), works out at ~0.093 edit ops/s per open session - about one op every 11 seconds averaged over every open document. A single actively-typing user emits several ops/s, so this mix implies only a few per cent of open sessions are typing at any instant; if your population types more than that, raise the edit share and re-run. The previous 82/6/6/4/2 mix was internally inconsistent: 1,800 opens/s against 1,800 presence/s implies a 15-second average document session, which is not a real editing session.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "collab",
-      "statement": "Editing sessions are sticky per document; 2,500 ops/s per instance covers the transform (operational transform / CRDT merge) plus broadcast to the other editors on that document. Instance count therefore tracks CONCURRENT DOCUMENTS, not raw op rate.",
+      "subject": "session-duration",
+      "statement": "The 10-minute average editing session is an ASSUMPTION with no published counterpart - Google publishes no session-length figure for Docs, and I found none in any primary source. It is stated as a first-class input because it is what sets concurrency: halve it and the concurrent-session count, and with it the size of the editing tier, halves. Substitute your own measurement before trusting any sizing here.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "presence-cursor",
+      "statement": "The 15-second presence interval is a PROXY, not a Google figure. y-protocols' awareness implementation (github.com/yjs/y-protocols, src/awareness.js) sets outdatedTimeout = 30000 ms and renews at half that, so 15 s is the documented renewal period of a widely used awareness protocol. Google Docs does not use Yjs, so this is a reasoned stand-in for an unpublished number, labelled as such. If 'presence' in your system means cursor-movement messages rather than a liveness heartbeat, that traffic is typing-driven and has no floor at all - fold it into the edit flow instead of this one.",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "collaborators-per-document",
+      "statement": "Assumed ~1.5 concurrent collaborators per open document; the plausible range is 1.0 to 5.0, because most documents have a single editor at a time and a minority have many. At 180,000 concurrent sessions that is ~120,000 resident documents. This factor is what converts sessions into documents, and after session length it is the most sensitive input in the file: every accepted edit is broadcast to the OTHER editors of the same document, so doubling it roughly doubles the outbound message rate an instance must serialise while barely changing the inbound op rate. Discord's 'How Discord Scaled Elixir to 5,000,000 Concurrent Users' (2017) is the reference for why fan-out, not inbound rate, is what breaks this class of server.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "collab",
+      "statement": "NO VENDOR PUBLISHES AN OPS/SECOND FIGURE FOR A COLLABORATIVE EDITING SERVER. I searched the primary sources and found none. The old 2,500 ops/s was unanchored, and it was also the wrong KIND of number: this blueprint's own text said instance count tracks concurrent documents, while the engine was reporting utilisation of an op-rate ceiling - so a reader was being invited to optimise ops when the lever is documents. The capacity is now derived from the resource that actually binds. An instance is assumed to hold 12,000 concurrent WebSocket sessions - sockets and per-session buffers, plus the in-memory state of the ~8,000 documents those sessions spread across at ~1.5 collaborators each, roughly 2.8 GiB of the 4 GiB on a c7g.large. Each session drives ~0.16 messages/s into this tier (0.067 presence + 0.093 edit), so 12,000 x 0.16 = 1,920 ops/s per instance. The op-rate ceiling the engine reports is therefore a RESTATEMENT of the session ceiling, not an independent claim: to get headroom, add memory or shard documents across more instances - a faster transform will not move it. Figma's own multiplayer win was '>10x faster serialization' after its Rust rewrite ('Rust in Production at Figma', 2 May 2018), which is the evidence that this tier's cost is serialisation and socket handling, not the merge algorithm.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "collab",
+      "statement": "THE ENGINE CANNOT MODEL WHAT ACTUALLY BINDS THIS TIER. The real ceilings are in-memory bytes per open document, open socket count per instance, and outbound broadcast bandwidth. The engine models requests per second only, so all three are folded into the single derived rps figure above and cannot be varied independently. Read the utilisation here as 'fraction of the session ceiling consumed', and size a real fleet from measured memory and socket counts, not from this number.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "collab",
+      "statement": "20 instances, not the 15 the mean load alone would need, because document ownership is STICKY: 'each document lives exclusively on one specific worker' (Figma, 'Rust in Production at Figma', 2 May 2018) and 'multiplayer holds the state of the file in-memory', so a hot document cannot be split across two instances. Load therefore does not spread evenly, and the fleet carries deliberate slack for that imbalance and for rolling restarts, which move every session on an instance at once. The slack is a stated sizing decision, not a capacity claim.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "docreg",
+      "statement": "NEW COMPONENT, and the hard part of this category, which the previous version simply did not have. Sticky routing is not a load-balancer property - something must decide and record which instance owns a document, and refuse a second owner. Figma added exactly this: a '(lock UUID, file key)' entry so that 'only one Multiplayer instance is writing to the journal at a time' ('Making Multiplayer More Reliable'). Without it two instances can accept edits for the same document and the durable stream forks - split brain, and silent data loss. Every open-doc request takes a lease here, so it sits on the open path at x1.0. Its modelled capacity (8,000 rps on a single db.m6i.large, the same class and cited price as the metadata database) is far above the 300 opens/s it sees, and that is the point: this component is a CORRECTNESS constraint, not a throughput one. Running it as a single primary makes it a single point of failure by design - the split-brain guard cannot itself be split - which is a real trade to make consciously.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "docreg",
+      "statement": "LEASE RENEWAL IS UNMODELLED. A lease must be renewed or it expires and another instance may claim the document. Renewal traffic is background, not user-request-driven, so it appears on no flow here and contributes nothing to the utilisation figure - which makes this registry look quieter than it is. It is not a small amount of traffic: at ~120,000 resident documents, a naive per-document renewal every 10 s would be on the order of 12,000 writes/s against a tier whose declared capacity is 8,000 rps. A real design batches renewals per owning instance - one message covering every document that instance holds. Model that explicitly before sizing this tier.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "journal",
+      "statement": "NEW COMPONENT: a durable append-only journal between the editing tier and storage, carrying the edit stream itself rather than only a periodic snapshot. The BATCH RATIO is the input that matters and it is declared here as its own assumption: one journal append per 5 edit ops (visit_prob 0.2), which is the 'batching allows less frequent journal writes' design Figma describes. No vendor publishes a batch ratio, so 5:1 is an ASSUMPTION, and it is the most sensitive number in the file - set this visit probability to 1.0 (no batching) and re-run, and the journal, not the editing tier, becomes the constraint at this load. It is offered as a live CONTENDER, not as a settled answer. The 5 ms append latency is likewise an assumption: an acknowledged write replicated to a second broker. Cost and class are copied from the change-log queue in this same file (kafka.t3.small).",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
       "subject": "store",
-      "statement": "Edits are applied in memory and flushed as a compacted snapshot roughly every 100 ops, so the object store sees ~1% of the edit rate. The change log fans out on ~5% of ops (batched).",
+      "statement": "Edits are applied in memory and flushed as a compacted whole-document snapshot roughly every 100 ops, so the object store sees ~1% of the edit rate. The change log fans out on ~5% of ops (batched). THE CONSEQUENCE, which the previous version disclosed the cadence of but not the effect of: snapshot-only durability means a crash loses everything written since the last snapshot. Figma shipped exactly this design and then replaced it in October 2022, reporting that it could lose 'up to 60 seconds of work on the server-side if multiplayer crashes' ('Making Multiplayer More Reliable'). That bounded data loss is why the journal above now exists; the snapshot stays alongside it, because Figma runs journal and checkpoint together rather than choosing between them.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "base_latency_ms raised from 30 to 150. AWS's own S3 performance guidance states that applications can expect 'consistent small object latencies ... of roughly 100-200 milliseconds' (docs.aws.amazon.com, Optimizing Amazon S3 performance), so 30 ms was 3-6x optimistic against the vendor's published figure. 150 ms is the midpoint of that published range and applies to a SMALL object. A whole-file checkpoint is not a small object: Figma reports checkpoint writes taking '~4 seconds or more' for the worst 5% of files, so treat the open-doc and save-export latencies computed here as a floor for a small document, not as a p95 for a large one.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "The 30,000 rps declared for the object store is not a single-prefix figure. S3 scales to 3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second PER PARTITIONED PREFIX (AWS, Optimizing Amazon S3 performance), so this capacity implies roughly six to ten prefixes and a snapshot key layout that spreads writes across them. Nothing in this blueprint declares that layout. It does not bind at today's modelled load, but it is a design obligation someone has to discharge, not a free number.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cache",
+      "statement": "Redis is NO LONGER ON THE EDIT PATH. The previous version routed 100% of edit ops through Redis for 'hot document state'. No primary source supports that: Google's 2010 write-up keeps 'the current state of the document as of the last processed change' on the server, and Figma keeps it in the multiplayer process's own memory. It also contradicted this blueprint's own stickiness assumption - if every editor of a document is already pinned to one instance, a shared cache has nothing to do on the per-op path. Redis now holds presence, cursors and session routing (which instance currently owns which document, read on connect), which is what it is still on the presence, open-doc and listing flows for.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "db",
-      "statement": "PostgreSQL holds metadata, ACLs and the revision index only \u2014 never the character stream. That is why a single primary at ~8,000 rps is enough at 30,000 edit ops/s.",
+      "statement": "PostgreSQL holds metadata, ACLs and the revision index only \u2014 never the character stream. That is why a single primary at ~8,000 rps is enough at 30,000 messages/s.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
@@ -395,6 +546,13 @@
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "BROADCAST BANDWIDTH IS NOT IN THE BILL. Every accepted edit is fanned out to the other collaborators on that document, so the editing tier's outbound byte volume is a multiple of its inbound volume, set by the collaborators-per-document factor above. None of it is declared as egress on any component here. In a real deployment the cross-AZ and internet egress of a fan-out tier at this message rate is a material line, and it is absent from the total.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

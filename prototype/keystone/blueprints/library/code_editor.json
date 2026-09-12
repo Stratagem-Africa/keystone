@@ -3,7 +3,7 @@
   "name": "Online Code Editor",
   "workload": {
     "system_rps": 20000,
-    "description": "80% collaborative edit ops over WebSocket; the rest project reads, saves and code runs"
+    "description": "~93% collaborative edit ops over WebSocket, ~6% presence/cursor, under 1% HTTP (project reads, saves) and a small fraction of a percent code runs \u2014 see the `workload` assumption for the derivation"
   },
   "components": [
     {
@@ -45,7 +45,7 @@
       "kind": "app_server",
       "name": "Workspace API (projects, files, auth)",
       "per_instance_rps": 1800,
-      "instances": 3,
+      "instances": 2,
       "base_latency_ms": 8.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
@@ -80,7 +80,7 @@
       "kind": "app_server",
       "name": "Collaboration session servers (CRDT merge + fan-out)",
       "per_instance_rps": 2200,
-      "instances": 10,
+      "instances": 14,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 5293,
       "egress_gb_per_month": 0,
@@ -117,6 +117,41 @@
       "per_instance_rps": 100000,
       "instances": 2,
       "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "ownership",
+      "kind": "cache",
+      "name": "Workspace ownership registry (one container lease per workspace)",
+      "per_instance_rps": 30000,
+      "instances": 2,
+      "base_latency_ms": 1.0,
       "monthly_cost_per_instance": 15038,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -186,7 +221,7 @@
       "name": "Object store (file blobs, workspace snapshots)",
       "per_instance_rps": 50000,
       "instances": 1,
-      "base_latency_ms": 25.0,
+      "base_latency_ms": 150.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -198,13 +233,13 @@
       "match_context": {}
     },
     {
-      "id": "q",
-      "kind": "queue",
-      "name": "Kafka (run/build job dispatch)",
-      "per_instance_rps": 8000,
+      "id": "sched",
+      "kind": "app_server",
+      "name": "Placement scheduler (stateful router: workspace -> runner host)",
+      "per_instance_rps": 5000,
       "instances": 2,
-      "base_latency_ms": 2.0,
-      "monthly_cost_per_instance": 3329,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
       "requests_per_month": 0,
@@ -213,32 +248,32 @@
       "provenance": "ASSUMPTION",
       "groundings": {
         "monthly_cost_per_instance": {
-          "value": 3329.0,
+          "value": 7008.0,
           "unit": "usd_minor_per_month",
-          "confidence_low": 3329.0,
-          "confidence_high": 3329.0,
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
           "provenance": "GROUNDED",
-          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
           "citations": [
             {
               "source": "AWS first-party pricing",
-              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
-              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
             }
           ]
         }
       },
       "match_context": {
-        "instance_class": "kafka.t3.small"
+        "instance_class": "m6i.large"
       }
     },
     {
       "id": "runner",
       "kind": "app_server",
-      "name": "Sandboxed execution workers (container runners)",
-      "per_instance_rps": 25,
-      "instances": 28,
-      "base_latency_ms": 120.0,
+      "name": "Sandboxed execution workers (3 concurrent sandboxes/host)",
+      "per_instance_rps": 1.5,
+      "instances": 49,
+      "base_latency_ms": 2000.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -271,7 +306,7 @@
   "flows": [
     {
       "name": "edit-sync",
-      "share": 0.8,
+      "share": 0.931,
       "path": [
         {
           "component_id": "lb",
@@ -282,10 +317,6 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "cache",
-          "visit_prob": 1.0
-        },
-        {
           "component_id": "store",
           "visit_prob": 0.02
         }
@@ -293,7 +324,7 @@
     },
     {
       "name": "presence-heartbeat",
-      "share": 0.04,
+      "share": 0.06,
       "path": [
         {
           "component_id": "lb",
@@ -311,7 +342,7 @@
     },
     {
       "name": "open-workspace",
-      "share": 0.06,
+      "share": 0.001,
       "path": [
         {
           "component_id": "cdn",
@@ -323,6 +354,10 @@
         },
         {
           "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ownership",
           "visit_prob": 1.0
         },
         {
@@ -341,7 +376,7 @@
     },
     {
       "name": "save-file",
-      "share": 0.08,
+      "share": 0.005,
       "path": [
         {
           "component_id": "lb",
@@ -363,7 +398,7 @@
     },
     {
       "name": "run-code",
-      "share": 0.02,
+      "share": 0.003,
       "path": [
         {
           "component_id": "lb",
@@ -374,7 +409,11 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "q",
+          "component_id": "ownership",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "sched",
           "visit_prob": 1.0
         },
         {
@@ -391,23 +430,93 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "20,000 ops/s at peak. An 'op' is one editor event, not one page view: ~80% are collaborative edit/keystroke messages on an open WebSocket, 4% presence heartbeats, and only 16% are HTTP requests (open, save, run).",
+      "statement": "20,000 ops/s at peak. An 'op' is one editor event, not one page view: ~93% are collaborative edit/keystroke messages on an open WebSocket, 6% presence heartbeats, and under 1% are HTTP requests (open, save, run). The HTTP share was cut ~16x from the previous revision of this file, which is why the Workspace API and Postgres now sit far from the constraint - see the 'workload-mix' entry for the session arithmetic that forced the change.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "workload-mix",
+      "statement": "The mix is derived from a stated session duration rather than picked. GitHub Codespaces documents a default idle timeout of 30 minutes ('By default this period is 30 minutes') and Gitpod/Ona documents the same default ('workspaces stop following 30 minutes without user input'), so one open workspace is assumed to last ~1,800 s. The open-workspace share of 0.001 therefore implies roughly 36,000 workspaces open at once, which sits inside Replit's published 'tens of thousands of Repls at any one time'. The previous 6% open share implied ~100x that number and failed the same check, which is what made this file's proportions wrong rather than merely imprecise. Presence at 0.06 is those ~36,000 sessions renewing awareness about every 30 s - a PROXY taken from the Yjs y-protocols awareness default (outdatedTimeout 30,000 ms), not a published code-editor figure. save-file at 0.005 assumes a quarter of open workspaces are actively edited and each lands one durable write per ~90 s; no vendor publishes a save rate, so this is engineering judgement and is labelled as such.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "run-share",
+      "statement": "run-code at 0.003 states the editor-events-per-run ratio explicitly, because the verdict for this design now rides on it: ~310 editor events per Run at this mix. Read the other way it is about one Run per open workspace every ten minutes, i.e. ~3 Runs across a 30-minute session - low for someone actively coding, high for the many sessions that are merely idle inside the 30-minute timeout. No vendor publishes a Runs-per-session figure, so no source is claimed for it. It is roughly 7x LOWER than the 400 runs/s the previous revision asserted.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
       "subject": "collab",
-      "statement": "Collaboration servers are sticky per document: every editor on a doc lands on the same instance, so instances scale by DOCUMENT count, not by op rate. 2,200 ops/s per instance covers CRDT merge + fan-out to the other editors on that doc.",
+      "statement": "Collaboration servers are sticky per document: every editor on a doc lands on the same instance, so instances scale by DOCUMENT count, not by op rate. 2,200 ops/s per instance covers CRDT merge + fan-out to the other editors on that doc. NO PUBLIC FIGURE for this tier was found - 2,200 is an uncited guess, and that is the honest label, not 'too low' or 'too high'. The Eg-walker paper (EuroSys '25) does show that the merge ALGORITHM is not the cost (it replays a 652k-event trace in 56.1 ms on one pinned core, against 365 ms for OT and 84.1 ms for Yjs), and Figma independently reports '>10x faster serialization' from the same kind of work - but that paper explicitly does not use a server-based algorithm ('We do not use the server-based Jupiter algorithm or the popular OT library ShareDB') and measures a whole-trace batch merge, so it CANNOT be used to size a server's per-op transform-and-broadcast loop. It is cited here only for what it proves.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edit-sync",
+      "statement": "The edit path no longer visits Redis. The previous revision sent every keystroke through cache at visit_prob 1.0 while also declaring the collab tier sticky per document - the two statements contradict each other, and the Redis hop was a phantom that made the cache tier look busy and the collab tier look cheap. Hot document state lives in the collab process that owns the document; Redis now carries presence and workspace lookup only.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ownership",
+      "statement": "A workspace-ownership registry is modelled explicitly because it is the one invariant every documented operator of this shape enforces. Replit, verbatim: 'We must ensure that there is only a single container per repl at anytime. The container is used to facilitate multiplayer features, so its important that every user in the repl connects to the same container.' It is taken on open (acquire/renew the lease) and on run (resolve which host owns the workspace), NOT per keystroke - the WebSocket is already pinned to the owning session by then. Capacity of 30,000 ops/s per node is an uncited guess for a compare-and-set lease workload on the same Redis node class as the cache tier; no vendor publishes one. This tier is a CORRECTNESS component, not a capacity one - the engine will show it nearly idle, and removing it would not save meaningful load, only the invariant.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "sched",
+      "statement": "The Kafka dispatch hop was removed and replaced by a stateful placement scheduler. Choosing a host for a run is a placement LOOKUP against live host state, not a durable log: Replit routes replit.com/@user/repl through repl-it-web -> Eval -> Controlplane -> Conman, and the AWS Lambda/Firecracker paper describes its equivalent as 'a custom high-volume ... low-latency (<10ms 99.9th percentile latency) stateful router'. The 3 ms service time here is a mean chosen to sit inside that published p99.9 bound - the bound is the citation, the mean is not published. Capacity of 5,000 rps per instance is an uncited guess. Modelling this as a queue at 2.5% utilisation, as the previous revision did, made placement look free.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "runner",
+      "statement": "The sandbox tier is modelled as a CONCURRENCY POOL, not a request rate: 3 concurrent sandboxes per host divided by a 2.0 s run gives the 1.5 runs/s per instance the engine reads, and the 2,000 ms service time is that same run duration. The previous revision asserted 25 runs/s per host at 120 ms, which is the defect this file existed to teach against - a request that occupies a slot for seconds is not the same object as one that returns in milliseconds, and the rps model cannot see the difference unless the duration is stated. Long-running, interactive, or GPU workloads are still NOT modelled and would change this tier by an order of magnitude.",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "runner",
-      "statement": "Code execution dominates the bill: ~25 runs/s per instance (3 concurrent sandboxes at ~120 ms per short run). Long-running or GPU workloads are NOT modelled and would change this tier by an order of magnitude.",
+      "subject": "runner-duration",
+      "statement": "What the 2,000 ms covers, and why a single figure was the defect. The previous 120 ms is approximately the BOOT FLOOR of an empty sandbox and nothing more: Firecracker (Agache et al., NSDI '20) reports a microVM 'boots to application code in less than 125ms', measured before any user code is compiled or executed. The only user-visible figure a real operator of this product publishes is Replit's, and it is far larger: '99th percentile session boot time dropped from ~2 minutes to ~15 seconds', and that is the number AFTER their fix. This design assumes the WARM path - a pre-booted sandbox taken from a pool, dependencies already resolved, a short program compiled and run - and puts 2 s on it. Cold start (pool miss, image pull, dependency install) is NOT in this number; at Replit's published p99 it is seconds to tens of seconds and would dominate. Nobody publishes a warm compile-and-run distribution, so 2 s is engineering judgement bounded from below by Firecracker's 125 ms and from above by Replit's 15 s, not a measurement.",
       "confidence": "low",
       "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "runner-density",
+      "statement": "3 concurrent sandboxes per host is a stated budget, not a copied one. The host is an m6i.large - 2 vCPU, 8 GiB - and the budget per sandbox is ~2 GiB of memory and ~0.6 vCPU, which fits 3 in memory and deliberately oversubscribes CPU by ~1.5x on the assumption that a short run is not pinned at 100% CPU for its whole duration. Firecracker's 'Each worker runs hundreds or thousands of MicroVMs' is deliberately NOT used here: that counts RESIDENT single-tenant slots, most of them idle holding memory, and the paper's own model moves slots through init/idle/busy. It is not a count of concurrently EXECUTING sandboxes, and importing it would replace one error with a larger one.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "runner-sensitivity",
+      "statement": "The verdict this design reaches is conditional on two assumptions above, and both are uncited, so the sensitivity is published rather than buried. (1) DURATION: capacity here is concurrent-slots divided by run duration, so it is inversely proportional to that duration - halve the 2 s and this tier's utilisation halves; double it and the tier saturates. (2) SHARE: utilisation is directly proportional to the runs/s in the 'run-share' entry, which is itself an assumed editor-events-per-run ratio. Re-run the engine after changing either before trusting which tier binds. WHAT IS NOT ROBUST, stated because an earlier version of this note got it wrong: this assumption used to claim the runner binds at ANY duration of a second or more. The engine refutes that on this very file \u2014 holding these instances and this share, the collaboration tier still binds at 0.5s, 1.0s and 1.5s, and the crossover is nearer 1.6s. Which component binds is an ENGINE OUTPUT and does not belong in prose here: change the duration or the share and re-run, rather than trusting a sentence.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "runner-headroom",
+      "statement": "Headroom is the feature on a Run button, and this design does not have much of it - that is deliberate and it is the thing to look at. Because the service time on this tier is SECONDS rather than milliseconds, any queue wait the engine reports for the run-code flow is also measured in seconds, not milliseconds; read the engine's per-flow latency for run-code, and do not take a figure written in prose here. An operator who wants a snappy Run button buys more of this tier (or shortens runs), and pays proportionally - which is why this is the largest compute line in the design. The previous revision claimed deliberate ~55% headroom on this tier while its own numbers put the tier over capacity; that claim is withdrawn.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "shape",
+      "statement": "THE SPLIT TIERS ARE A CONSTRUCTION, NOT AN OBSERVED DESIGN. Neither documented leader in this category separates a collaboration server from a per-run sandbox the way this file does. Replit runs ONE long-lived container per repl that is simultaneously the multiplayer host and the sandbox. StackBlitz removes the server-side runner entirely: 'All code execution happens inside the browser's security sandbox, not on remote VMs or local binaries' (WebContainers, 20 May 2021), and says so explicitly against this category. Both shapes move or delete the tier this design says is the constraint: the one-container shape turns it into a per-SESSION pool sized by concurrent workspaces (far larger than a per-run pool), and the browser shape deletes the tier and its bill outright. Treat the split here as one legible option, not the standard.",
+      "confidence": "high",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -425,18 +534,25 @@
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "runner-headroom",
-      "statement": "The sandbox pool is deliberately held near 55% utilisation, not at the 85% ceiling. Queueing multiplies a user-visible wait: the same 120 ms run would feel like ~800 ms at 85%. Headroom is the feature on a Run button, and it is why the runner tier is the largest line on the bill.",
+      "subject": "store",
+      "statement": "Object-store first-byte latency corrected from 25 ms to 150 ms. AWS's own S3 performance guidance puts a small-object read at 'roughly 100-200 milliseconds'; 25 ms was 4-8x optimistic and made snapshot and file-read paths look free. 150 ms is the midpoint of the published range, not a measurement of any particular bucket.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The monthly figure is COMPUTE only. The CDN, load balancer and object store have no honest per-instance price, and no egress/storage volumes are declared, so their bill is not in the total - a real workspace platform pays real money for blob storage and egress.",
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "cost",
-      "statement": "The monthly figure is COMPUTE only. The CDN, load balancer and object store have no honest per-instance price, and no egress/storage volumes are declared, so their bill is not in the total \u2014 a real workspace platform pays real money for blob storage and egress.",
+      "subject": "cold-start",
+      "statement": "NOT MODELLED: the cold path. Sandbox pool misses, image pulls, dependency installation and the first-open boot of a workspace are absent from every number here - the 2 s run duration is the warm case only. Replit's published p99 session boot of ~15 seconds is the scale of what is missing, and a pool sized only for warm runs will queue badly whenever the warm pool empties. Adding a cold-start fraction with its own duration is the next honest refinement.",
       "confidence": "high",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
+      "source": "benchmark",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

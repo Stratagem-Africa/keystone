@@ -2,8 +2,8 @@
   "spec_version": 1,
   "name": "Multi-Agent Supervisor",
   "workload": {
-    "system_rps": 120.0,
-    "description": "120 runs/s; 3 model calls + 2 specialist subtasks per run; provider quota is the ceiling"
+    "system_rps": 15.0,
+    "description": "15 req/s at peak (about 7 agent runs/s): 10 model calls + 4 specialist subagents per run; the provider's INPUT-TOKEN-per-minute quota is the ceiling, not its request quota"
   },
   "components": [
     {
@@ -14,7 +14,7 @@
       "instances": 2,
       "base_latency_ms": 1.0,
       "monthly_cost_per_instance": 0,
-      "egress_gb_per_month": 586,
+      "egress_gb_per_month": 84,
       "storage_gb": 0,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
@@ -61,16 +61,16 @@
     {
       "id": "llm",
       "kind": "api_gateway",
-      "name": "Model API gateway (provider quota pools)",
-      "per_instance_rps": 67.0,
+      "name": "Model API gateway (provider token-quota pools)",
+      "per_instance_rps": 23.8,
       "instances": 4,
-      "base_latency_ms": 2800.0,
+      "base_latency_ms": 10800.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
       "requests_per_month": 0,
-      "llm_input_tokens_per_month": 941673600000,
-      "llm_output_tokens_per_month": 107619840000,
+      "llm_input_tokens_per_month": 333396000000,
+      "llm_output_tokens_per_month": 38102400000,
       "provenance": "ASSUMPTION",
       "groundings": {},
       "match_context": {}
@@ -114,9 +114,9 @@
       "id": "worker",
       "kind": "app_server",
       "name": "Specialist agent workers (tool-using)",
-      "per_instance_rps": 40.0,
-      "instances": 5,
-      "base_latency_ms": 45.0,
+      "per_instance_rps": 4.8,
+      "instances": 9,
+      "base_latency_ms": 3000.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -219,7 +219,7 @@
   "flows": [
     {
       "name": "run",
-      "share": 0.55,
+      "share": 0.47,
       "path": [
         {
           "component_id": "lb",
@@ -238,27 +238,31 @@
           "visit_prob": 1.0
         },
         {
+          "component_id": "state",
+          "visit_prob": 1.0
+        },
+        {
           "component_id": "q",
-          "visit_prob": 1.0
+          "visit_prob": 4.0
         },
         {
           "component_id": "worker",
-          "visit_prob": 1.0
+          "visit_prob": 4.0
         },
         {
           "component_id": "llm",
-          "visit_prob": 1.0
+          "visit_prob": 8.0
         },
         {
-          "component_id": "worker",
-          "visit_prob": 1.0
-        },
-        {
-          "component_id": "llm",
-          "visit_prob": 1.0
+          "component_id": "cache",
+          "visit_prob": 4.0
         },
         {
           "component_id": "sup",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "llm",
           "visit_prob": 1.0
         },
         {
@@ -268,8 +272,8 @@
       ]
     },
     {
-      "name": "status_poll",
-      "share": 0.35,
+      "name": "progress_stream",
+      "share": 0.37,
       "path": [
         {
           "component_id": "lb",
@@ -291,7 +295,7 @@
     },
     {
       "name": "resume",
-      "share": 0.08,
+      "share": 0.04,
       "path": [
         {
           "component_id": "lb",
@@ -306,11 +310,23 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "q",
+          "component_id": "cache",
           "visit_prob": 1.0
         },
         {
+          "component_id": "q",
+          "visit_prob": 2.0
+        },
+        {
           "component_id": "worker",
+          "visit_prob": 2.0
+        },
+        {
+          "component_id": "llm",
+          "visit_prob": 4.0
+        },
+        {
+          "component_id": "sup",
           "visit_prob": 1.0
         },
         {
@@ -325,7 +341,7 @@
     },
     {
       "name": "tool_callback",
-      "share": 0.02,
+      "share": 0.12,
       "path": [
         {
           "component_id": "lb",
@@ -333,6 +349,10 @@
         },
         {
           "component_id": "sup",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
           "visit_prob": 1.0
         },
         {
@@ -345,56 +365,140 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "120 agent runs/s at peak: 55% new runs, 35% status polls from the UI, 8% resumed runs, 2% async tool callbacks.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "architecture",
-      "statement": "FAN-OUT IS MODELLED AS REPEATED SERIAL VISITS. A run makes 3 model calls (plan, then one per specialist subtask) and dispatches 2 subtasks, written as repeated steps on the run path. The arrival rates this produces are exact; the LATENCY IS AN UPPER BOUND, because the v1 engine sums service time along a path and has no parallel-fan-out primitive. Real parallel subtasks finish closer to max(subtask) than to their sum.",
+      "statement": "15 req/s at peak: 47% new agent runs (about 7 runs/s), 37% progress-stream opens, 4% resumed runs, 12% async tool callbacks. The peak was RESTATED DOWN from the 120 req/s this blueprint used to claim, and the reason is the whole point of the file: correcting the provider quota to its published TOKEN limits (below) and the fan-out to Anthropic's published 3-5 subagents leaves the same four quota pools serving far fewer runs. The load was lowered rather than the capacity inflated - inflating capacity to keep a flattering headline is exactly the error being repaired.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "llm",
-      "statement": "The hosted model provider is modelled as the model API gateway in front of it (v1 has no per-instance price for an external API, so giving the provider its own priced node would invent a number). Capacity is the provisioned provider quota: 4 pools x 4,000 requests/minute, about 268 model calls/s. This is the design's binding constraint - the servers have headroom the provider quota does not.",
+      "statement": "CAPACITY HERE IS A TOKEN LIMIT, NOT A REQUEST LIMIT - this is the correction that matters most. Anthropic's published API rate limits for the Scale tier are 10,000 requests/min, 10,000,000 INPUT tokens/min and 2,000,000 OUTPUT tokens/min, applied per model and per organization (platform.claude.com/docs/en/api/rate-limits). At this design's 7,000 input tokens per call the input-token ceiling binds first and hardest: 10,000,000 / 7,000 = about 1,429 calls/min = 23.8 calls/s per pool, which is what per_instance_rps is set from. The output ceiling would allow 2,000,000 / 800 = 2,500 calls/min and the request ceiling 10,000 calls/min, both far higher. The '4,000 requests/min per pool' this blueprint asserted before measured the WRONG DIMENSION and overstated each pool by roughly 2.8x: it made a token-starved design look request-rich.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "llm",
+      "statement": "FOUR POOLS MEANS FOUR SEPARATE QUOTAS, AND YOU CANNOT MANUFACTURE THEM. The same rate-limit page states 'Organization-wide limits always apply, even if Workspace limits add up to more', so splitting one organization into four workspaces buys no capacity whatsoever. It also states 'Rate limits are applied separately for each model', so four DISTINCT MODELS is a legitimate way to hold four pools - as are four distinct providers or four separately contracted organizations. instances=4 means a pool of those kinds. Modelling workspaces as pools is modelling paper capacity.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "llm",
+      "statement": "PROMPT CACHING IS A CAPACITY LEVER HERE, NOT ONLY A COST ONE. Anthropic documents that cache_read_input_tokens do not count toward the input-tokens-per-minute limit on most models. This design's 7,000-token prompt is mostly a fixed prefix (tool schemas plus a system prompt), which is exactly what caching is for: if about 89% of that prefix were served as cache reads the billable input would fall to roughly 770 tokens per call and one pool would cover on the order of nine times the call rate. The engine has NO cache-read token rate, so this blueprint cannot take the lever - it is named, not modelled, and the capacity above is the UNCACHED figure.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "llm",
-      "statement": "7,000 input and 800 output tokens per agent model call; tool schemas plus accumulated conversation state dominate the prompt. Monthly volume = peak call rate / 4 x 2,592,000 s.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "cost",
-      "statement": "Prompt caching is NOT modelled (the engine has no cache-read token rate), and agent prompts are exactly the case where a cached tool-schema prefix saves the most. The token line is an upper bound.",
+      "statement": "WHAT IT TAKES TO RUN THIS SHAPE ANY FASTER. Four Scale-tier pools at 7,000 input tokens per call cover the call rate modelled here and essentially nothing more. Anything materially above it needs one of: a Custom-tier contract (Anthropic's published tiers stop at Scale - Custom limits are negotiated and NOT published, so no number for them appears anywhere in this file), more distinct models/providers/accounts, or the caching lever above. Adding your own servers does nothing at all. That is the single lesson this blueprint exists to teach, and it is why the quota row is the one to read first.",
       "confidence": "high",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "worker",
-      "statement": "40 subtasks/s per worker instance: a tool-using subtask is I/O bound at roughly 3 s with about 120 concurrent slots.",
+      "subject": "architecture",
+      "statement": "FAN-OUT FOLLOWS THE PUBLISHED SHAPE. Anthropic's engineering write-up of its multi-agent research system (anthropic.com/engineering/multi-agent-research-system, 13 June 2025) describes a lead agent that 'spins up 3-5 subagents in parallel rather than serially', each of which is itself an agent loop using '3+ tools in parallel'. This design dispatches 4 subagents - the middle of the published range - written as visit_prob 4.0 on the queue and the worker tier. The previous 2 subtasks understated the published shape, and because every subtask costs model calls it understated load on the one component that cannot be relieved by buying servers.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "architecture",
+      "statement": "TEN MODEL CALLS PER RUN, AND THE PER-SUBAGENT FIGURE IS A FLOOR RATHER THAN A PUBLISHED NUMBER. The run path makes 1 planning call, 2 calls per subagent across 4 subagents, and 1 supervisor synthesis call. The 3-5 subagents and the '3+ tools in parallel' ARE published; how many model calls a subagent's loop actually takes is NOT published in any source I can cite, so 2 (one to choose tools, one to interpret their results) is deliberately the minimum a tool-using loop can take and is stated as a floor, not an estimate. The citable anchor for the direction is Anthropic's own observation that 'multi-agent systems use about 15x more tokens than chats'. Read the model-call volume, and therefore the quota utilisation, as a LOWER bound.",
       "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "state",
-      "statement": "Run state is written once per run and once per resume; status polls read the cache and fall through to the state store 15% of the time.",
+      "subject": "architecture",
+      "statement": "THE SUPERVISOR MAKES THE FINAL MODEL CALL. In the published architecture the lead agent synthesises the subagents' results itself. An earlier version of this path ended worker -> llm -> sup -> state, so the supervisor aggregated without ever calling the model - which is not the architecture the file claims to model, and it quietly removed a call from the binding constraint. The run path now ends sup -> llm -> state.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "architecture",
+      "statement": "FAN-OUT IS MODELLED AS REPEATED VISITS (visit_prob > 1): a run visits the queue and the workers 4 times and the model gateway 10 times. The ARRIVAL RATES this produces are exact, which is what the engine needs for utilisation and the bottleneck. The LATENCY IS AN UPPER BOUND, because the v1 engine sums service time along a path and has no parallel-fan-out primitive: the four subagents run in parallel, so real wall-clock is closer to plan + the slowest subagent + synthesis than to the sum of all ten calls. Treat the run flow's latency as the serial worst case, not as a prediction.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "llm",
+      "statement": "7,000 input and 800 output tokens per agent model call: tool schemas plus accumulated conversation state dominate the prompt. This is the most defensible number in the file and it is still an ASSUMPTION - Anthropic publishes the RATIO, not the absolute ('agents typically use about 4x more tokens than chat interactions, and multi-agent systems use about 15x more tokens than chats'), and every capacity figure above is divided by this number, so an error here moves the quota ceiling proportionally. Monthly token volume = peak call rate / 4 x 2,592,000 s (average load modelled at a quarter of peak).",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "BASE LATENCY IS FULL-RESPONSE GENERATION TIME, NOT TIME-TO-FIRST-TOKEN. Artificial Analysis measures Claude Sonnet 5 on Anthropic's own API at about 74 output tokens/s (artificialanalysis.ai/providers/anthropic). At this design's 800 output tokens that is 800 / 74 = about 10.8 s of generation, so base_latency_ms is 10,800. The previous 2,800 ms implied about 286 output tokens/s - nearly 4x faster than anything measured - and the run path pays that error ten times over. 10,800 ms is a FLOOR: it excludes time-to-first-token (which I could not confirm against a primary source and therefore do not add) and excludes tool-execution time, which is carried on the worker tier instead so it is not double-counted.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "architecture",
+      "statement": "PROGRESS IS PUSHED OVER SSE, AND POLLING WAS REJECTED ON PURPOSE. Anthropic describes these runs as taking minutes ('...more work in minutes instead of hours'). A UI polling a 2-minute run every 2 s issues about 60 status requests per run, so a polled design carries roughly sixty times the run rate on the supervisor tier and the SUPERVISOR, not the provider quota, becomes the binding constraint - a self-inflicted bottleneck sitting in front of the real one. An earlier version of this blueprint modelled 0.64 polls per run, which is not a simplification of a minutes-long run, it is an inconsistency with the workload the file itself describes. This design therefore streams. Stream opens run BELOW the run rate (share 0.37 against a run share of 0.47) because only about 70% of runs are watched live from a UI - the rest are programmatic API calls whose result is fetched later - and a watched run opens roughly 1.15 streams counting reconnects. If you keep polling instead, size the supervisor tier from the POLL rate, not the run rate.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "sup",
+      "statement": "THE SUPERVISOR'S REAL LIMIT UNDER SSE IS CONCURRENT CONNECTIONS, AND v1 CANNOT EXPRESS IT. A streamed run holds a connection open for the whole run, so this tier must hold roughly (runs/s x run duration) simultaneous streams - at 7 runs/s over a multi-minute run that is on the order of a thousand open connections - while the engine sizes the tier purely on REQUESTS/s, where a stream open counts once and then disappears. GAP: the engine has no concurrency or connection-lifetime primitive, so the supervisor's utilisation here is NOT the number to provision against. File-descriptor limits, per-connection memory and load-balancer idle timeouts are.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "worker",
+      "statement": "4.8 subtasks/s per worker instance, down from 40. A subagent's subtask waits on TWO model calls, and at the measured generation rate above that alone is about 21.6 s; add roughly 3 s of tool execution and a subtask occupies a slot for about 25 s. With about 120 concurrent slots per instance that is 120 / 25 = 4.8 subtasks/s. The old 40/s assumed a 3 s subtask, which is the cost of a single tool call, not of an agent loop. 9 instances are provisioned so this tier stays clear of the quota rather than tying with it - a co-bottleneck would send the reader to add servers, which is precisely the wrong move on this design.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "worker",
+      "statement": "The worker's 3,000 ms base latency is TOOL-EXECUTION and local processing time only; the model-call wait is carried on the gateway node so it is not counted twice. Tool latency varies enormously (a cached lookup versus a web fetch versus a sandboxed code run) and no single published figure covers it - 3 s is this blueprint's own estimate, inherited from its previous subtask figure, and is the weakest number in the file.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
       "subject": "cost",
-      "statement": "Egress is billed per response: ~12 KB per completed run, ~1 KB per status poll, ~256 B per tool callback.",
+      "statement": "Prompt caching is NOT modelled (the engine has no cache-read token rate), and agent prompts are exactly the case where a cached tool-schema prefix saves the most. The token line is an upper bound. This caveat used to stop there, and that was half the story: on most models cache reads are also exempt from the input-tokens-per-minute limit, so the same lever that cuts the bill also buys CAPACITY on the binding constraint - see the capacity-lever assumption above.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "state",
+      "statement": "Run state is written twice per run (the run row and task graph at plan time, the result at completion) and twice per resume; progress-stream opens read the cache and fall through to the durable store 15% of the time.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "architecture",
+      "statement": "CONTEXT LENGTH IS A REAL CONSTRAINT ON THIS SHAPE AND IS NOT MODELLED. Anthropic's write-up states that the lead agent saves its plan to Memory because 'if the context window exceeds 200,000 tokens it will be truncated' - which is WHY this design has a durable state store and a shared scratchpad at all. The engine has no notion of context length, so nothing here computes when a run must checkpoint, summarise, or spawn a fresh subagent to shed context. GAP: the scratchpad and state store are sized by request rate, not by the context pressure that actually drives their traffic.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "architecture",
+      "statement": "SEVERAL TIERS ARE SIZED BY AVAILABILITY, NOT BY LOAD. The queue (3 brokers), the cache (2 nodes) and the supervisor (2 instances) sit at their HA minimums rather than at a capacity-derived count, so their near-zero utilisation is expected and is not a signal to shrink them. Only the model gateway and the worker tier are sized from load in this file.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "Egress is billed per response: ~12 KB per completed run and per resumed run, ~8 KB per progress stream (SSE progress events over a multi-minute run plus the terminal payload), ~256 B per tool callback; averaged at a quarter of peak over 2,592,000 s.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
@@ -422,10 +526,17 @@
     },
     {
       "subject": "engine",
-      "statement": "Retries, guardrail rejections and loop-until-done iterations are NOT modelled: v1 has no feedback edge, so a run that re-plans three times appears as one run. Real model-call volume is higher than shown.",
+      "statement": "Retries, guardrail rejections and loop-until-done iterations are NOT modelled: v1 has no feedback edge, so a run that re-plans three times appears as one run. Real model-call volume is higher than shown, and that compounds with the 'two calls per subagent is a floor' assumption above - both push the same direction, onto the quota.",
       "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "THE ONLY PUBLISHED PRIMARY SOURCE FOR THIS ARCHITECTURE IS DATED. The orchestrator-worker shape, the 3-5 subagent count, the 200,000-token truncation and the 15x token multiple all come from a single Anthropic engineering post published 13 June 2025. Rate-limit tiers, measured tokens/s and token prices all move faster than that post does. GAP: re-check platform.claude.com/docs/en/api/rate-limits and a current tokens/s measurement before treating anything here as a plan rather than as a teaching reference.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],
@@ -441,7 +552,7 @@
   "_library": {
     "category": "ai_agents",
     "difficulty": "advanced",
-    "summary": "A supervisor agent that plans, fans work out to specialist workers over a queue, and resumes from durable run state.",
+    "summary": "A supervisor agent that plans, fans work out to specialist subagents over a queue, streams progress, and resumes from durable run state - constrained by a provider TOKEN quota, not by servers.",
     "keywords": [
       "multi agent",
       "multi-agent",

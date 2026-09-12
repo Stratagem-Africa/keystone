@@ -3,18 +3,18 @@
   "name": "DNS System",
   "workload": {
     "system_rps": 50000.0,
-    "description": "50k qps authoritative DNS; 96% answer-cache hit rate; automation-driven zone churn"
+    "description": "50k qps authoritative DNS; pre-signed zones resident in RAM on the nameservers; automation-driven zone churn on a separate control plane"
   },
   "components": [
     {
       "id": "edge",
       "kind": "load_balancer",
-      "name": "Anycast edge (UDP/53, DoT/DoH termination)",
-      "per_instance_rps": 60000.0,
+      "name": "Anycast edge (UDP/53 + DoT/DoH termination)",
+      "per_instance_rps": 120000.0,
       "instances": 2,
       "base_latency_ms": 0.3,
       "monthly_cost_per_instance": 0,
-      "egress_gb_per_month": 4846,
+      "egress_gb_per_month": 25559,
       "storage_gb": 0,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
@@ -27,7 +27,7 @@
       "id": "ns",
       "kind": "app_server",
       "name": "Authoritative nameserver fleet (Knot/NSD)",
-      "per_instance_rps": 25000.0,
+      "per_instance_rps": 150000.0,
       "instances": 3,
       "base_latency_ms": 0.4,
       "monthly_cost_per_instance": 5293,
@@ -59,74 +59,21 @@
       }
     },
     {
-      "id": "cache",
-      "kind": "cache",
-      "name": "Hot answer + negative-answer cache (Redis)",
-      "per_instance_rps": 40000.0,
+      "id": "cp",
+      "kind": "load_balancer",
+      "name": "Control-plane ingress (HTTPS, separate prefix)",
+      "per_instance_rps": 5000.0,
       "instances": 2,
-      "base_latency_ms": 0.2,
-      "monthly_cost_per_instance": 4745,
-      "egress_gb_per_month": 0,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 135,
       "storage_gb": 0,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
       "provenance": "ASSUMPTION",
-      "groundings": {
-        "monthly_cost_per_instance": {
-          "value": 4745.0,
-          "unit": "usd_minor_per_month",
-          "confidence_low": 4745.0,
-          "confidence_high": 4745.0,
-          "provenance": "GROUNDED",
-          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
-          "citations": [
-            {
-              "source": "AWS first-party pricing",
-              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
-              "note": "$0.065/h x 730 = 4745c/month."
-            }
-          ]
-        }
-      },
-      "match_context": {
-        "instance_class": "cache.t4g.medium"
-      }
-    },
-    {
-      "id": "rr",
-      "kind": "replica",
-      "name": "Record read replica (cache-miss lookups)",
-      "per_instance_rps": 8000.0,
-      "instances": 1,
-      "base_latency_ms": 3.0,
-      "monthly_cost_per_instance": 12994,
-      "egress_gb_per_month": 0,
-      "storage_gb": 0,
-      "requests_per_month": 0,
-      "llm_input_tokens_per_month": 0,
-      "llm_output_tokens_per_month": 0,
-      "provenance": "ASSUMPTION",
-      "groundings": {
-        "monthly_cost_per_instance": {
-          "value": 12994.0,
-          "unit": "usd_minor_per_month",
-          "confidence_low": 12994.0,
-          "confidence_high": 25988.0,
-          "provenance": "GROUNDED",
-          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
-          "citations": [
-            {
-              "source": "AWS first-party pricing",
-              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
-              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
-            }
-          ]
-        }
-      },
-      "match_context": {
-        "instance_class": "db.m6i.large"
-      }
+      "groundings": {},
+      "match_context": {}
     },
     {
       "id": "db",
@@ -166,7 +113,7 @@
     {
       "id": "q",
       "kind": "queue",
-      "name": "Zone-change propagation bus (Kafka)",
+      "name": "Zone-change propagation bus (Kafka -> DNS NOTIFY + IXFR fan-out)",
       "per_instance_rps": 20000.0,
       "instances": 3,
       "base_latency_ms": 2.0,
@@ -246,14 +193,6 @@
         {
           "component_id": "ns",
           "visit_prob": 1.0
-        },
-        {
-          "component_id": "cache",
-          "visit_prob": 1.0
-        },
-        {
-          "component_id": "rr",
-          "visit_prob": 0.04
         }
       ]
     },
@@ -262,7 +201,7 @@
       "share": 0.002,
       "path": [
         {
-          "component_id": "edge",
+          "component_id": "cp",
           "visit_prob": 1.0
         },
         {
@@ -290,10 +229,6 @@
         {
           "component_id": "ns",
           "visit_prob": 1.0
-        },
-        {
-          "component_id": "cache",
-          "visit_prob": 1.0
         }
       ]
     }
@@ -301,30 +236,44 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "50,000 queries/s at peak for a mid-size authoritative DNS service: 99.75% data-plane queries, 0.2% record writes (automation-driven churn from external-dns, ACME and ephemeral records), 0.05% propagation events.",
+      "statement": "50,000 queries/s at peak for a mid-size authoritative DNS service: 99.75% data-plane queries, 0.2% record writes (automation-driven churn from external-dns, ACME and ephemeral records), 0.05% propagation events. Calibration: SIDN reports the .nl zone answering roughly 4 billion queries a day - about 46,000 qps averaged - across its 80+ anycast servers, so 50,000 qps is the right order of magnitude for a service of this shape. The write share errs generously toward writes, which is the safe direction: it over-states control-plane load rather than hiding it.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "cache",
-      "statement": "96% answer-cache hit rate on the query path, so 4% of queries reach the record read replica. The cache-cold case is this design's real risk: at a 0% hit rate the replica sees roughly 25x its steady-state arrival rate.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "edge",
-      "statement": "60,000 qps per anycast POP for small UDP responses, across 2 POPs. Anycast edges are deliberately over-provisioned to absorb reflection/amplification floods, so low steady-state utilisation here is design intent, not slack.",
-      "confidence": "low",
+      "subject": "ns",
+      "statement": "THE QUERY PATH IS edge -> nameserver AND NOTHING ELSE. An earlier version of this blueprint put a Redis answer cache and a PostgreSQL read replica on that path; both have been deleted, because no published authoritative nameserver consults a network cache or a database per query. NSD's documentation describes it as \"designed with a pure philosophy that prioritises raw performance\", serving hundreds of thousands to millions of queries per second with no database backend. PowerDNS - the one authoritative server with a real SQL backend - says on its own performance page that its packet cache \"is handled by malloc in your libc\", i.e. in-process, with no mention of Redis or memcached. Even Cloudflare's KV-backed stack is a LOCAL read: the Quicksilver post (2025-07-10) records that each server kept \"a full copy of the data\". The zone is pre-signed and resident in RAM; a query is a memory lookup.",
+      "confidence": "high",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "ns",
-      "statement": "25,000 qps per authoritative nameserver instance (Knot/NSD serving pre-signed zones from memory on 2 vCPU). Conservative: published figures for these servers on larger hardware are considerably higher.",
-      "confidence": "low",
+      "statement": "150,000 queries/s per nameserver instance (2 vCPU, pre-signed zone in RAM). Order of magnitude from Lencse's peer-reviewed RFC-8219 authoritative-DNS benchmark (IEEE Access, 2020), which measures 177,735 qps on a SINGLE core, and over 1.5 Mqps (Knot) and 2.5 Mqps (NSD) on 16- and 32-core hosts; the slowest pair tested, BIND and YADIFA, could not exceed 260,000 qps. 150,000 for a 2-vCPU instance is therefore conservative - still below one measured core. It replaces this file's previous 25,000 qps rating, which was ~14x below a single measured core and made the nameserver fleet a false bottleneck.",
+      "confidence": "med",
       "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edge",
+      "statement": "120,000 queries/s per anycast POP for small UDP/53 responses, across 2 POPs. The rating is deliberately BELOW the nameserver's per-instance rating because this tier also terminates DoT (TCP/853) and DoH (HTTPS), where a TLS handshake costs far more per query than a UDP packet - which is why the front door, not the zone lookup, is the tier that binds in this design. Sizing rule: each POP must carry the ENTIRE fleet rate when its sibling is withdrawn from anycast (N-1), so 120,000 leaves about 2.4x headroom per POP against the full 50,000 qps load. No public per-POP qps figure was used for this number - it is an assumption, not a measurement.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edge",
+      "statement": "GAP - what actually binds an anycast DNS edge is PACKET rate under attack, and this engine cannot express it. Cloudflare reported auto-mitigating a 3.8 Tbps / 2.14 Bpps flood (2024-10-02) whose components \"predominantly leverage UDP on a fixed port\" - about four orders of magnitude beyond anything in this model. Real absorption comes from upstream scrubbing, BGP withdrawal, kernel-bypass filtering and response-rate limiting, none of which is a component here, and the headroom above is nowhere near flood scale. Read the edge's steady-state utilisation as design intent and as a modelling limit, NOT as evidence that this design survives a flood.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cp",
+      "statement": "Zone writes arrive on a SEPARATE control-plane ingress (HTTPS, its own prefix and its own failure domain), not on the UDP/53 anycast edge that answers queries. Keeping them apart is the point: a flood aimed at port 53 must not take the zone-management API down with it, and the two tiers are scaled, filtered and rate-limited on completely different rules. The 5,000 rps per instance is a placeholder ASSUMPTION set well above the 0.2% write share of the 50,000 qps workload precisely so that it cannot bind - no public figure was used and it must not be read as a measured capacity.",
+      "confidence": "med",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -335,18 +284,39 @@
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "cost",
-      "statement": "Egress is billed only where bytes leave for a client: ~160 B per DNS answer and ~512 B per management API response. Zone propagation is internal and egresses nothing.",
+      "subject": "q",
+      "statement": "The propagation bus runs 3 Kafka brokers because replication factor 3 is the minimum safe configuration, not because throughput demands it.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "q",
-      "statement": "The propagation bus runs 3 Kafka brokers because replication factor 3 is the minimum safe configuration, not because throughput demands it.",
+      "statement": "GAP - the real constraint on a zone-change path is STALENESS, and this engine has no way to state a freshness objective. The budget to hold yourself to is Cloudflare's published figure of new DNS data being \"actually available to 99% of our global PoPs in under 5s\" (2017); at the other end of the spectrum SIDN distributes \"an updated copy of the .nl zone file every half an hour\" to its 80+ anycast partners - a periodic file copy, not a message bus. The component here only fans a change out to DNS NOTIFY + IXFR transfers, so whatever throughput utilisation the engine reports for it says nothing about whether the zone is fresh at the edge. Propagation lag is unmodelled and must be measured separately.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cost",
+      "statement": "Egress is billed only where bytes leave for a client. DNS answers: ~195 octets per signed response - Geoff Huston's APNIC measurement of DNSSEC response sizes (2021-10-18) puts an ECDSA P-256 signed answer at about that size, against the ~160 B unsigned A response this file previously assumed (which contradicted its own claim that zones are pre-signed) and ~747 octets if the zone were signed with RSA-4096. The edge volume is therefore recomputed from scratch as 49,875 answers/s x 195 B x 2,628,000 s (a 730-hour month) = ~25,559 GB. Management API responses: ~512 B x the write rate = ~135 GB, billed at the control-plane ingress it leaves from (the previous file asserted this rate but declared 0 GB anywhere). Zone propagation is internal and egresses nothing. Signing with RSA-4096 instead would multiply the DNS egress volume by roughly 3.8x.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "GAP - the egress volume above is priced at this model's generic cloud rate of $0.09/GB, and that is the wrong rate for this shape. Nobody runs a 50,000 qps authoritative service on metered per-GB cloud egress; anycast operators buy flat-rate transit and settlement-free peering, where the marginal cost of one more answer is ~0. Re-rate pricing.egress_micro_usd_per_gb against your own transit contract before treating the cost line as a budget - as priced here it answers \"what would this cost on a hyperscaler's bandwidth meter\", not \"what does authoritative DNS cost\".",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cost",
+      "statement": "GAP - neither the anycast edge nor the control-plane ingress carries a per-instance price. The engine's grounded catalogue has no per-instance SKU for a load balancer (ALB/NLB bill an hourly floor per balancer plus LCU charges), and an anycast DNS POP is not an AWS load balancer at all - it is transit, IP space and hardware. The compute line therefore prices the nameservers, the management API, the database and the brokers only; the two ingress tiers are a known cost gap rather than a free tier.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     },
     {
       "subject": "db",
@@ -364,7 +334,7 @@
     },
     {
       "subject": "cost",
-      "statement": "Zone and record storage on the primary and replica is not priced: the engine's only storage rate is object storage, and applying it to RDS/block storage would understate the bill. Compute and egress are priced; database storage is a known gap.",
+      "statement": "Zone and record storage on the control-plane primary is not priced: the engine's only storage rate is object storage, and applying it to RDS/block storage would understate the bill. Compute and egress are priced; database storage is a known gap. (This caveat previously also named a read replica; that component has been deleted because it was not on any real query path, so its storage is no longer a gap - it is simply gone.)",
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
@@ -383,7 +353,7 @@
   "_library": {
     "category": "infrastructure",
     "difficulty": "intermediate",
-    "summary": "Authoritative DNS service: anycast edge, cached nameserver fleet, and a control plane that propagates zone changes.",
+    "summary": "Authoritative DNS service: an anycast edge in front of a memory-resident nameserver fleet, with zone changes arriving on a separate control plane and fanned out to the edge.",
     "keywords": [
       "dns",
       "domain name system",

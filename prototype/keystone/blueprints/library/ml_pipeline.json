@@ -132,7 +132,7 @@
       "id": "q",
       "kind": "queue",
       "name": "Kafka raw-event bus (feature sources)",
-      "per_instance_rps": 5000,
+      "per_instance_rps": 200000,
       "instances": 3,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 3329,
@@ -368,6 +368,48 @@
       "confidence": "high",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Kafka broker capacity is modelled at 200,000 messages/s per broker (3 brokers). Source: Confluent's benchmark (confluent.io/blog/kafka-fastest-messaging-system/, published 2020-08-21) measured 605 MB/s of peak stable throughput across 3 i3en.2xlarge brokers at 1 KB messages with replication factor 3 \u2014 about 200k msg/s per broker. LinkedIn's 2014 run (engineering.linkedin.com, '2,024,032 records/sec' across three machines, 100-byte messages, 3x ASYNCHRONOUS replication) implies roughly 675k/broker; the lower, larger-message, synchronous-RF=3 Confluent figure is the one used here. The value this replaces \u2014 5,000 msg/s per broker \u2014 sat 40x to 135x below both published figures, which made the event bus look like the thing to buy more of. It is not: at a cited broker rate the bus is close to idle and the binding constraint is the streaming transformer, which is where a real feature pipeline is sized.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "MISMATCH, declared rather than hidden: the broker THROUGHPUT above was measured on i3en.2xlarge hardware, while this row's PRICE is the AWS MSK kafka.t3.small broker-hour rate. Those are not the same machine \u2014 a t3.small broker will not sustain 200k msg/s. This model has no way to tie a capacity citation to a price citation, so read the bus cost line as a placeholder for 'three brokers', not as the cost of the hardware the benchmark ran on. Sizing a real cluster means pricing the broker class you actually benchmark.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "stream",
+      "statement": "With the bus corrected, 2,500 events/s per transformer instance becomes the load-bearing number in this design \u2014 it alone decides which component binds and where the design breaks \u2014 and it has NO published source. It is an author's engineering estimate for a stateful windowed transform on one m6i.large. Real per-operator throughput in Flink or Spark Structured Streaming swings by an order of magnitude with window size, state backend, serialisation format and key skew, so this figure should be replaced by a measurement of your own job before any fleet is sized from it.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "db",
+      "statement": "The 8% fall-through from the online store to the point-in-time store (db visit_prob 0.08) is a modelling simplification that is kept here, with its limits stated. Feast's documentation (docs.feast.dev/getting-started/components/offline-store) gives the offline store two purposes \u2014 'Building training datasets from time-series features' and 'Materializing (loading) features into an online store to serve those features at low-latency in a production setting' \u2014 and the online-store page states that 'for each entity key, only the latest feature values are stored. No historical values are stored.' Neither page says what happens on a miss, so this blueprint does NOT claim that Feast returns null. What it does flag is this: in a materialised feature store the real failure mode of an online-store miss is usually a degraded or missing feature vector \u2014 a CORRECTNESS incident that skews inference \u2014 rather than the extra database load this edge models. The engine sizes load; it cannot see that failure. Dropping the edge would lower db's computed arrivals but would not change which component binds.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cache",
+      "statement": "Open storage-layout question this model does not resolve: is one online lookup ONE Redis operation on a serialized feature vector (fan-out 1, which is what is modelled here), or one operation PER FEATURE (a fan-out of 50-250)? Hopsworks' vendor benchmark (2023-12-22, measuring itself against Feast) 'gradually increased the number of features in the vector from 50 to 250', but it is a P99 LATENCY test at a constant 10 RPS and does not establish operations per feature. The 50k ops/s per-node derate used here \u2014 supported by redis.io's benchmark note that 'processing 10 bytes, 100 bytes, or 1000 bytes queries almost result in the same throughput' against a measured 'SET: 180180.17 requests per second' unpipelined on a 3-byte payload \u2014 covers only the serialized-vector layout. Under a field-per-feature layout the cache's arrivals would be multiplied by the feature count and this sizing would not hold.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "workload",
+      "statement": "The 80% online-lookup / 19.4% event-ingest split is an author's estimate, not a measured ratio. It is write-heavy for a feature store, and no primary source establishing the true read:write ratio of a production feature store was found \u2014 saying so is more honest than citing one that does not exist. This matters because the ingest share alone sets the load on the bus and the transformer, and the transformer is the component this design names as its constraint: a different split moves the constraint.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

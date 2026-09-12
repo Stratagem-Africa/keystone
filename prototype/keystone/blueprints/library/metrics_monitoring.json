@@ -3,15 +3,15 @@
   "name": "Metrics & Monitoring",
   "workload": {
     "system_rps": 400000,
-    "description": "400k samples/s peak: remote-write ingest through a log into a TSDB writer, with dashboard queries and alert evaluation over a result cache"
+    "description": "400k samples/s peak: batched remote-write through a distributor tier and a Kafka log into replicated TSDB ingesters, with a cached read tier (dashboards + standing rules) that also reads the ingesters' in-memory head"
   },
   "components": [
     {
       "id": "lb",
       "kind": "load_balancer",
-      "name": "Network load balancer (remote-write ingest)",
+      "name": "Network load balancer (remote-write ingest + query API)",
       "per_instance_rps": 100000,
-      "instances": 6,
+      "instances": 2,
       "base_latency_ms": 1.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
@@ -26,9 +26,9 @@
     {
       "id": "ingest",
       "kind": "app_server",
-      "name": "Remote-write receiver (decode + validate)",
-      "per_instance_rps": 8000,
-      "instances": 64,
+      "name": "Remote-write distributor (decode, validate, shard)",
+      "per_instance_rps": 25000,
+      "instances": 24,
       "base_latency_ms": 2.0,
       "monthly_cost_per_instance": 4964,
       "egress_gb_per_month": 0,
@@ -44,12 +44,27 @@
           "confidence_low": 4964.0,
           "confidence_high": 4964.0,
           "provenance": "GROUNDED",
-          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "measured_context": "c6g.large — AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
           "citations": [
             {
               "source": "AWS first-party pricing",
               "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
               "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        },
+        "per_instance_rps": {
+          "value": 25000.0,
+          "unit": "rps",
+          "confidence_low": 25000.0,
+          "confidence_high": 50000.0,
+          "provenance": "GROUNDED",
+          "measured_context": "Grafana Mimir capacity-planning guidance, stated PER CPU CORE for the distributor. It is vendor planning guidance, not a benchmark on named hardware, and it is denominated in SAMPLES per second (not HTTP requests). Band: value = one dedicated core per modelled instance; the band top = the same rule applied to both vCPU of the priced c6g.large.",
+          "citations": [
+            {
+              "source": "Grafana Mimir first-party docs — Planning capacity",
+              "reference": "https://grafana.com/docs/mimir/latest/manage/run-production-environment/planning-capacity/",
+              "note": "Verbatim for the distributor: 'CPU: 1 core every 25,000 samples per second'. Modelled conservatively as one core-equivalent per instance, which leaves the second vCPU of the priced c6g.large to TLS termination, decompression and GC; that 2-vCPU reading is the top of the band, not the value used."
             }
           ]
         }
@@ -61,7 +76,7 @@
     {
       "id": "q",
       "kind": "queue",
-      "name": "Kafka write-ahead sample bus",
+      "name": "Kafka write-ahead sample bus (Mimir-style ingest storage)",
       "per_instance_rps": 30000,
       "instances": 18,
       "base_latency_ms": 2.0,
@@ -79,7 +94,7 @@
           "confidence_low": 15330.0,
           "confidence_high": 15330.0,
           "provenance": "GROUNDED",
-          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "measured_context": "kafka.m5.large — AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
           "citations": [
             {
               "source": "AWS first-party pricing",
@@ -96,9 +111,9 @@
     {
       "id": "writer",
       "kind": "app_server",
-      "name": "TSDB writer + block compactor",
-      "per_instance_rps": 10000,
-      "instances": 52,
+      "name": "TSDB ingester (in-memory head + WAL, replication factor 3)",
+      "per_instance_rps": 20000,
+      "instances": 74,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
@@ -114,12 +129,32 @@
           "confidence_low": 7008.0,
           "confidence_high": 7008.0,
           "provenance": "GROUNDED",
-          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "measured_context": "m6i.large — AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
           "citations": [
             {
               "source": "AWS first-party pricing",
               "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
               "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        },
+        "per_instance_rps": {
+          "value": 20000.0,
+          "unit": "rps",
+          "confidence_low": 5000.0,
+          "confidence_high": 30000.0,
+          "provenance": "GROUNDED",
+          "measured_context": "DERIVED, not published: the cited rule is '1 core for every 300,000 series in memory' (Grafana Mimir capacity planning, per CPU core). Converting in-memory SERIES to a sample RATE needs a scrape interval, which is an assumption in this file and not a cited figure. Band = the same cited rule at a 10 s scrape interval (30,000 samples/s per core) and at a 60 s interval (5,000); the value is the 15 s reading. Read the band as the scrape-interval uncertainty, because that is exactly what it is.",
+          "citations": [
+            {
+              "source": "Grafana Mimir first-party docs — Planning capacity",
+              "reference": "https://grafana.com/docs/mimir/latest/manage/run-production-environment/planning-capacity/",
+              "note": "Verbatim for the ingester: 'CPU: 1 core for every 300,000 series in memory'. At an assumed 15 s scrape interval a core's 300,000 series absorb 300,000/15 = 20,000 samples/s. Cross-check on the order of magnitude: Grafana's 1-billion-active-series run reports ~50 million samples/s across 600 ingesters at replication factor 3, i.e. ~250,000 replicated writes per ingester on much larger machines than the 2-vCPU box priced here."
+            },
+            {
+              "source": "Grafana Labs engineering blog — scaling Mimir to 1 billion active series",
+              "reference": "https://grafana.com/blog/how-we-scaled-our-new-prometheus-tsdb-grafana-mimir-to-1-billion-active-series/",
+              "note": "1 billion active series, ~50 million samples/s, 1,500 replicas, ~7,000 cores, 30 TiB RAM, 600 ingesters, replication factor 3. Used only as an order-of-magnitude cross-check on the per-core rule above; the per-instance rate here is NOT taken from it."
             }
           ]
         }
@@ -131,8 +166,8 @@
     {
       "id": "store",
       "kind": "object_store",
-      "name": "Long-term block storage (compacted TSDB blocks)",
-      "per_instance_rps": 8000,
+      "name": "Long-term block storage (compacted TSDB blocks, one prefix)",
+      "per_instance_rps": 5500,
       "instances": 1,
       "base_latency_ms": 35.0,
       "monthly_cost_per_instance": 0,
@@ -142,7 +177,23 @@
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
       "provenance": "ASSUMPTION",
-      "groundings": {},
+      "groundings": {
+        "per_instance_rps": {
+          "value": 5500.0,
+          "unit": "rps",
+          "confidence_low": 3500.0,
+          "confidence_high": 5500.0,
+          "provenance": "GROUNDED",
+          "measured_context": "AWS S3 published per-partitioned-prefix request rate. The two axes are DIFFERENT numbers and the engine accepts only one capacity per component, so they are split across the band rather than summed: value = the 5,500 GET/HEAD read ceiling (reads dominate this component in this design), band floor = the stricter 3,500 PUT/COPY/POST/DELETE write ceiling. Grading a mixed read+write total against either single ceiling would be an artefact; do not do it.",
+          "citations": [
+            {
+              "source": "AWS S3 first-party docs — Optimizing Amazon S3 performance",
+              "reference": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html",
+              "note": "3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per partitioned prefix. The same page states 'There are no limits to the number of prefixes in a bucket', so a single prefix is the conservative modelling choice, not a physical system limit."
+            }
+          ]
+        }
+      },
       "match_context": {}
     },
     {
@@ -166,7 +217,7 @@
           "confidence_low": 4745.0,
           "confidence_high": 4745.0,
           "provenance": "GROUNDED",
-          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "measured_context": "cache.t4g.medium — AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
           "citations": [
             {
               "source": "AWS first-party pricing",
@@ -183,10 +234,10 @@
     {
       "id": "query",
       "kind": "app_server",
-      "name": "Query engine (dashboards + alert rules)",
-      "per_instance_rps": 600,
-      "instances": 10,
-      "base_latency_ms": 60.0,
+      "name": "Query tier (queriers + ruler: dashboards, recording rules, alerts)",
+      "per_instance_rps": 10,
+      "instances": 28,
+      "base_latency_ms": 100.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
@@ -201,12 +252,27 @@
           "confidence_low": 7008.0,
           "confidence_high": 7008.0,
           "provenance": "GROUNDED",
-          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "measured_context": "m6i.large — AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
           "citations": [
             {
               "source": "AWS first-party pricing",
               "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
               "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        },
+        "per_instance_rps": {
+          "value": 10.0,
+          "unit": "rps",
+          "confidence_low": 10.0,
+          "confidence_high": 20.0,
+          "provenance": "GROUNDED",
+          "measured_context": "Grafana Mimir capacity-planning guidance, stated PER CPU CORE for the querier and the store-gateway; the same page says rule evaluation costs the same, so the ruler shares this rate. Vendor planning guidance, not a benchmark on named hardware. Band: value = one dedicated core per modelled instance; band top = the same rule applied to both vCPU of the priced m6i.large. A query here is a whole PromQL evaluation, not a single series read.",
+          "citations": [
+            {
+              "source": "Grafana Mimir first-party docs — Planning capacity",
+              "reference": "https://grafana.com/docs/mimir/latest/manage/run-production-environment/planning-capacity/",
+              "note": "Verbatim: 'CPU: 1 core for every 10 queries per second' (querier and store-gateway) and 'rules evaluation is computationally equal to queries execution, so the querier resources recommendations apply to ruler too'. The query-frontend's separate '1 core for every 250 queries per second' is NOT used here: this component models the querier/ruler work, not the frontend."
             }
           ]
         }
@@ -219,11 +285,11 @@
   "flows": [
     {
       "name": "ingest_samples",
-      "share": 0.99,
+      "share": 0.9995,
       "path": [
         {
           "component_id": "lb",
-          "visit_prob": 1.0
+          "visit_prob": 0.0005
         },
         {
           "component_id": "ingest",
@@ -235,17 +301,17 @@
         },
         {
           "component_id": "writer",
-          "visit_prob": 1.0
+          "visit_prob": 3.0
         },
         {
           "component_id": "store",
-          "visit_prob": 0.005
+          "visit_prob": 0.00000008
         }
       ]
     },
     {
       "name": "dashboard_query",
-      "share": 0.004,
+      "share": 0.00005,
       "path": [
         {
           "component_id": "lb",
@@ -260,6 +326,10 @@
           "visit_prob": 12.0
         },
         {
+          "component_id": "writer",
+          "visit_prob": 1.0
+        },
+        {
           "component_id": "store",
           "visit_prob": 1.8
         }
@@ -267,7 +337,7 @@
     },
     {
       "name": "alert_eval",
-      "share": 0.006,
+      "share": 0.00045,
       "path": [
         {
           "component_id": "lb",
@@ -279,11 +349,15 @@
         },
         {
           "component_id": "cache",
+          "visit_prob": 10.0
+        },
+        {
+          "component_id": "writer",
           "visit_prob": 1.0
         },
         {
           "component_id": "store",
-          "visit_prob": 0.05
+          "visit_prob": 0.2
         }
       ]
     }
@@ -291,29 +365,134 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "400,000 samples/s peak. 99% is the write path (remote-write from scrapers), 0.6% alert-rule evaluations, 0.4% (1,600/s) dashboard queries. Monitoring systems are overwhelmingly write-dominated and this ratio is the point.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
+      "statement": "400,000 samples/s peak, with the read:write mix taken from published deployments instead of guessed. Grafana's 500-million-active-series Mimir case study ran '10,000 queries per minute' (about 167 queries/s) against 100+ distributors, 100+ ingesters, 100+ queriers, 50 store-gateways, 30 compactors and 20 query-frontends. Shares here are therefore ingest 0.9995, alert_eval 0.00045, dashboard_query 0.00005 — 200 queries/s in total. The previous version of this file gave queries a 1% share (4,000 queries/s), which is roughly a thousand times more query-heavy than any published deployment of this size, and that single input was doing most of the work in its verdict.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "alert_eval",
+      "statement": "Standing queries dominate the read mix 9:1 over ad-hoc dashboard loads. Google's Monarch paper (VLDB 2020, p.10) states 'Approximately 95% of all queries are standing queries (including alerting queries)... they only issue ad hoc non-standing-queries very occasionally'. A rule evaluation also costs the SAME at the query tier as a dashboard query — Grafana Mimir's capacity-planning doc: 'rules evaluation is computationally equal to queries execution, so the querier resources recommendations apply to ruler too'. The previous version split alerts:dashboards 60:40 and gave an alert about a twelfth of a dashboard's fan-out, which contradicted both sources at once.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
     },
     {
       "subject": "dashboard_query",
-      "statement": "One dashboard load is modelled as 12 cache lookups (visit_prob 12.0) \u2014 one per panel \u2014 and 1.8 block reads on the misses. That fan-out, not the query count, is what sizes the query tier.",
+      "statement": "One dashboard load is modelled as 12 cache lookups (visit_prob 12.0) — one per panel — and 1.8 block reads on the misses. One rule-group evaluation is modelled at 10 cache lookups, because a group evaluates several expressions per run, which is why its fan-out is now comparable to a dashboard's rather than a twelfth of it. The alert path keeps a much smaller object-store fan-out (0.2 against 1.8) for a stated reason and not a convenient one: alert ranges are minutes long, so they are served from the ingesters' in-memory head, while a dashboard commonly ranges over hours or days and falls through to compacted blocks. Panel and rule counts are ASSUMPTIONS — no public figure was found for either.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "writer",
-      "statement": "The writer appends to an in-memory head block and flushes one compacted block per ~200 samples (store visit_prob 0.005). Retention, downsampling and compaction cost are not modelled.",
+      "subject": "ingest_samples",
+      "statement": "The write path is denominated in SAMPLES, not HTTP requests, and remote write batches heavily. Prometheus's documented remote-write defaults are 'max_samples_per_send: 2000' and 'capacity: 10000', so roughly one HTTP request carries 2,000 samples — modelled as visit_prob 0.0005 on the load-balancer hop of the ingest flow, and 1.0 everywhere downstream where the unit really is samples. The previous version compared a sample rate against a request-rate capacity at the load balancer with no conversion at all, which made that tier look about three thousand times over-provisioned. This is the one mixed unit in the file and it is now converted explicitly rather than ignored.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "lb",
+      "statement": "The load balancer's 100,000 rps per node is an UNCITED assumption carried over from the previous version of this file. No first-party per-node throughput figure was found for a managed L4 load balancer, so this should not be read as evidence. It is also not load-bearing here: after the remote-write batching conversion above, this tier sees about one request per 2,000 samples plus one per query, and its instance count is now 2 — set by availability-zone redundancy, not by throughput. If you need this tier sized properly, measure your own terminator; do not inherit this number.",
       "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ingest",
+      "statement": "Distributor capacity is now the published planning figure rather than a guess: Grafana Mimir's capacity-planning doc states verbatim 'CPU: 1 core every 25,000 samples per second'. The previous 8,000 samples/s per instance was about three times below that and carried no source. One modelled instance is one dedicated core, so the priced c6g.large (2 vCPU) sits at the TOP of the cited band and not at the value used. 24 core-equivalents are provisioned against the 400,000 samples/s design load. Note what this tier is: stateless decode-validate-shard work, the cheapest thing in this design to scale — you add pods — which is why it is rarely where a real operator's problem lives.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "writer",
+      "statement": "The ingester is sized by ACTIVE SERIES HELD IN MEMORY, not by sample rate — that is the whole reason cardinality rather than traffic is what kills these systems. Mimir's capacity-planning doc gives '1 core for every 300,000 series in memory'. Turning that into a sample rate needs a scrape interval, which is an ASSUMPTION in this file and not a published number: at the common 15 s interval, 300,000 series absorb 20,000 samples/s per core (10 s would give 30,000; 60 s would give 5,000 — those are the band edges on the grounding). Mimir's default replication factor is 3, modelled as visit_prob 3.0 on this hop, so every accepted sample is materialised three times. A 3x multiplier on a memory-bound, STATEFUL tier is what makes this the hardest thing in the design to grow: you reshard, you do not just add pods. The previous version put 10,000 samples/s per instance here with no replication multiplier at all — about 25x below Grafana's own measurement (1 billion active series / 20 s is ~50 million samples/s, spread over 600 ingesters at replication factor 3, so ~250,000 replicated writes each) — and that pair of errors is what let a stateless decode tier come out ahead of it.",
+      "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "writer",
+      "statement": "Queries now traverse the ingester, and that edge is the most important structural change in this file. Mimir's own component docs state 'Queriers read recent data from ingesters and older data from long-term object storage via store-gateways', with blocks uploaded every two hours by default. Grafana names this coupling as the reason it built ingest storage: 'In classic architecture, ingester nodes are highly stateful. They combine in-memory data with local write-ahead logs (WALs) and participate in both writes and reads. This can lead to heavy queries disrupting live writes.' GAP: the edge is modelled at visit_prob 1.0 — one ingester visit per query — which is a FLOOR, not a calibrated cost. A real range query scans thousands of head-block samples, so the true read pressure on this tier is far higher than one sample-write's worth. Before this edge existed the documented failure mode was not merely simplified away, it was INEXPRESSIBLE: a reader asking 'what happens if query load grows' saw a write tier that never moved. Fix: measure head-block samples scanned per query in your own deployment and raise this visit_prob to that figure before using this design to size a read-heavy fleet.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
       "subject": "query",
-      "statement": "A query instance sustains only ~600 rps because range queries are expensive; service time is set at 60 ms. Cardinality explosion \u2014 the failure mode that actually kills these systems \u2014 is NOT expressible in this engine: it changes the cost per query, and the engine takes cost per query as a fixed input.",
+      "statement": "Query-tier capacity is the published figure: Mimir's capacity-planning doc gives 'CPU: 1 core for every 10 queries per second' for both the querier and the store-gateway, and states that rule evaluation costs the same, so the ruler shares this component. One modelled instance is one dedicated core; the priced m6i.large (2 vCPU) is the top of the cited band. The query-frontend's separate '1 core for every 250 queries per second' is deliberately NOT used, because this component models querier/ruler execution rather than the frontend that splits and caches requests.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "query",
+      "statement": "The 100 ms service time is DERIVED from the cited per-core rule (1 core for every 10 queries/s implies about 100 ms of CPU per query), not published, and it is stated as a derivation so nobody reads it as a measurement. As an order-of-magnitude sanity check, the Monarch paper reports a 79 ms median root-query latency and a 6 s 99.9th percentile. The previous version declared 600 rps per instance at 60 ms, which implies about 36 queries executing in parallel on a 2-vCPU box — internally inconsistent regardless of which figure you believed. 28 core-equivalents are provisioned for 200 queries/s rather than the bare minimum, for a reason worth knowing: standing queries are BURSTY, because rule groups fire on aligned interval boundaries, so the instantaneous read rate is well above the average this engine models.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "Object-store capacity is now a published ceiling instead of an unsourced 8,000 rps. AWS documents 3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per partitioned prefix. These are two SEPARATE axes and the engine accepts one capacity per component, so they are carried as the band rather than summed: the value grades against the 5,500 read ceiling, because reads dominate this component in this design (1.8 block reads per dashboard query and 0.2 per rule evaluation, against a write leg of 0.00000008 per sample), and the stricter 3,500 write ceiling is the band floor. Adding read and write counts together and grading the total against either single ceiling is a mixed-axis artefact; it is named here so nobody repeats it. The point that survives either treatment: the old 8,000 exceeded BOTH published ceilings.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "store",
+      "statement": "GAP: modelling a single prefix is the conservative choice, not the real one. AWS states on the same page that 'There are no limits to the number of prefixes in a bucket', and TSDB blocks are named by ULID, so a real deployment spreads blocks across many prefixes and the per-prefix ceiling stops being a system wall. Fix: set this component's instance count to your measured prefix fan-out if you need this tier's headroom to be realistic, and note that doing so removes the single-instance exposure this design currently carries.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "writer",
+      "statement": "The write path barely touches object storage, and the previous version had this badly wrong: it flushed 'one compacted block per ~200 samples' (visit_prob 0.005), which at this load implies thousands of object PUTs per second. Mimir uploads a block per ingester every two hours by default. With the ingester count modelled here and an assumed three objects per block (chunks, index, meta.json — the object count per block is an ASSUMPTION, the two-hour cadence is cited), that is on the order of 0.03 PUTs/s, modelled as visit_prob 0.00000008 per sample. Object storage is not the steady-state constraint in a metrics platform, and a reference design should not imply that it is.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Kafka sits between the distributors and the ingesters, which is Mimir's ingest-storage architecture. Its 30,000 records/s per broker is an UNCITED assumption carried over from the previous version of this file — no first-party per-broker figure for this workload was found — and it must not be read as evidence. It is close enough to the top of the ranking here to matter, so it is the first number to replace with your own measurement.",
       "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "GAP: consumer fan-out is not modelled on the bus. Each of the three ingester replicas consumes the same records, so a broker's read load is roughly three times the produce load counted on this flow; only the produce leg (visit_prob 1.0) is on the path, while the replication multiplier is applied at the ingester where it binds on memory. Fix: if your brokers are network- or disk-read-bound rather than produce-bound, raise this hop's visit_prob to match your replica count before trusting this tier's headroom.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cache",
+      "statement": "The query-result cache is modelled at 20,000 rps per node. No public per-node figure was found for this workload, so this is an uncited assumption and is stated as one. It is not load-bearing: the tier carries a small fraction of the declared capacity at this mix, and changing it does not change which component binds.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "compaction",
+      "statement": "GAP: compaction, downsampling and retention are not modelled as components and their cost is not in the bill. For scale, Thanos downsamples to 5-minute resolution after 40 hours and to 1-hour resolution after 10 days, and its docs note that downsampling 'can increase the size of your storage a bit (~3x)' — counter-intuitive, because the downsampled series are kept ALONGSIDE the raw ones rather than replacing them. Grafana's 500-million-series deployment ran 30 compactors, so this is not a rounding error at scale. Fix: add a compactor tier and a storage GB line before treating the cost figure here as a budget.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "query",
+      "statement": "GAP: cardinality explosion — the failure mode that actually kills these systems — is NOT expressible in this engine. It changes the cost per query and the number of series held per ingester, and the engine takes both as fixed inputs. What this design can now show you is the SHAPE of the exposure, which the previous version could not: the ingester tier is sized off active series held in memory, so a doubling of your series count halves the modelled capacity of the tier that binds. Fix: re-run this blueprint with the ingester's per-instance rate divided by your expected cardinality growth factor, and treat the result as the planning case.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "verdict",
+      "statement": "Read the ranking with its inputs in view. Which tier binds here is set by three things: Mimir's published per-core rules for the distributor and the querier, the published 300,000-series-per-core ingester rule, and an ASSUMED 15 s scrape interval that is not published anywhere. The first three carry sources; the scrape interval does not, and it moves the ingester's capacity directly (10 s gives 30,000 samples/s per core, 60 s gives 5,000 — the band on that grounding). The previous version of this file ranked its top three tiers effectively level on per-instance rates that carried no source at all, which made its headline a coin-flip dressed as a determination. Replication factor, scrape interval and the per-query ingester cost are the three inputs to change first if you are adapting this design.",
+      "confidence": "high",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
@@ -338,7 +517,7 @@
   "_library": {
     "category": "data_pipeline",
     "difficulty": "intermediate",
-    "summary": "Write-dominated metrics platform: remote-write ingest through a log into a TSDB writer, with a cached query tier for dashboards and alerting.",
+    "summary": "Write-dominated metrics platform: batched remote-write through distributors and a Kafka log into replicated TSDB ingesters, with a cached read tier for dashboards and standing alert rules that also reads the ingesters' in-memory head.",
     "keywords": [
       "metrics",
       "monitoring",

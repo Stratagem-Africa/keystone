@@ -3,7 +3,7 @@
   "name": "RAG + MCP Assistant",
   "workload": {
     "system_rps": 200.0,
-    "description": "200 asks/s; 30% semantic-cache hit; retrieval + model call behind a provider quota"
+    "description": "200 asks/s; 30% semantic-cache hit; embed -> retrieve -> generate behind a provider TOKEN quota"
   },
   "components": [
     {
@@ -27,8 +27,8 @@
       "id": "api",
       "kind": "app_server",
       "name": "Assistant API / agent runtime (MCP host)",
-      "per_instance_rps": 60.0,
-      "instances": 5,
+      "per_instance_rps": 40.0,
+      "instances": 8,
       "base_latency_ms": 8.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
@@ -61,16 +61,16 @@
     {
       "id": "llm",
       "kind": "api_gateway",
-      "name": "Model API gateway (provider quota pools)",
-      "per_instance_rps": 67.0,
+      "name": "Model API gateway (provider TOKEN quota pools)",
+      "per_instance_rps": 105.0,
       "instances": 3,
-      "base_latency_ms": 2400.0,
+      "base_latency_ms": 4655.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
       "storage_gb": 0,
       "requests_per_month": 0,
-      "llm_input_tokens_per_month": 475061760000,
-      "llm_output_tokens_per_month": 53239680000,
+      "llm_input_tokens_per_month": 455787648000,
+      "llm_output_tokens_per_month": 50712480000,
       "provenance": "ASSUMPTION",
       "groundings": {},
       "match_context": {}
@@ -114,8 +114,8 @@
       "id": "vec",
       "kind": "sql_db",
       "name": "Vector store (PostgreSQL + pgvector, HNSW)",
-      "per_instance_rps": 900.0,
-      "instances": 1,
+      "per_instance_rps": 40.0,
+      "instances": 5,
       "base_latency_ms": 25.0,
       "monthly_cost_per_instance": 16425,
       "egress_gb_per_month": 0,
@@ -154,7 +154,7 @@
       "base_latency_ms": 30.0,
       "monthly_cost_per_instance": 0,
       "egress_gb_per_month": 0,
-      "storage_gb": 4200,
+      "storage_gb": 213,
       "requests_per_month": 0,
       "llm_input_tokens_per_month": 0,
       "llm_output_tokens_per_month": 0,
@@ -179,6 +179,10 @@
         {
           "component_id": "cache",
           "visit_prob": 1.0
+        },
+        {
+          "component_id": "llm",
+          "visit_prob": 0.7
         },
         {
           "component_id": "vec",
@@ -248,53 +252,116 @@
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "flow",
+      "statement": "CORRECTED 2026-09-12: the ask path now visits the model gateway TWICE - once to EMBED the question before the vector search, and once to GENERATE the answer after it. The previous path visited the gateway only after retrieval (0.7 visits total), which is not a retrieval-augmented flow that can physically run: you cannot search a vector index without first embedding the query. It also contradicted this file's own token assumption, which described the per-call figures as blended 'across answer generation and embedding calls' - so embedding calls did route through this node, the path simply never charged them to it. Repeating a component in a path is supported (multi_agent_supervisor's run path visits its model node three times), so this was an omission in the blueprint, not an engine limitation. The correction raises the gateway's call rate by 1.95x and is the single change that moves the bottleneck off the runtime tier and onto the provider quota.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
       "subject": "cache",
-      "statement": "30% of asks are served from the semantic answer cache, so retrieval and the model call both carry visit probability 0.7. Half of the remaining asks need full chunk text from object storage (0.35 of asks).",
+      "statement": "30% of asks are served from the semantic answer cache, so the embedding call, the vector search and the generation call all carry visit probability 0.7. Half of the remaining asks need full chunk text from object storage (0.35 of asks). A cache hit skips BOTH model calls, which is why the cache hit rate is the cheapest available lever on the quota tier.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "llm",
-      "statement": "The hosted model provider is NOT a separate node: v1's compute catalogue has no per-instance price for an external API, so pricing one would be an invented number. It is modelled as the model API gateway that fronts it (LiteLLM/Bedrock-shaped). Capacity is the PROVISIONED PROVIDER QUOTA: 3 pools x 4,000 requests/minute, about 201 model calls/s. That ceiling, not the servers, is what a real deployment hits first.",
+      "statement": "The hosted model provider is NOT a separate node: v1's compute catalogue has no per-instance price for an external API, so pricing one would be an invented number. It is modelled as the model API gateway that fronts it (LiteLLM/Bedrock-shaped). Its capacity is the PROVISIONED PROVIDER QUOTA. The previous '4,000 requests/minute' figure was unattributed; it is replaced with Anthropic's published Scale-tier limits, which apply per organization and per model: 10,000 requests/min, 10,000,000 input tokens/min (ITPM) and 2,000,000 output tokens/min (OTPM) for Claude Sonnet 5 / Opus 5 / Haiku 4.5 (platform.claude.com/docs/en/api/rate-limits). Three pools are modelled, and the docs force the caveat: 'Organization-wide limits always apply, even if Workspace limits add up to more' - so three pools CANNOT be three workspaces inside one organisation. They must be three distinct models, providers or accounts, which is a procurement and evaluation problem, not a scaling knob.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "llm",
-      "statement": "5,800 input and 650 output tokens per model call, blended across answer generation and embedding calls. Monthly token volume = peak model-call rate / 4 (peak-to-average) x 2,592,000 s.",
+      "statement": "WHICH QUOTA DIMENSION BINDS - the number the old blueprint got wrong. It modelled only requests/minute, the one dimension with headroom. At the modelled mix the gateway sees roughly 120 generation calls/s and roughly 126 embedding calls/s, so generation is about 48.8% of gateway calls. Converting each published Scale-tier ceiling into blended gateway calls/s for ONE pool at that mix: requests -> 10,000/60 = 167 calls/s; output tokens -> 2,000,000 / (0.488 x 650) / 60 = 105 calls/s; input tokens with NO prompt caching -> 10,000,000 / (0.488 x 5,800 + 0.512 x 40) / 60 = 58 calls/s; input tokens at an 80% cache-read rate -> 10,000,000 / (0.488 x 1,160 + 0.512 x 40) / 60 = 284 calls/s. So uncached, ITPM binds at about 58 calls/s per pool and this design is infeasible; with heavy prompt caching, OTPM binds at about 105 calls/s per pool. per_instance_rps is set to that 105 and instances to the 3 distinct accounts. The engine has ONE capacity dimension per component, so this is a token ceiling CONVERTED to calls/s at the current mix - it is not a request limit, and it moves if the token mix moves.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "PROMPT CACHING IS A CAPACITY LEVER, NOT JUST A COST FOOTNOTE. Anthropic's rate-limit docs state that cache_read_input_tokens do not count toward ITPM on most models, and give the worked example: 'With a 2,000,000 ITPM limit and an 80% cache hit rate, you could effectively process 10,000,000 total input tokens per minute.' For this design that is the difference between infeasible and feasible - see the dimension figures above, where caching moves the input-token ceiling from below the offered load to well above it. The long stable prefix here (system prompt, MCP tool definitions, and a fixed corpus preamble) is exactly the shape that caches well. If you take one lesson from this blueprint, it is that on a token-quota-bound design the cache prefix is a capacity decision made by the prompt author.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "Token sizing per call, now split by call type rather than blended: a GENERATION call carries about 5,800 input tokens (system prompt + MCP tool definitions + retrieved chunks) and about 650 output tokens; an EMBEDDING call carries about 40 input tokens for a user question and produces no output tokens. Monthly volume = the per-type peak call rate / 4 (peak-to-average) x 2,592,000 s.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "cost",
-      "statement": "PROMPT CACHING IS NOT MODELLED. The engine has one input-token rate and no cache-read tier, so a design reusing a long system/tool prefix would pay far less than shown. Treat the token line as an upper bound.",
-      "confidence": "high",
-      "source": "llm_inferred",
+      "subject": "llm",
+      "statement": "base_latency_ms is now a FULL-RESPONSE figure, not a time-to-first-token figure. The old 2,400 ms was TTFT-shaped in a full-response slot. Artificial Analysis measures Claude Sonnet 5 at about 74 output tokens/s, so 650 output tokens is about 8.8 s of GENERATION ALONE before any time-to-first-token; roughly 9.5 s is used here for a generation call. Because one node serves both call types, the field holds the CALL-WEIGHTED blend: (126.4 embedding calls x ~40 ms + 120.4 generation calls x ~9,500 ms) / 246.8 calls = about 4,655 ms. The ask path visits the node twice at 0.7, so the blend recovers roughly the right per-ask service time (1.4 x 4,655 = 6,517 ms against a true 0.7 x (40 + 9,500) = 6,678 ms).",
+      "confidence": "low",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "llm",
+      "statement": "GAP - the blended latency above is right on average and wrong per visit. A fast embedding call is charged the blend, and so is a slow generation call; the M/M/c waiting term is likewise charged twice per ask at the blended service time. Splitting the gateway into an embedding node and a generation node would fix this, at the cost of two quota rows that in reality draw on the SAME organisation ceiling - which v1 cannot express either. Read the per-flow latency here as order-of-magnitude only. The arrival and utilisation figures on this node do not depend on the blend and are the trustworthy output.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cost",
+      "statement": "PROMPT CACHING IS NOT MODELLED IN THE COST LINE, even though it IS modelled in the capacity line above. The engine has one input-token rate and no cache-read tier, so the token spend shown bills every input token at the full rate while the ITPM headroom assumes 80% of them are cache reads. The two halves of this blueprint therefore disagree on purpose, and the disagreement is disclosed rather than hidden: treat the token COST as an upper bound and the token CAPACITY as the cached case. Closing this needs a cache-read price tier in the engine.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
       "subject": "api",
-      "statement": "60 req/s per runtime instance: each request is held open for the roughly 2.4 s model round-trip, so this tier is concurrency-bound rather than CPU-bound.",
+      "statement": "40 req/s per runtime instance: this tier is I/O-concurrency-bound, not CPU-bound - each ask holds an upstream model call open for the full response. The old 60 req/s was derived from a '2.4 s model round-trip' that the latency note above shows is a TTFT-shaped number; at the corrected round-trip (about 9.5 s of generation, plus the embedding call, the vector search and the chunk fetch, and only on the 70% of asks that miss the cache) 40 req/s means roughly 270 requests in flight per instance. That is comfortable for an async/event-loop runtime and IMPOSSIBLE for a thread-per-request one, which is the real design constraint this number encodes. No published benchmark exists for this workload shape, so the figure is an ASSUMPTION and the instance count carries it: 8 instances instead of 5.",
       "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "vec",
-      "statement": "900 ANN searches/s per pgvector instance (HNSW, top-k over a few million chunks on 2 vCPU / 16 GiB).",
+      "statement": "40 ANN searches/s per pgvector instance at a STATED RECALL TARGET of about recall@10 = 0.92 with ef_search tuned to reach it. A pgvector rps with no recall target is not a capacity number: Alibaba Cloud's official ANN-Benchmarks run on 16 cores over 290K x 256-dim vectors moves 1,423.985 QPS at recall 0.630, 297.267 QPS at recall 0.918 and 84.268 QPS at recall 0.969 - a 17x spread on the same hardware and index. Scaled from that 16-core figure down to the 2 vCPU of a db.r6g.large, and allowing that 1,536-dim vectors cost several times more per distance computation than 256-dim ones, 40 searches/s is the conservative figure used here. It is an ASSUMPTION: no published figure exists for 1,536-dim HNSW on this instance class. The old 900/s was not survivable on any of the three published measurements below.",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "docs",
-      "statement": "Object-store capacity is expressed as about 5,500 GET/s per S3 prefix; instances here mean PREFIXES, not servers. Corpus sized at roughly 4.2 TB of source documents and chunks.",
+      "subject": "vec",
+      "statement": "CORPUS RESIZED so the HNSW index is actually resident: about 1,000,000 indexed chunks, down from 'a few million'. Jonathan Katz measured a 1M x 1,536-dim HNSW index at 7,734 MB, and 1M raw 1,536-dim float4 vectors are about 6.1 GB, so roughly 13.9 GB per million - already at the edge of a 16 GiB box before shared_buffers, WAL and the heap. 'A few million' would have been about 42 GB on 16 GiB, so the index could not have been resident and every search would have gone to disk. Corroboration that the old sizing was not realistic: AWS's own pgvector deep-dive ran on exactly this class of box (db.r5.large, 2 vCPU / 16 GiB) with only 58,634 documents totalling 364 MB, and explicitly disclaimed benchmarking intent; Supabase needed an 8-core / 32 GB instance to benchmark 1M x 1,536 at all.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "vec",
+      "statement": "The tier is now internally coherent on concurrency, which the old figures were not: 40 searches/s x 25 ms is about 1 Postgres backend in flight per instance on 2 vCPU, leaving the second core for ingestion writes, autovacuum and WAL. The old 900/s x 25 ms implied 22.5 backends in flight on 2 vCPU for a CPU-bound SIMD workload, while both published harnesses cited above run one query at a time.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "vec",
+      "statement": "GAP - how this tier scales past ~1M chunks is NOT modelled. The binding resource on a pgvector tier is RAM for a resident index, not throughput, and adding replicas does not help because every replica holds a full copy. Growing the corpus needs either a larger instance class (v1's compute catalogue has no cited price for one here, and inventing one would be worse than the gap) or sharding with query fan-out. Fan-out IS expressible - visit_prob above 1 models it - but it is not used here, because a sharded design also multiplies the per-search cost across shards and would need its own per-shard capacity evidence.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "docs",
+      "statement": "Object-store capacity is expressed as about 5,500 GET/s per S3 prefix; instances here mean PREFIXES, not servers. This is the one figure in the file that matches a first-party published number verbatim (AWS S3 performance guidelines). Storage resized with the corpus: about 1,000,000 indexed chunks drawn from roughly 150,000 source documents, originals averaging about 1.4 MB, so about 210 GB of originals plus about 3 GB of extracted chunk text.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "docs",
+      "statement": "GAP - reads and writes share one capacity number. AWS documents about 5,500 GET/s AND about 3,500 PUT/COPY/POST/DELETE per second per prefix; the ingestion flow writes to this node, but v1 has a single per_instance_rps per component, so the GET ceiling is what the engine sees. At the modelled 3% ingestion share the write rate is far below either ceiling, so this does not change the verdict here - it would matter for a bulk-backfill workload.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
     },
     {
       "subject": "cost",
@@ -312,24 +379,31 @@
     },
     {
       "subject": "db",
-      "statement": "The write primary is a SINGLE instance and the engine reports it as a single point of failure. That is the shape of the design: high availability comes from Multi-AZ standby failover, which v1 cannot express - `instances` means active capacity, and a warm standby serves no traffic. Budget for it (the RDS price band tops out at Multi-AZ) and treat the SPOF flag as a reminder, not a modelling error.",
+      "statement": "The vector tier is a write primary plus read replicas, and v1 cannot express that split: `instances` means undifferentiated active capacity, so the engine spreads ALL traffic - including the ingestion writes - evenly across five nodes. Only one of the five actually accepts writes, so the write path remains a single point of failure that the utilisation figure does not show, and the engine no longer raises a SPOF flag now that the instance count is above one. That is a modelling limitation, not an improvement in the design. High availability for the primary comes from Multi-AZ standby failover, which v1 also cannot express - a warm standby serves no traffic - so budget for it: the RDS price band tops out at Multi-AZ.",
       "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "engine",
-      "statement": "The engine now queues each tier as M/M/c (Erlang-C over its instance count), so a fleet is no longer charged the waiting time of a single server \u2014 this assumption previously warned that the latency here was pessimistic for exactly that reason, and that warning is obsolete as of 2026-09-07. What remains true, and matters more: a PROVIDER QUOTA is not a fleet you own. Its concurrency is a contractual number you buy, it can be changed by the provider, and it cannot be relieved by adding your own instances. Read the ARRIVAL and UTILISATION figures as the trustworthy output and treat the quota row as a contract to renegotiate rather than capacity to provision.",
+      "statement": "The engine queues each tier as M/M/c (Erlang-C over its instance count), so a fleet is no longer charged the waiting time of a single server. What matters more here: a PROVIDER QUOTA is not a fleet you own. Its ceiling is a contractual number you buy, it can be changed by the provider, and it cannot be relieved by adding your own instances - which is precisely why the old blueprint's verdict was harmful. It put the runtime tier on top, teaching 'add API instances', when the wall is a token-per-minute contract that more instances of your own make WORSE, not better. Read the ARRIVAL and UTILISATION figures as the trustworthy output and treat the quota row as a contract to renegotiate, a cache prefix to lengthen, or an output budget to shorten.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "engine",
-      "statement": "Streaming responses are modelled as a single request/response. Time-to-first-token, which is what users actually feel in a RAG assistant, is NOT computable in v1.",
+      "statement": "Streaming responses are modelled as a single request/response. Time-to-first-token, which is what users actually feel in a RAG assistant, is NOT computable in v1 - which is why base_latency on the gateway is now a full-response figure and the reported latencies look long compared with how the product feels.",
       "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "llm",
+      "statement": "GAP - the levers that actually move this design's ceiling are mostly outside the engine's vocabulary, so they are named here rather than modelled: shorten the output budget (OTPM is the binding dimension and output tokens cannot be cached), raise the semantic-cache hit rate above 30% (it removes whole calls), route embeddings to a cheaper model or a self-hosted embedder on a separate quota, batch ingestion embeddings, or negotiate a higher tier. Adding runtime instances or vector replicas changes none of them.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],
@@ -345,7 +419,7 @@
   "_library": {
     "category": "ai_agents",
     "difficulty": "intermediate",
-    "summary": "Retrieval-augmented assistant: semantic cache, pgvector search over a document corpus, and a quota-bounded model gateway.",
+    "summary": "Retrieval-augmented assistant: semantic cache, pgvector search over a document corpus, and a token-quota-bounded model gateway.",
     "keywords": [
       "retrieval augmented generation",
       "vector search",

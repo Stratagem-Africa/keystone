@@ -3,7 +3,7 @@
   "name": "Hotel Reservation System",
   "workload": {
     "system_rps": 2000,
-    "description": "Search-dominated booking funnel: 90% availability search, 6% booking attempts"
+    "description": "OTA-style booking funnel sized from a PUBLISHED look-to-book ratio (1,000 searches per booking attempt): 80.0% availability search, 17.52% hotel detail, 0.4% price re-check, 0.08% booking attempts, 2% manage-an-existing-booking"
   },
   "components": [
     {
@@ -164,11 +164,46 @@
       }
     },
     {
+      "id": "supplier",
+      "kind": "app_server",
+      "name": "Supplier / CRS connector (blocks on the supplier's book + price-check API)",
+      "per_instance_rps": 20,
+      "instances": 2,
+      "base_latency_ms": 400.0,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
       "id": "pay",
       "kind": "app_server",
       "name": "Payment authorisation service (blocks on the acquirer)",
       "per_instance_rps": 50,
-      "instances": 3,
+      "instances": 2,
       "base_latency_ms": 150.0,
       "monthly_cost_per_instance": 4964,
       "egress_gb_per_month": 0,
@@ -202,7 +237,7 @@
   "flows": [
     {
       "name": "search_availability",
-      "share": 0.75,
+      "share": 0.8,
       "path": [
         {
           "component_id": "lb",
@@ -224,7 +259,7 @@
     },
     {
       "name": "view_hotel",
-      "share": 0.15,
+      "share": 0.1752,
       "path": [
         {
           "component_id": "lb",
@@ -245,8 +280,30 @@
       ]
     },
     {
+      "name": "price_check",
+      "share": 0.004,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "supplier",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
       "name": "book_room",
-      "share": 0.06,
+      "share": 0.0008,
       "path": [
         {
           "component_id": "lb",
@@ -258,6 +315,10 @@
         },
         {
           "component_id": "db",
+          "visit_prob": 2.0
+        },
+        {
+          "component_id": "supplier",
           "visit_prob": 1.0
         },
         {
@@ -268,7 +329,7 @@
     },
     {
       "name": "manage_booking",
-      "share": 0.04,
+      "share": 0.02,
       "path": [
         {
           "component_id": "lb",
@@ -288,9 +349,23 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "2,000 req/s peak. A booking funnel is search-dominated: 90% of traffic is availability search and hotel detail, and only 6% is a booking attempt",
+      "statement": "2,000 req/s peak. The search:book MIX IS DERIVED FROM A PUBLISHED LOOK-TO-BOOK RATIO, not guessed: 1,000 availability searches per booking attempt (search 80.0% of requests, book 0.08%). IATA's 'Addressing NDC scalability challenges in the leisure market' (March 2019; study by Jean Philippe Mesure of ITS4T, drawn from more than 25 interviews with leading industry actors) reports that 'Far from the 100- to 300-to-1 observed with airlines' own websites, the look-to-book ratios for OTAs or MSEs are in the best case 1,000-to-1 but more commonly above 10,000-to-1', and that 'an average look-to-book ratio in the range of 5,000- to 10,000-to-1 should be achievable'. CROSS-DOMAIN CAVEAT, STATED HONESTLY: those are AIRLINE NDC distribution figures transferred to hotel, not hotel measurements. The hotel-native anchor points the same way - Booking.com reports 'over 8 billion requests per day, with peaks of 100,000 requests per second' while selling 'around one billion reservations per year' (Sanver Tarmur, Booking.com, GraphQL Summit 2024, reported by Apollo GraphQL), which is roughly 2,900 requests per reservation. 1,000:1 is deliberately the MOST booking-heavy end of the published range, so the payment path here is stressed harder than the literature says it would be in practice. THE PREVIOUS VERSION OF THIS BLUEPRINT USED 0.75/0.06 = 12.5:1, i.e. 8x to 800x too booking-heavy, and that single input error is what made it name the wrong bottleneck.",
       "confidence": "med",
-      "source": "llm_inferred",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "SANITY ANCHOR ON THE ABSOLUTE BOOKING RATE (arithmetic on the inputs, not an engine output): at 2,000 rps and a 0.08% booking share this design attempts about 1.6 bookings per second, roughly 138,000 a day. Booking.com sells 'around one billion reservations per year' (~2.7 million a day), so this blueprint models a large regional OTA at a few percent of that - a believable system. The previous version's 6% booking share implied about 120 booking attempts per second, which is several times Booking.com's ENTIRE global reservation rate, served by four m6i.large instances and one Postgres primary.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "~650 req/s per instance and ~30 ms of own work per search. NO VENDOR PUBLISHES a per-instance throughput figure for a hotel availability-search API, so this is an uncited engineering estimate and is labelled as one - do not read it as measured. Availability search fans out across a date range and every rate plan, so it is by far the most expensive read in the system. The 30 ms of own work does sit comfortably inside the one published latency budget for this domain: Google's hotel-prices docs state that 'All Live pricing query requests have a response time limit which is typically up to 4000 milliseconds', with deadlines configurable as low as 500 ms. STRUCTURALLY, EVERY flow in this design traverses the app tier with visit_prob 1.0, so its utilisation is fixed by TOTAL load and is independent of the search/book mix; only the booking-path components move when the mix moves. That is why, once the look-to-book ratio is set from published evidence, search capacity is the binding resource and the booking path is not. The design lesson is 'a booking funnel is a search-capacity problem'.",
+      "confidence": "low",
+      "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
@@ -301,29 +376,71 @@
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "pay",
-      "statement": "THE AUTHORISATION TIER IS THE BOTTLENECK AT 80%, NOT THE APP TIER. What is modelled is the payment service YOU run; the card acquirer itself is not a component, because a third-party API has no per-instance price (it is billed per transaction, e.g. 2.9% + $0.30). Its capacity of 150 auth/s is deliberately set to the CONTRACTED ACQUIRER RATE LIMIT: each instance blocks on a ~150 ms round-trip, and adding instances past the contracted ceiling buys nothing. Raising that limit is worth more than any amount of app-tier scaling",
+      "subject": "cache",
+      "statement": "WHY A CACHE IN FRONT OF A READ REPLICA IS THE RIGHT SHAPE HERE, AND NOT A GENERIC READ-THROUGH BOLT-ON: hotel availability and rates arrive as a PUSH feed, not a query. Google's official hotel-prices documentation states that 'ARI feeds aren't queried for specific prices or itineraries. Instead, you push messages when your pricing model has new or changed data', that prices should be 'visible to users within 15 to 20 minutes after a message has been received', and that under Changed Pricing 'Prices stay in the cache indefinitely until updated'. Rate data that is pushed and then read many times is exactly what a cache is for; the replica behind it serves the long tail of misses. Google also publishes 'an account-level maximum update rate of 400 messages per second' for those feeds - the ingest side of this cache, which this blueprint does not model at all.",
       "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "supplier",
+      "statement": "THIS BLUEPRINT IS AN OTA / RESELLER, NOT A SINGLE CHAIN'S OWN BOOKING ENGINE, and that choice decides which external dependency binds. An OTA's booking path calls a supplier or CRS to re-validate a rate and then to book it. Expedia Group's Rapid lodging documentation sets out the sequence Shop -> Price Check -> Book, with Price Check defined as 'Confirms the price returned by the Shop response. Use this API to verify a previously-selected rate is still valid before booking', alongside hold-and-resume ('Some inventory isn't eligible for hold and resume') and expiring tokens ('Tokenized request links will expire after a short period'). That supplier/CRS call is slower and more tightly rate-limited than any card acquirer, so the previous version - which modelled the acquirer as the ONLY external dependency - modelled the less constraining of the two. If you are a single chain running your own inventory, delete this component and the price_check flow; your booking path then ends at your own database.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "supplier",
+      "statement": "NO PUBLIC FIGURE EXISTS for a supplier/CRS booking-API rate ceiling or round-trip time, so the 20 calls/s per connector instance, the 2-instance (40 calls/s) ceiling and the ~400 ms round trip are uncited engineering estimates - SAID PLAINLY, because pretending otherwise would be the same error this file is fixing. For scale only, the nearest PUBLISHED rate ceiling anywhere in hotel distribution is Google's 'account-level maximum update rate of 400 messages per second' for ARI feeds, but that governs a PUSH feed of availability and rates, not a booking call, so it is context and not evidence for this number. Like the payment tier, this connector blocks on someone else's API: its capacity is set by concurrency and by a contract, not by CPU, and adding instances past the contracted ceiling buys nothing.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "The two funnel shares that are NOT derived from a published ratio, flagged so a reader does not mistake them for evidence. (1) price_check at 0.4% = 5 price re-checks per completed booking: travel checkout abandonment is high and a shopper re-validates several candidate rates before committing, but no vendor publishes a price-check:book ratio, so this is an estimate. (2) manage_booking at 2% is driven by the STOCK of existing reservations, not by today's booking rate - itineraries are viewed, modified and cancelled repeatedly between booking and stay - so it is deliberately NOT scaled off the booking share, and it is also an estimate with no public source.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "THE BOOKING PATH NOW MODELS THE TWO HOPS THAT MAKE HOTEL INVENTORY HARD AND THAT THE PREVIOUS VERSION OMITTED ENTIRELY: a price re-check before book (its own flow, hitting the supplier), and a HOLD with a TTL. The hold is modelled as visit_prob 2.0 on the db hop of book_room - one write to place a hold row that expires, one to commit the reservation and release it. The engine counts those as two arrivals and NOTHING MORE: it does not model the TTL, the expiry sweep, or a hold that lapses mid-checkout, and a real system's abandoned holds - placed and never converted - would add write load this design does not carry.",
+      "confidence": "low",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "pay",
-      "statement": "At 80% utilisation the M/M/1 queueing term roughly quintuples the 150 ms acquirer round-trip to ~750 ms AT THAT HOP, which drags the booking flow to ~890 ms mean and ~4.1 s at p99 while search stays near 130 ms. That is a real prediction of this model and the single most important number in the design",
+      "statement": "THE PAYMENT TIER IS NOT THE BOTTLENECK IN THIS DESIGN. The previous version asserted in capitals that it was, on a 12.5:1 look-to-book ratio; under every published look-to-book ratio - including the most booking-heavy figure in the literature, the 100- to 300-to-1 of an airline's OWN website - the authorisation path is nowhere near the constraint. What is modelled is the authorisation service YOU run; the card acquirer itself is not a component, because a third-party API has no per-instance price (it is billed per transaction, e.g. 2.9% + $0.30). Capacity is now pinned to a PUBLISHED ceiling instead of a guess: Stripe's rate-limit documentation gives a live-mode 'Global API rate limit - Live mode: 100 requests per second' and 'Individual API endpoints (unless otherwise noted): 25 requests per second', so this design provisions 2 x 50 auth/s = 100 auth/s and stops there. The previous 150 auth/s 'contracted acquirer rate limit' was 6x Stripe's published per-endpoint default and 1.5x its global live-mode default - reachable only as a NEGOTIATED ENTERPRISE LIMIT, which the old text never said.",
       "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
-      "subject": "app",
-      "statement": "~650 req/s per instance. Availability search fans out across a date range and every rate plan, so it is by far the most expensive read in the system",
-      "confidence": "low",
+      "subject": "pay",
+      "statement": "MECHANISM CAVEAT, KEPT FROM THE EARLIER VERSION WITH ITS HAND-WRITTEN LATENCY FIGURES REMOVED (the engine produces numbers, not the author; the old prose asserted specific millisecond outputs, and they were computed off the wrong mix anyway). Each authorisation instance BLOCKS on a ~150 ms acquirer round-trip, so this tier's capacity is set by concurrency and by contract, not by CPU, and its queueing term grows sharply as utilisation approaches the ceiling - which is why a small absolute number of authorisations per second can still hurt. At the look-to-book ratio modelled here the tier runs far from that ceiling, so the effect is LATENT rather than absent. Read the engine's per-flow latency output for the actual figures; do not take them from this sentence.",
+      "confidence": "med",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
     },
     {
+      "subject": "workload",
+      "statement": "GAP - THE PAYMENT-CONSTRAINED CASE IS NOT MODELLED HERE, AND IT SHOULD BE A SEPARATE, LABELLED WHAT-IF RATHER THAN THE DEFAULT MIX. A flash sale, a city-wide event, a rate drop or a same-day mobile-push campaign compresses the look-to-book ratio by orders of magnitude for minutes at a time, and THAT - not steady-state traffic - is when the authorisation tier and the supplier/CRS connector bind. To explore it, raise the book_room share deliberately, run it as a burst, and label the run as a burst. Nothing in this blueprint's steady-state mix covers it, and the steady-state mix must not be bent to imply that it does.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "workload",
+      "statement": "GAP - the search tier's load is treated as human demand only. A large share of a real OTA's availability traffic is automated (metasearch partners, price scrapers, cache-warming crawlers), which is a large part of WHY the published look-to-book ratio is so extreme in the first place. This design does not separate that traffic, models no bot filter and no per-partner quota in front of the app tier, and therefore cannot tell you how much of the binding search capacity is being spent on requests that were never going to book.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
       "subject": "db",
-      "statement": "The primary is sized for TRANSACTION CONTENTION, not throughput: at 200 req/s it reads as ~3% busy. Room inventory needs serialisable holds - two guests must not book the last room - and the v1 analytical engine models throughput only, NOT lock contention or transaction aborts. The real booking ceiling is lower than 8,000 req/s and this model does not tell you by how much",
+      "statement": "The primary is sized for TRANSACTION CONTENTION, not throughput. Room inventory needs serialisable holds - two guests must not book the last room - and the v1 analytical engine models throughput only, NOT lock contention, hold expiry or transaction aborts. Whatever utilisation the engine reports for this component, the real booking ceiling is lower than 8,000 req/s and this model does not tell you by how much. (The earlier version made the same point but hand-wrote a utilisation figure into the prose, which is the engine's job.)",
       "confidence": "low",
       "source": "benchmark",
       "provenance": "ASSUMPTION"
@@ -358,7 +475,7 @@
   "_library": {
     "category": "web_app",
     "difficulty": "advanced",
-    "summary": "Search-dominated booking funnel where the rate-limited payment authorisation path, not the app tier, is the constraint.",
+    "summary": "OTA booking funnel sized from a published look-to-book ratio, where SEARCH capacity - the app tier - is the binding constraint, not the payment or supplier/CRS path.",
     "keywords": [
       "hotel booking",
       "hotel reservation",

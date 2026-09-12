@@ -27,7 +27,7 @@
       "id": "auth",
       "kind": "app_server",
       "name": "Auth service (token issue + verify)",
-      "per_instance_rps": 3000,
+      "per_instance_rps": 2100,
       "instances": 3,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 4964,
@@ -62,7 +62,7 @@
       "id": "users",
       "kind": "app_server",
       "name": "User service (profiles, preferences)",
-      "per_instance_rps": 1500,
+      "per_instance_rps": 1275,
       "instances": 2,
       "base_latency_ms": 8.0,
       "monthly_cost_per_instance": 7008,
@@ -97,8 +97,8 @@
       "id": "catalog",
       "kind": "app_server",
       "name": "Catalog service (products, stock)",
-      "per_instance_rps": 2000,
-      "instances": 5,
+      "per_instance_rps": 1600,
+      "instances": 6,
       "base_latency_ms": 6.0,
       "monthly_cost_per_instance": 4964,
       "egress_gb_per_month": 0,
@@ -132,8 +132,8 @@
       "id": "orders",
       "kind": "app_server",
       "name": "Order service (create, status)",
-      "per_instance_rps": 1200,
-      "instances": 3,
+      "per_instance_rps": 1056,
+      "instances": 2,
       "base_latency_ms": 12.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
@@ -272,7 +272,7 @@
       "id": "orderdb",
       "kind": "sql_db",
       "name": "PostgreSQL \u2014 order service database",
-      "per_instance_rps": 8000,
+      "per_instance_rps": 1200,
       "instances": 1,
       "base_latency_ms": 5.0,
       "monthly_cost_per_instance": 12994,
@@ -342,7 +342,7 @@
   "flows": [
     {
       "name": "browse-catalog",
-      "share": 0.5,
+      "share": 0.61,
       "path": [
         {
           "component_id": "gw",
@@ -412,7 +412,7 @@
     },
     {
       "name": "place-order",
-      "share": 0.12,
+      "share": 0.01,
       "path": [
         {
           "component_id": "gw",
@@ -470,7 +470,21 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "12,000 rps at peak, read-dominated: half the traffic is catalog browsing, 12% places an order.",
+      "statement": "12,000 rps at peak, read-dominated. The order share is now ~1% of requests, not the 12% this file previously assumed. Two published Shopify figures set that. Shopify Engineering, 'Preparing Shopify for Black Friday Cyber Monday' (21 Dec 2018), reports BFCM peak of 'nearly 11,000 orders created per minute and around 100,000 requests per second being served for extended periods during the weekend' - 0.183% of requests create an order. Shopify Engineering, BFCM readiness (20 Nov 2025), reports a 2025 scale test in which 'by the fourth test, we hit 146 million requests per minute and 80,000+ checkouts per minute' - 0.055%. Allowing for the definitional gap between edge requests and app-server requests, the honest figure is sub-1%, so place-order moves 0.12 -> 0.01 and the freed 11 points go to browse-catalog (0.50 -> 0.61). The old 12% was ~65x the 2018 ratio and ~219x the 2025 one. These are one retailer's numbers, not an industry constant; a B2B or wholesale API would sit far higher.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "orderdb",
+      "statement": "The order database's ceiling was 8,000 rps per instance - 2.7x the 3,000 given to the two read-mostly Postgres instances in this same file, which is backwards: the WRITE primary is the slow one. It is now 1,200 rps, a TPC-C-class transaction rate for ONE un-sharded primary. Evidence: Verbitski et al., 'Amazon Aurora: Design Considerations for High Throughput Cloud-Native Relational Databases', SIGMOD 2017. Table 5 (Percona TPC-C variant, r3.8xlarge with 32 vCPUs and 244 GB on an EBS volume with 30K provisioned IOPS, 500 connections / 10 GB / 100 warehouses) measures MySQL 5.7 at 25,289 tpmC = 421 tx/s and Aurora at 73,955 tpmC = 1,233 tx/s. Table 2 (SysBench write-only, writes/sec - statements, not transactions) measures MySQL at 8,400/s on a 1 GB dataset falling to 1,500/s at 100 GB. So 1,200 tx/s is about 3x that 32-vCPU single-node MySQL 5.7 result - a generous allowance for 2017->2026 hardware - and roughly the distributed-storage Aurora figure. It is an OPTIMISTIC ceiling for a single node, not a conservative one. The same paper's section 6.1.5 ('Throughput with hot row contention') singles out hot-row contention - exactly an inventory decrement on one popular SKU - as where a single engine collapses well below this. That is NOT modelled here.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "orders",
+      "statement": "With the order share corrected, the order tier had been provisioned for roughly 65x the order rate it will actually see, so it is resized: the order service goes 3 instances -> 2. It still carries order-status reads, which outnumber creations 8:1 in this mix (0.08 share vs 0.01), so the tier is mostly a read tier wearing a write tier's name. The order database stays at ONE instance and is the component you cannot fix by adding instances: a single un-sharded primary is one machine by definition, so its ceiling is a hard wall, not a scaling knob. Sharding or partitioning order data (by customer or by order id) is the change that raises it; that is not modelled, and neither is the failover time of the SPOF it leaves. The Kafka pair stays at two brokers because replication needs at least two, not because the corrected order-event rate needs that much capacity - it is now far larger than the load it carries.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
@@ -484,10 +498,31 @@
     },
     {
       "subject": "auth",
-      "statement": "Every authenticated route verifies a token at the auth service, which is why auth sees 50% of all traffic and is the second-busiest tier. Verifying locally at the gateway would remove that hop and that failure mode.",
+      "statement": "Every authenticated route verifies a token at the auth service. Under the corrected mix the non-browse flows total 39% of requests (login 20%, profile 10%, order-status 8%, place-order 1%), so auth sees 39% of traffic rather than the 50% the old mix implied - but it is still the second-busiest tier, and because it runs the highest rps per instance in the file it pays the largest sidecar CPU tax (see the mesh assumptions), which costs it proportionally more usable capacity than any other tier here. Verifying tokens locally at the gateway would remove that hop, that failure mode and that tax in one move; it is the highest-leverage change available to this design.",
       "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "mesh",
+      "statement": "A service mesh IS assumed here (Istio-class sidecars on the four application tiers; the managed Redis and RDS instances sit outside it, and the gateway is itself a proxy so it gets no second one). Its cost is CPU, not latency, and this file previously worried about the wrong one. LATENCY: Istio's own 1.21 performance-and-scalability page measures that 'two proxies add about 0.182 ms and 0.248 ms to the 90th and 99th percentile latency, respectively' at 1000 rps, 1 kB payload, HTTP/1.1, mutual TLS enabled, 2 proxy workers. Five to six proxy-pair hops on the order path is therefore order-1.5 ms at p99 against base service times that sum to tens of milliseconds - immaterial. The widely-quoted '+3 ms p50 / +10 ms p99' figures come from Istio's performance-best-practices post of 9 Jul 2019 for Istio 1.2 with Mixer in the data path; they are superseded and roughly 40x worse than current, and are deliberately NOT used here.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "mesh",
+      "statement": "The sidecar CPU tax is SUBTRACTED from each application tier's per-instance capacity rather than left as a caveat, so the reader sees it in the sizing instead of in a footnote. Istio 1.24's performance page measures that 'a single sidecar proxy with 2 worker threads consumes about 0.20 vCPU and 60 MB of memory' per 1,000 rps / 1 KB (ambient's ztunnel is cheaper - 'about 0.06 vCPU and 12 MB' - and would cut this tax to roughly a third). Every application instance here is a 2-vCPU box: c6g.large for auth and catalog, m6i.large for users and orders, both 2 vCPU per AWS's published instance specs, and the class is already pinned in each component's match_context for pricing. The sidecar's share of those 2 vCPU is (nominal rps / 1000 x 0.20) / 2, so: auth 3,000 nominal -> 30% -> 2,100 usable; catalog 2,000 -> 20% -> 1,600; users 1,500 -> 15% -> 1,275; orders 1,200 -> 12% -> 1,056. Catalog is given a sixth instance to carry the same offered load at the reduced per-instance figure - that sixth box is what the mesh costs in money. The subtraction assumes the tier is CPU-bound and that the proxy competes for the same 2 vCPU as the application; neither is measured here, and the nominal per-instance rates it is applied to are themselves uncited, so treat the magnitude as derivable-but-unvalidated and the direction as the documented part.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "gw",
+      "statement": "The gateway's 20,000 rps per instance is an assumption wearing a number's clothes: there is no published figure behind it and none is available. Envoy's own benchmarking FAQ refuses to give one - 'There is no single QPS, latency or throughput overhead that can characterize a network proxy such as Envoy' - and warns to 'never measure latency at max load, this is not generally meaningful or reflecting of real system performance; aim to measure below the knee of the QPS-latency curve'. It is not load-bearing here - two instances at that claimed rate would be sized for more than three times the whole system's offered 12,000 rps - but it is unverified and would be the first thing to measure on your own config before trusting any headroom claimed above it.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "GAP"
     },
     {
       "subject": "gw",
@@ -505,10 +540,24 @@
     },
     {
       "subject": "engine",
-      "statement": "Service discovery, retries, circuit breakers and a service mesh's sidecar overhead are not modelled. Retry storms are the usual way this shape fails and the engine will not show them.",
+      "statement": "Service discovery, retries, circuit breakers and backpressure are still not modelled. Retry storms are the usual way this shape fails - one slow tier turns every caller's retry budget into extra load on the tier that is already slow - and the engine will not show it, because it computes a steady state, not a cascade.",
       "confidence": "high",
       "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
+      "provenance": "GAP"
+    },
+    {
+      "subject": "engine",
+      "statement": "Read the busiest-tier ranking as 'these tiers are the constraint', not 'this one tier is'. Every per_instance_rps in this file is an uncited assumption with no measured error bar, and the spread on any one of them is plausibly wider than the gap between the top two components. The engine publishes joint contenders when that gap is under five percentage points; a gap just above that threshold deserves the same caution and does not currently get it.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "engine",
+      "statement": "Two errors in OPPOSITE directions were cancelling in this file before this revision: the write database's ceiling was ~6.7x too high while the order rate was ~65x too high, so the order tier read as comfortable and the named constraint looked settled. Both are corrected here independently. That is worth stating because the previous verdict was not wrong by accident - it was right for reasons that did not hold.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
     }
   ],
   "domain_flags": [],

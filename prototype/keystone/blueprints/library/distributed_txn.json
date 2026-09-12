@@ -3,7 +3,7 @@
   "name": "Distributed Transaction Coordinator",
   "workload": {
     "system_rps": 3000,
-    "description": "3k business transactions/s; each fans out to 3 participants via an orchestrated saga"
+    "description": "3k business transactions/s; each is a SAGA over 3 participants \u2014 about 4 orchestrator invocations, 5 saga-log writes, 7 broker messages and 1 external card authorisation per transaction, which is why most visit counts are above 1"
   },
   "components": [
     {
@@ -28,7 +28,7 @@
       "kind": "app_server",
       "name": "Saga orchestrator (state machine, timeouts, retries)",
       "per_instance_rps": 1500,
-      "instances": 3,
+      "instances": 10,
       "base_latency_ms": 8.0,
       "monthly_cost_per_instance": 7008,
       "egress_gb_per_month": 0,
@@ -63,7 +63,7 @@
       "kind": "sql_db",
       "name": "Saga log + transactional outbox (PostgreSQL)",
       "per_instance_rps": 4000,
-      "instances": 1,
+      "instances": 5,
       "base_latency_ms": 4.0,
       "monthly_cost_per_instance": 16425,
       "egress_gb_per_month": 0,
@@ -94,10 +94,45 @@
       }
     },
     {
+      "id": "timer",
+      "kind": "sql_db",
+      "name": "Durable timer / timeout store (sharded, Temporal History-Shard analogue)",
+      "per_instance_rps": 4000,
+      "instances": 6,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 200,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
       "id": "q",
       "kind": "queue",
       "name": "Command/event bus (Kafka, at-least-once delivery)",
-      "per_instance_rps": 2800,
+      "per_instance_rps": 100000,
       "instances": 3,
       "base_latency_ms": 3.0,
       "monthly_cost_per_instance": 15330,
@@ -126,6 +161,41 @@
       },
       "match_context": {
         "instance_class": "kafka.m5.large"
+      }
+    },
+    {
+      "id": "relay",
+      "kind": "app_server",
+      "name": "Outbox message relay (polling publisher)",
+      "per_instance_rps": 2500,
+      "instances": 7,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
       }
     },
     {
@@ -234,6 +304,41 @@
       }
     },
     {
+      "id": "psp",
+      "kind": "app_server",
+      "name": "Card PSP rail (Stripe) \u2014 acquirer connections, quota-capped",
+      "per_instance_rps": 100,
+      "instances": 34,
+      "base_latency_ms": 200.0,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
       "id": "cache",
       "kind": "cache",
       "name": "Idempotency keys + participant lock registry (Redis)",
@@ -280,15 +385,23 @@
         },
         {
           "component_id": "coord",
-          "visit_prob": 1.0
+          "visit_prob": 4.0
         },
         {
           "component_id": "db",
-          "visit_prob": 1.0
+          "visit_prob": 5.1
+        },
+        {
+          "component_id": "timer",
+          "visit_prob": 6.0
         },
         {
           "component_id": "q",
-          "visit_prob": 1.0
+          "visit_prob": 7.0
+        },
+        {
+          "component_id": "relay",
+          "visit_prob": 4.0
         },
         {
           "component_id": "order",
@@ -303,8 +416,12 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "cache",
+          "component_id": "psp",
           "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 4.0
         }
       ]
     },
@@ -314,15 +431,23 @@
       "path": [
         {
           "component_id": "coord",
-          "visit_prob": 1.0
+          "visit_prob": 4.0
         },
         {
           "component_id": "db",
-          "visit_prob": 1.0
+          "visit_prob": 4.1
+        },
+        {
+          "component_id": "timer",
+          "visit_prob": 3.0
         },
         {
           "component_id": "q",
-          "visit_prob": 1.0
+          "visit_prob": 5.0
+        },
+        {
+          "component_id": "relay",
+          "visit_prob": 3.0
         },
         {
           "component_id": "inv",
@@ -333,8 +458,12 @@
           "visit_prob": 1.0
         },
         {
-          "component_id": "cache",
+          "component_id": "psp",
           "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 4.0
         }
       ]
     },
@@ -364,8 +493,120 @@
   "assumptions": [
     {
       "subject": "workload",
-      "statement": "3,000 business transactions/s at peak. 90% commit cleanly, 5% fail a step and run compensating actions, 5% are status polls from the caller. The 5% compensation rate is a payment-decline / out-of-stock rate, not an infrastructure failure rate.",
+      "statement": "3,000 business transactions/s at peak. 90% commit cleanly, 5% fail a step and run compensating actions, 5% are status polls from the caller. The 5% compensation rate is a payment-decline / out-of-stock rate, not an infrastructure failure rate. SCALE CONTEXT the earlier version did not give the reader: 3,000 multi-participant business transactions/s is Black-Friday-tier for a single merchant and is the same order of magnitude as a card network's average global authorisation rate. Read every sizing below as what this SHAPE costs at that load, not as somewhere to start.",
       "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "flows",
+      "statement": "THE FAN-OUT NOW LIVES IN THE FLOW, NOT IN THE CAPACITIES. A saga is a SEQUENCE, so one business transaction is MANY visits to the orchestrator, the saga log and the bus. Per commit saga over three participants: ~4 orchestrator invocations (1 start + 1 reply handled per participant); ~5 durable saga-log writes (one per state transition \u2014 started, order reserved, stock reserved, payment authorised, completed); ~7 broker messages (1 start + 3 commands + 3 replies); ~4 outbox rows published by the relay; ~6 durable timer operations; ~4 idempotency-key touches. microservices.io's own orchestration walk-through of Create Order runs SIX steps with only ONE remote participant, so these counts at three participants are the conservative end. Temporal names the unit outright \u2014 a State Transition is 'a unit of progress by a Workflow Execution' \u2014 and sizes its server in per-step database operations, not in workflows. THE DEFECT THIS FIXES: the earlier version modelled db and coord at visit_prob 1.0, i.e. one write and one invocation per whole saga, under-counting both by roughly 4-5x, and justified it with the claim that visit_prob 'is a probability in [0,1] and cannot express a >1 visit ratio'. That claim is false for this engine \u2014 visit_prob above 1 is legal and models exactly this fan-out (model.py says so; youtube.json uses 6.0) \u2014 so the fan-out has been moved out of the capacity inputs and into the flows, where a reader can see it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Kafka capacity is now stated in NATIVE MESSAGES/s, and the ~7-messages-per-saga fan-out lives in the flow instead of being baked into the capacity. ~100,000 msg/s per broker is a deliberately conservative read of two published benchmarks: LinkedIn's own (27 Apr 2014; six-core Xeon 2.5 GHz, six 7200 RPM SATA drives, 1 GbE, 100-byte messages) sustained 421,823 records/s at 3x SYNCHRONOUS replication, and Confluent (21 Aug 2020; three i3en.2xlarge NVMe brokers, 1 KB records, 100 partitions) peaked at 605 MB/s, roughly 200,000 records/s per broker. The previous figure (2,800 transactions/s per broker, i.e. ~20,000 msg/s) was 10-20x below both, which put the bus in the bottleneck conversation when it does not belong there. Saga commands and replies are small (100 B - 1 KB), so both measurements bracket this payload; 3 brokers is replication factor 3, not a capacity decision.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The saga log is the durability anchor and it now carries its real visit count (~5.1 writes per commit saga: 5 state transitions plus the relay's batched outbox reads/marks \u2014 see the 'flows' note). CAPACITY IS CONCURRENCY-DEPENDENT, NOT A PHYSICAL CEILING: the earlier reasoning 'every state transition is an fsync'd write, therefore ~4,000 rps' does not follow, because Postgres group commit lets many transactions share one flush. PostgreSQL's own docs: commit_delay 'can improve group commit throughput by allowing a larger number of transactions to commit via a single WAL flush', and 'Beginning in PostgreSQL 9.3, the first process that becomes ready to flush waits for the configured interval, while subsequent processes wait only until the leader completes the flush operation.' ~4,000 writes/s per writer is therefore ONE operating point at modest concurrency \u2014 higher with deep concurrency and commit_delay tuned, lower on a slower disk. No published figure pins it for this workload, so it stays an ASSUMPTION and must not be read as a limit. At 3k sagas/s the per-saga write fan-out puts this far beyond a single writer, so the file's own long-standing advice is now BUILT IN rather than deferred: the log is sharded by saga id. Temporal is the production precedent \u2014 'the number of History Shards represents the number of concurrent database operations that can occur for a Temporal Service', chosen before you integrate the database and unchangeable afterwards.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "coord",
+      "statement": "Orchestration (not choreography): one coordinator owns the state machine. It is stateless between steps \u2014 all state lives in the saga log \u2014 so it scales horizontally. Its capacity is now stated per ORCHESTRATOR INVOCATION (~1,500 invocations/s per instance, an uncited ASSUMPTION: no vendor publishes this), and the ~4 invocations per saga live in the flow. That is the whole correction here: at one invocation per saga this tier looked comfortable on 3 instances; at its real visit count it needs 10. The orchestrator, not the inventory service, is the number-two internal consumer of capacity in this design.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "relay",
+      "statement": "The transactional outbox REQUIRES a relay, and the earlier version named one without modelling it. microservices.io: the message is stored 'in the database as part of the transaction that updates the business entities', and 'A separate process then sends the messages to the message broker' \u2014 by transaction log tailing or by a polling publisher. This models the POLLING PUBLISHER, the variant that actually costs you something, because its read/mark load lands on the saga log, the tightest store in the estate. That load is small ONLY because it batches: ~2 database operations per batch of ~100 outbox rows, i.e. ~0.1 extra database operations per saga at ~4 outbox rows per saga. Take the batching away and the relay on its own roughly doubles the saga log's write rate. Its capacity (2,500 rps/instance) is an uncited ASSUMPTION set equal to the participant services: it does a database read plus a batched produce, and there is no reason to assume it is faster than they are. It is sized with visible spare headroom on purpose: redelivery after an incident arrives here as a burst, and this is the cheapest tier in the design to over-provision.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "relay_duplicates",
+      "statement": "GAP \u2014 'The Message relay might publish a message more than once' (microservices.io, transactional outbox). At-least-once is the DEFAULT here, not a failure mode: any participant command can arrive twice, which is why the idempotency-key registry sits on the commit path. What is NOT modelled is the extra broker, participant and PSP load created by redelivery. It is bursty and it correlates with exactly the incidents you least want to amplify \u2014 a slow participant produces timeouts, timeouts produce retries, retries produce more load.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "timer",
+      "statement": "Durable timers were the missing half of 'state machine, timeouts, retries'. Every participant call needs a timeout that survives the orchestrator process dying, so ~6 durable timer operations per commit saga (set and cancel one per participant). Temporal makes exactly this a first-class, SHARDED persistence concern, so it is modelled as a sharded store of the same kind and instance class as the saga log; its capacity, shard count and 200 GB storage figure are uncited ASSUMPTIONS. Two honest notes. (1) Temporal CO-LOCATES timers with history in one sharded store \u2014 splitting them out here makes the load visible instead of hiding it inside the saga log, but it is a modelling choice, not a requirement. (2) A single saga-level deadline instead of a timer per participant would cut this to ~2 operations per saga and shrink the store accordingly, at the cost of not being able to time out an individual participant call.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "psp",
+      "statement": "THE BINDING CONSTRAINT IS THE EXTERNAL CARD RAIL, NOT ANYTHING YOU OWN \u2014 and the earlier version of this file did not model it at all. Both the commit path (authorise) and the compensate path (void) call the PSP once, so ~0.95 x 3,000 = ~2,850 calls/s leave the estate every second at the design load. Stripe's published live-mode limits are 100 requests per second GLOBALLY PER ACCOUNT and 25 requests per second per individual API endpoint (sandbox mode is 25 global); Stripe's rate-limit page even names this scenario: 'A sudden increase in charge volume, such as a flash sale, might result in rate limiting.' ~2,850 calls/s is roughly 28x the published global account quota and roughly 114x the per-endpoint quota. That is not a sharding problem, it is a commercial one: you cannot run this design until the quota exists. It is modelled as 34 INDEPENDENT RATE-LIMIT BUCKETS (acquirer connections / PSP accounts) each at the published 100 rps, because that reaches the volume using the published number instead of an invented one. In practice you negotiate a quota increase \u2014 whose ceiling Stripe does NOT publish, so this file states no figure for it \u2014 and/or route across several acquirers. SIZE CONCURRENCY SEPARATELY: ~2,850 calls/s x a ~0.2 s round trip is ~570 simultaneously in-flight authorisations (Little's Law), and Stripe documents concurrency limits that 'restrict the number of simultaneously active requests, separate from rate limits', plus 429 lock_timeout errors when requests contend on the same object. The 200 ms here is round-trip time, not CPU.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "psp_modelling",
+      "statement": "GAP + MODELLING NOTE on the card rail. It is declared as an app_server because this schema prices only the component kinds in the grounded compute catalogue, but what it represents is an EXTERNAL dependency you do not control: its per-instance capacity is a published third-party quota rather than a CPU limit, and its instance count is a count of rate-limit buckets rather than of servers you can tune. Its cost line therefore covers ONLY the connector hosts that hold the acquirer connections (priced from the same grounded EC2 row as the payment service). Stripe's per-transaction fees are NOT in this bill, and at this authorisation volume they dominate the whole infrastructure figure by orders of magnitude \u2014 take them from your own contract, not from here.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "pay",
+      "statement": "Payment authorisation is modelled at ~1,500 rps/instance of LOCAL adapter work with 12 ms of local service time \u2014 both uncited ASSUMPTIONS. THE EARLIER OMISSION WAS CAPACITY, NOT LATENCY: the previous note flagged the missing PSP hop as 'typically 100-300 ms', which reads as a latency footnote, when the external rail's RATE LIMIT is the constraint that decides whether this design can be run at all (see the 'psp' note). The round trip is now modelled explicitly as its own component at 200 ms, mid-range of that 100-300 ms window; no vendor publishes an authorisation latency, so 200 ms is an assumption, not a measurement.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Idempotency keys are written before the first participant call and checked on every retry, which is what makes at-least-once delivery safe. The lock registry is advisory: it reduces conflicting sagas on the same entity, it does not guarantee isolation. Sagas are NOT serialisable \u2014 intermediate states are visible to other readers. VISIT COUNT, for completeness: the key is touched ~4 times per saga (one write, then a check on each participant's retry path), not once, and that count is now in the flow like every other fan-out in this file. It changes nothing material \u2014 against redis-benchmark's measured 'SET: 180180.17 requests per second, p50=0.143 msec' un-pipelined (72,144 rps against a 100k random keyspace) this tier stays nearly idle at either count. It is stated because the visit-count correction was applied everywhere deliberately, not only where it changed the answer.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "shard_model",
+      "statement": "GAP \u2014 sharded stores are modelled as ONE POOLED QUEUE. The engine treats the saga-log shards and the timer-store shards as M/M/c over c servers, i.e. a single queue any request may use. Real shards are INDEPENDENT queues keyed by saga id, so a hot key or an uneven hash shows up as one saturated shard while the pooled figure still looks healthy. Read the shard counts as 'how much aggregate write capacity you must buy', never as evidence that any individual shard is safe. Temporal's History Shard count being unchangeable after you integrate the database is the reason this matters: you pick it once, on a model like this one.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "compensate_accounting",
+      "statement": "GAP \u2014 the 5% of transactions that compensate are modelled as a SEPARATE flow, so their forward work (the steps they completed before failing) is counted once, on the compensate path, at compensation's visit counts. A real failing saga does forward work AND reverse work, so this under-counts every forward component by up to ~5% of its load. It is declared rather than patched because WHERE a saga failed decides how much forward work it did, and this model has no notion of where.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "dead_letter",
+      "statement": "GAP \u2014 no dead-letter / stuck-saga path is modelled. Sagas that can neither complete nor compensate (a participant permanently rejecting the compensating action, a poison message, a transaction held by an operator) have to go somewhere and be worked by someone. That queue, its alerting, and the human runbook behind it carry no load and no cost in this design, and in a money system they are not optional.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "alternative_2pc",
+      "statement": "WHAT THE SAGA BOUGHT YOU, versus the 2PC this blueprint's title reads like (the summary says 'orchestrated saga', but the keywords include 'two phase commit', so be explicit). Published measurements of coordinated distributed commit, for context only: Percolator (Peng & Dabek, OSDI 2010) runs client-coordinated 2PC and reports a single-cell write incurring 'roughly a factor of four overhead' over raw Bigtable \u2014 'a read to check for locks, a write to add the lock, and a second write to remove the lock record' \u2014 'roughly 30 times more CPU per transaction' than the comparison system, '11,200 tps using 15,000 cores' against '3,183 tpsE using a single large shared-memory machine', at 2 to 5 seconds average transaction latency. Spanner (Corbett et al., TOCS 2013, Table IV; one region, 3 zones of 25 spanservers) measures 2PC at 14.6 ms mean / 26.6 ms p99 for 1 participant, 20.7 / 32.0 for 2, 23.9 / 46.4 for 5, 33.8 / 62.4 for 50, and notes 'latencies start to rise noticeably at 100 participants'. A saga trades those costs, and the coordinator sitting in the commit path of every write, for throughput and availability \u2014 and pays for it with the loss of isolation disclosed above. None of these figures were produced by this engine and none of them describe THIS design; they are cited context for the choice.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "bottleneck_verdict",
+      "statement": "HOW TO READ THE BOTTLENECK VERDICT ON THIS DESIGN. In the earlier version the top two components were separated by well under one percentage point of utilisation, both of them uncited ASSUMPTION constants \u2014 a coin flip presented as a determination, which happened to land on the right component for the wrong reason, since that component's load was itself under-counted several-fold. With the per-saga fan-out moved into the flows and the external rail modelled, what is tightest here is decided by a PUBLISHED third-party quota rather than by a rounding difference between two guesses. The engine, not this note, computes which component is tightest and by how much; if it ever reports the leaders within a few points of each other, read them as indistinguishable at these inputs rather than as a ranking.",
+      "confidence": "high",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
@@ -373,41 +614,6 @@
       "subject": "engine",
       "statement": "THE IMPORTANT CAVEAT: a saga is a SEQUENCE \u2014 commit, then compensate on failure \u2014 and the v1 engine is an open queueing network with no notion of ordering, in-flight state or elapsed saga lifetime. What is modelled is the steady-state per-second VISIT RATE each participant sees. It will size the fleet correctly and find the throughput bottleneck; it will NOT tell you the p99 end-to-end saga completion time, how many sagas are in flight, or what happens when a participant is down and retries pile up. Those need a discrete-event model.",
       "confidence": "high",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "q",
-      "statement": "Kafka capacity is stated in TRANSACTIONS/s, not messages/s. One saga costs roughly 7 broker messages (1 start + 3 commands + 3 replies); a broker sustaining ~20,000 msg/s therefore contributes ~2,800 transactions/s. The engine's visit_prob is a probability in [0,1] and cannot express a >1 visit ratio, so the fan-out lives in the capacity input instead of the flow.",
-      "confidence": "med",
-      "source": "benchmark",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "db",
-      "statement": "The saga log is the durability anchor: every state transition is an fsync'd write, and the outbox is polled by the relay. Sized at ~4,000 rps on a single writer \u2014 the log is append-mostly but each write is synchronous. This component is the bottleneck at 3k tps and is the first thing to shard by saga id.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "coord",
-      "statement": "Orchestration (not choreography): one coordinator owns the state machine. It is stateless between steps \u2014 all state lives in the saga log \u2014 so it scales horizontally, which is why 3 instances at ~1,500 rps each suffice.",
-      "confidence": "med",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "pay",
-      "statement": "Payment authorisation is modelled at ~1,500 rps/instance with 12 ms of local service time. The remote card network / PSP round trip (typically 100-300 ms) is NOT included: an external rail has no per-instance capacity Keystone can size. Add it as a rate-limited external dependency before reading any end-to-end latency figure.",
-      "confidence": "low",
-      "source": "llm_inferred",
-      "provenance": "ASSUMPTION"
-    },
-    {
-      "subject": "cache",
-      "statement": "Idempotency keys are written before the first participant call and checked on every retry, which is what makes at-least-once delivery safe. The lock registry is advisory: it reduces conflicting sagas on the same entity, it does not guarantee isolation. Sagas are NOT serialisable \u2014 intermediate states are visible to other readers.",
-      "confidence": "med",
       "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     }
