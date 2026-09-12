@@ -106,8 +106,15 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 
+# A desktop launch should land you IN the app, not hand you a URL to copy. Only when a real TTY is
+# attached, so a CI or headless run never tries to open a browser.
+URL="http://$BIND:$WEB_PORT/studio"
+if [ -t 1 ] && command -v open >/dev/null 2>&1; then
+  ( sleep 1; open "$URL" ) >/dev/null 2>&1 &
+fi
+
 echo
-bold "  http://$BIND:$WEB_PORT/studio"
+bold "  $URL"
 if [ "$MODE" = "cli" ]; then
   dim "  Council + ingestion: your Claude subscription. Numbers: always the engine, never the AI."
 else
