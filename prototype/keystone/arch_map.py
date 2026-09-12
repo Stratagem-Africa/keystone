@@ -38,6 +38,9 @@ _LAYERS: tuple[tuple[str, str, tuple[ComponentKind, ...]], ...] = (
     ("async",    "Background work",   (ComponentKind.QUEUE,)),
     ("external", "External", (ComponentKind.EXTERNAL_API,)),
 )
+# Id of the synthetic users node. Prefixed so it can never collide with a real component id.
+_USERS_ID = "__users__"
+
 _KIND_LAYER: dict[ComponentKind, tuple[str, str, int]] = {
     k: (lid, label, i) for i, (lid, label, kinds) in enumerate(_LAYERS) for k in kinds
 }
@@ -258,6 +261,31 @@ def build_arch_map(model: SystemModel, sim: SimulationResult, *, sweep: bool = F
             "provenance": _node_provenance(comp, evidence),
             "evidence": evidence,
         })
+    # THE USERS. `_LAYERS` has had a "client" layer labelled "Your users" from the start and ZERO of
+    # the 56 blueprints ever populated it, so every architecture opened on a load balancer with no
+    # sign of the people it exists for. Reported as "it shouldn't just start with load balancer",
+    # and that was right: a diagram of a system serving nobody reads as a diagram of nothing.
+    #
+    # Synthesised HERE rather than added to 56 files, because it is DISPLAY ONLY. It carries no
+    # capacity, no cost and no utilisation; the engine never sees it and no number moves. It is the
+    # offered load, drawn where it actually comes from.
+    entry_ids = {f.path[0].component_id for f in model.flows if f.path}
+    if entry_ids:
+        clid, cllabel, clorder = _KIND_LAYER[ComponentKind.CLIENT]
+        nodes.append({
+            "id": _USERS_ID, "name": "Your users", "kind": ComponentKind.CLIENT.value,
+            "icon": _KIND_ICON.get(ComponentKind.CLIENT, "👤"),
+            "role": f"{model.workload.system_rps:,.0f} requests a second arriving from real people",
+            "layer": clid, "layer_label": cllabel, "layer_order": clorder,
+            "capacity_rps": None, "per_instance_rps": None, "instances": None,
+            "base_latency_ms": None, "monthly_cost_cents": 0,
+            "arrival_rps": model.workload.system_rps,
+            "utilization": None, "mean_latency_ms": None, "saturated": False, "status": "ok",
+            "is_bottleneck": False, "is_spof": False,
+            "provenance": "ASSUMPTION", "evidence": [],
+            "synthetic": True,
+        })
+
     nodes.sort(key=lambda n: (n["layer_order"], n["id"]))
 
     layers = [{"id": lid, "label": label, "order": i} for i, (lid, label, _k) in enumerate(_LAYERS)]
@@ -271,7 +299,13 @@ def build_arch_map(model: SystemModel, sim: SimulationResult, *, sweep: bool = F
             "name": fl.name,
             "share": fl.share,
             "color": _FLOW_COLORS[i % len(_FLOW_COLORS)],
-            "steps": [{"component_id": s.component_id, "visit_prob": s.visit_prob} for s in fl.path],
+            # The users are prepended as step 0 so an edge is drawn from them into the entry tier —
+            # and so the journey walkthrough opens where a request actually starts, with a person,
+            # rather than mid-system at a load balancer. Display only: the engine already computed
+            # this flow's latency from the real path, and `visit_prob` 1.0 on a component with no
+            # capacity contributes nothing to any figure.
+            "steps": ([{"component_id": _USERS_ID, "visit_prob": 1.0}] if fl.path else [])
+                     + [{"component_id": s.component_id, "visit_prob": s.visit_prob} for s in fl.path],
             "latency": ({"mean_ms": lat.mean_ms, "p50_ms": lat.p50_ms,
                          "p95_ms": lat.p95_ms, "p99_ms": lat.p99_ms} if lat else None),
         })
@@ -418,6 +452,25 @@ circle.req{opacity:.9;pointer-events:none}
 circle.resp{opacity:.42;fill:var(--muted);pointer-events:none}
 
 /* nodes */
+/* LOAD STATES. A component over its limit has to LOOK over its limit — reported as "shouldn't it be
+   blinking danger?", and that was fair: a tier at 140% looked identical to one at 4%. `hot` is a
+   warning, `saturated` is an alarm that pulses. `prefers-reduced-motion` drops the pulse and keeps
+   the colour, so the signal survives for anyone who cannot take the movement. */
+@keyframes ks-danger{
+  0%,100%{box-shadow:0 6px 18px rgba(0,0,0,.42), 0 0 0 0 rgba(248,113,113,.55)}
+  50%    {box-shadow:0 6px 22px rgba(0,0,0,.5),  0 0 0 7px rgba(248,113,113,0)}
+}
+.node.st-saturated{border-color:rgba(248,113,113,.85);animation:ks-danger 1.25s ease-in-out infinite}
+.node.st-hot{border-color:rgba(251,146,60,.6)}
+@media (prefers-reduced-motion: reduce){
+  .node.st-saturated{animation:none;border-color:rgba(248,113,113,.95);
+    box-shadow:0 6px 18px rgba(0,0,0,.42), 0 0 0 3px rgba(248,113,113,.35)}
+}
+/* The users are not a machine: no load bar, no danger state, just where the traffic comes from. */
+.node.users{background:linear-gradient(180deg,rgba(22,30,58,.9),rgba(12,18,38,.9));
+  border-style:dashed;border-color:rgba(150,170,240,.3);cursor:default}
+.node.users .util{display:none}
+
 .node{position:absolute;width:200px;border-radius:12px;padding:9px 11px 10px;cursor:pointer;
   background:linear-gradient(180deg,rgba(26,34,66,.94),rgba(14,20,44,.94));
   border:1px solid rgba(150,170,240,.16);box-shadow:0 6px 18px rgba(0,0,0,.42);
@@ -572,7 +625,8 @@ DATA.flows.forEach(f=>{
 // ---- node cards -----------------------------------------------------------
 const nodeEls={};
 DATA.nodes.forEach(n=>{
-  const d=el('div','node'+(n.status==='hot'||n.status==='saturated'?' hot':''));
+  const d=el('div','node st-'+n.status+(n.status==='hot'||n.status==='saturated'?' hot':'')
+             +(n.synthetic?' users':''));
   d.style.left=pos[n.id].x+'px';d.style.top=pos[n.id].y+'px';
   // In audit mode the left edge signals DIVERGENCE (the audit's core finding); otherwise provenance.
   d.style.setProperty('--pc', n.divergence?(divColor[n.divergence.status]||'var(--steel)'):(provColor[n.provenance]||'var(--steel)'));
@@ -828,6 +882,25 @@ stage.addEventListener('click',e=>{if(!e.target.closest('.node,#panel,#dock,#dra
 // Speed rises with the offered load (LOADI) so you can SEE the system get busier under traffic.
 let LOADI=1, ambRAF=null, ambT0=null; const ambient=[];
 const flowColor={}; DATA.flows.forEach(f=>flowColor[f.name]=f.color);
+// Traffic that does not respond to load is decoration. Each request carries the utilisation of the
+// component it is HEADING INTO, so it can slow down, redden, and pile up in front of a tier that is
+// full — which is what actually happens to a request in a real system, and the single clearest way
+// to show someone where their design hurts.
+function nodeUtil(id){ const n=DATA.nodes.find(x=>x.id===id); return (n&&n.utilization!=null)?n.utilization:0; }
+
+// How fast a request moves toward a tier at this utilisation. Deliberately NOT linear: a queue is
+// fine until it is not, so the slowdown is gentle to ~70% and then bites hard, mirroring the
+// 1/(1-rho) the engine itself computes. At and past 100% it is a crawl, because the queue is
+// growing faster than it drains and no request is getting through on time.
+function congestion(u){
+  if(u>=1) return 0.05;
+  return Math.max(0.08, Math.pow(1-u, 1.6));
+}
+function loadTint(u, base){
+  if(u>=1)   return 'var(--sat)';
+  if(u>=0.85)return 'var(--hot)';
+  return base;
+}
 function buildAmbient(){
   edgeEls.forEach((e,i)=>{
     const len=e.path.getTotalLength()||1, col=flowColor[e.flow]||'var(--blue)';
@@ -836,7 +909,7 @@ function buildAmbient(){
     for(let k=0;k<reqN;k++){
       const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
       c.setAttribute('r','2.6');c.setAttribute('class','req');c.style.fill=col;svg.appendChild(c);
-      ambient.push({c,p:e.path,len,ph:((i*0.37+k/reqN)%1),dir:1});
+      ambient.push({c,p:e.path,len,ph:((i*0.37+k/reqN)%1),dir:1,to:e.to,base:col});
     }
     const r=document.createElementNS('http://www.w3.org/2000/svg','circle');
     r.setAttribute('r','2');r.setAttribute('class','resp');svg.appendChild(r);
@@ -846,8 +919,23 @@ function buildAmbient(){
 function ambientTick(ts){
   if(ambT0==null)ambT0=ts; const dt=(ts-ambT0)/1000;
   const spd=0.11*Math.min(3.2,Math.max(0.35,LOADI));
-  ambient.forEach(q=>{ let u=((dt*spd*(q.dir<0?0.6:1))+q.ph)%1; if(q.dir<0)u=1-u;
-    const pt=q.p.getPointAtLength(u*q.len); q.c.setAttribute('cx',pt.x); q.c.setAttribute('cy',pt.y); });
+  ambient.forEach(q=>{
+    const util=q.to?nodeUtil(q.to):0;
+    const k=q.dir<0?1:congestion(util);              // responses are not queued by the tier ahead
+    let u=((dt*spd*(q.dir<0?0.6:1)*k)+q.ph)%1;
+    if(q.dir<0)u=1-u;
+    // PILE-UP. Past 100% the tier cannot take them, so requests stack in front of it instead of
+    // sailing through — the visual answer to "shouldn't the traffic stop?". They bunch in the last
+    // stretch of the edge rather than freezing dead, so it reads as a queue, not a broken render.
+    if(util>=1 && q.dir>0) u=0.80+(u%1)*0.18;
+    const pt=q.p.getPointAtLength(u*q.len);
+    q.c.setAttribute('cx',pt.x); q.c.setAttribute('cy',pt.y);
+    if(q.dir>0 && q.base){
+      const tint=loadTint(util,q.base);
+      if(q.tint!==tint){ q.tint=tint; q.c.style.fill=tint; }
+      q.c.setAttribute('r', util>=1?'3.4':'2.6');
+    }
+  });
   ambRAF=requestAnimationFrame(ambientTick);
 }
 
@@ -862,6 +950,14 @@ function applyFrame(i){
   DATA.nodes.forEach(n=>{ const nf=fr.nodes[n.id], d=nodeEls[n.id]; if(!nf||!d)return;
     d.style.setProperty('--sc',statusColor[nf.status]||'var(--muted)');
     d.classList.toggle('hot',nf.status==='hot'||nf.status==='saturated');
+    // The load-state classes have to MOVE with the slider. They were set once at render and never
+    // updated, so dragging the load to 10x left every card looking calm while the readout said the
+    // design was over its limit — the panel and the picture disagreeing about the same run.
+    d.classList.remove('st-ok','st-hot','st-saturated');
+    d.classList.add('st-'+nf.status);
+    // Keep the node's LIVE utilisation where the traffic animation reads it, so requests slow,
+    // redden and pile up as you drag — the whole point of the dial.
+    n.utilization = nf.utilization;
     const fill=d.querySelector('.util i'); if(fill)fill.style.width=Math.min(100,(nf.utilization||0)*100)+'%';
     const ub=d.querySelector('.meta b'); if(ub)ub.textContent=pct(nf.utilization);
     const ss=d.querySelector('.simplestat'); if(ss){ss.className='simplestat s-'+nf.status; ss.textContent=SSTAT[nf.status]||'';}

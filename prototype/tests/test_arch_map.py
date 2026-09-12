@@ -42,6 +42,15 @@ class TestArchMapNumbers(unittest.TestCase):
 
     def test_every_node_number_equals_the_engine(self):
         for n in self.arch["nodes"]:
+            if n.get("synthetic"):
+                # The "Your users" node is DISPLAY ONLY — it is not a component, the engine never
+                # sees it, and it must never carry an engine number. Asserted below rather than
+                # merely skipped, so a synthetic node can never smuggle a fabricated figure in.
+                self.assertIsNone(n["utilization"])
+                self.assertIsNone(n["capacity_rps"])
+                self.assertIsNone(n["mean_latency_ms"])
+                self.assertEqual(n["monthly_cost_cents"], 0)
+                continue
             cr = self.sim.components[n["id"]]
             self.assertEqual(n["utilization"], cr.utilization)
             self.assertEqual(n["arrival_rps"], cr.arrival_rps)
