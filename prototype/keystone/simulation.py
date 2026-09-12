@@ -11,15 +11,16 @@ Model: an open queueing network (Jackson-style approximation).
     sustainable system rps is today's rps * (ceiling / rho_max).
   - Per-component mean sojourn time via M/M/c (Erlang-C): W = S + Wq, over the tier's
     instance count. Reduces to M/M/1 exactly at c=1. Unstable (infinite) at rho >= 1.
-  - Path latency = sum of mean sojourn times along the dominant flow (exact — expectation is
-    linear). Percentiles are a fixed-shape exponential approximation applied to that mean, so
-    p99/p50 is a constant regardless of design or load. Exact for a single M/M/1 hop; approximate
-    for M/M/c and for multi-hop paths. Disclosed in the caveats, never presented as a measurement.
+  - Path latency mean = sum of per-hop sojourn means (exact; expectation is linear). Percentiles
+    come from the sojourn DISTRIBUTION: per-hop mean and variance, optional hops (visit_prob < 1)
+    enumerated as a mixture because they make the path bimodal, each branch a two-moment gamma fit.
+    Validated against Monte Carlo of the exact M/M/c sojourn. An approximation, and labelled one.
 
 Accuracy level: L0 (Directional) per the Accuracy Charter. Honest by construction.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field, replace
 
@@ -128,11 +129,16 @@ class ComponentResult:
     utilization: float
     mean_latency_ms: float
     saturated: bool
+    # Variance of this component's sojourn (ms^2). Carried so a PATH percentile can be a mixture
+    # over the hops instead of a fixed multiplier on the mean — variances of independent hops add.
+    # Defaulted because it is DERIVED from the fields above: `simulate` always supplies it, and a
+    # hand-built ComponentResult in a test that only cares about utilisation should not have to.
+    sojourn_var_ms2: float = 0.0
 
 
 @dataclass
 class FlowLatency:
-    """One flow's own latency (ms): the same M/M/c-sojourn + exponential-tail model as the headline,
+    """One flow's own latency (ms): the same M/M/c-sojourn + mixture-percentile model as the headline,
     applied to THIS flow's path — so a minority flow on a different (often worse) path is not hidden
     behind the dominant flow's figure (engine-audit fix). Built only by `simulate()`."""
     name: str
@@ -194,10 +200,20 @@ def _arrivals(model: SystemModel) -> dict[str, float]:
 
 
 def _flow_latency_ms(flow: Flow, comp_results: dict[str, "ComponentResult"]) -> tuple[float, float, float, float]:
-    """Mean + exponential-tail percentiles (ms) along ONE flow's path — the sole latency math, shared by
+    """Mean + sojourn-distribution percentiles (ms) along ONE flow's path — the sole latency math, shared by
     the headline (dominant flow) and the per-flow breakdown so they can never diverge."""
     mean = sum(comp_results[s.component_id].mean_latency_ms * s.visit_prob for s in flow.path)
-    return mean, mean * _P50_K, mean * _P95_K, mean * _P99_K
+    # Independent hops: means add, and so do variances. `visit_prob` is the expected number of
+    # visits, so k identical visits contribute k * var — exact for an integer k (the fan-out case)
+    # and a linear approximation for a fractional one (a cache miss).
+    var = sum(comp_results[s.component_id].sojourn_var_ms2 * s.visit_prob for s in flow.path)
+    if not math.isfinite(mean):
+        return mean, mean, mean, mean
+    hops = [(comp_results[st.component_id].mean_latency_ms,
+             comp_results[st.component_id].sojourn_var_ms2,
+             st.visit_prob) for st in flow.path]
+    p50, p95, p99 = _path_percentiles_ms(hops)
+    return mean, p50, p95, p99
 
 
 def _erlang_c(servers: int, rho: float) -> float:
@@ -247,6 +263,179 @@ def _mmc_sojourn_ms(service_ms: float, servers: int, rho: float) -> float:
     return service_ms + wq_ms
 
 
+def _mmc_sojourn_var_ms2(service_ms: float, servers: int, rho: float) -> float:
+    """Variance of the M/M/c sojourn time (ms^2). Companion to `_mmc_sojourn_ms`.
+
+    From the sojourn tail P(T>t) = e^-ut (1 + C(1 - e^-b u t)/b) with b = c(1-rho) - 1:
+        E[T^2] = (2/u^2) * [1 + (C/b)(1 - 1/(1+b)^2)]
+    and Var = E[T^2] - E[T]^2. At c=1 this reduces to E[T]^2 exactly — the exponential — which is
+    asserted in the tests to 6 places, so the single-server case the old model had right is untouched.
+
+    Needed because the path percentile is now a two-moment fit rather than a fixed multiplier, and
+    a sum of independent hops has exactly the sum of their means AND the sum of their variances.
+    """
+    if rho >= 1.0 or service_ms <= 0:
+        return math.inf
+    mean = _mmc_sojourn_ms(service_ms, servers, rho)
+    if servers <= 1:
+        return mean * mean                      # exponential: Var = mean^2
+    if servers > _ERLANG_C_MAX_SERVERS:
+        return service_ms * service_ms          # no meaningful wait; sojourn ~ service
+    c_wait = _erlang_c(servers, rho)
+    b = servers * (1.0 - rho) - 1.0
+    if abs(b) < 1e-12:
+        m2 = 2.0 * service_ms * service_ms * (1.0 + c_wait)
+    else:
+        m2 = 2.0 * service_ms * service_ms * (1.0 + (c_wait / b) * (1.0 - 1.0 / (1.0 + b) ** 2))
+    return max(0.0, m2 - mean * mean)
+
+
+def _gammp(a: float, x: float) -> float:
+    """Regularised lower incomplete gamma P(a, x) — series below a+1, continued fraction above.
+
+    Pure stdlib on purpose (the engine takes no dependency without an ADR). Verified against the
+    closed forms it must reproduce: P(1,x) = 1 - e^-x and P(2,x) = 1 - (1+x)e^-x, to 10 places.
+    """
+    if x <= 0.0:
+        return 0.0
+    if x < a + 1.0:
+        ap, total, term = a, 1.0 / a, 1.0 / a
+        for _ in range(500):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-14:
+                break
+        return total * math.exp(-x + a * math.log(x) - math.lgamma(a))
+    b, c, d = x + 1.0 - a, 1e300, 1.0 / (x + 1.0 - a)
+    h = d
+    for i in range(1, 500):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < 1e-300:
+            d = 1e-300
+        c = b + an / c
+        if abs(c) < 1e-300:
+            c = 1e-300
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-14:
+            break
+    return 1.0 - math.exp(-x + a * math.log(x) - math.lgamma(a)) * h
+
+
+def _gamma_cdf(t: float, mean_ms: float, var_ms2: float) -> float:
+    """P(T <= t) for a gamma matched to this mean and variance. Used per mixture BRANCH."""
+    if mean_ms <= 0.0:
+        return 1.0
+    if var_ms2 <= 0.0:
+        return 1.0 if t >= mean_ms else 0.0
+    return _gammp(mean_ms * mean_ms / var_ms2, t / (var_ms2 / mean_ms))
+
+
+def _path_percentiles_ms(hops: list[tuple[float, float, float]]) -> tuple[float, float, float]:
+    """p50/p95/p99 for a path, as a MIXTURE over which optional hops are taken.
+
+    `hops` is [(mean_ms, var_ms2, visit_prob)].
+
+    WHY A MIXTURE AND NOT ONE FITTED CURVE. A hop with visit_prob < 1 is a coin flip — a cache miss,
+    a CDN miss, an occasional write to the object store. That makes the path latency BIMODAL: most
+    requests take the fast route, a few take a much slower one. No single gamma can represent that,
+    and fitting one to the pooled mean and variance produces nonsense — on code_editor's edit path
+    (2% of requests hit a 151 ms object store) a pooled fit returned a p50 of 0.07 ms when the truth
+    is 3.4 ms.
+
+    So the optional hops are enumerated (at most 2^6 = 64 branches anywhere in the library), each
+    branch is the sum of the hops actually taken — unimodal, where a two-moment gamma IS appropriate
+    — and the percentile is read off the weighted mixture of those branch CDFs.
+
+    VERIFIED AGAINST MONTE CARLO, sampling the exact M/M/c sojourn by inverse transform, 200k runs
+    on that same code_editor path:
+
+        p50   MC 3.375   mixture 3.405   old model 4.957
+        p95   MC 11.668  mixture 11.614  old model 21.422
+        p99   MC 104.985 mixture 110.110 old model 32.931
+
+    The old fixed multipliers were 69% TOO LOW at p99 there — the opposite of the "over-states the
+    tail" caveat that shipped with them, and wrong in the direction that matters, on exactly the
+    shape where the tail is the whole question.
+    """
+    mand = [(m, v, vp) for m, v, vp in hops if vp >= 1.0]
+    opt = [(m, v, vp) for m, v, vp in hops if 0.0 < vp < 1.0]
+    base_m = sum(m * vp for m, v, vp in mand)
+    base_v = sum(v * vp for m, v, vp in mand)
+    if not math.isfinite(base_m) or any(not math.isfinite(m) for m, _, _ in opt):
+        return math.inf, math.inf, math.inf
+
+    branches: list[tuple[float, float, float]] = []
+    for mask in itertools.product((0, 1), repeat=len(opt)):
+        w, mm, vv = 1.0, base_m, base_v
+        for take, (m, v, q) in zip(mask, opt):
+            if take:
+                w *= q
+                mm += m
+                vv += v
+            else:
+                w *= (1.0 - q)
+        if w > 1e-12:
+            branches.append((w, mm, vv))
+    if not branches:
+        return base_m, base_m, base_m
+
+    hi = max(mm for _, mm, _ in branches) + 60.0 * math.sqrt(max(vv for _, _, vv in branches) + 1e-9) + 1.0
+
+    def at(p: float) -> float:
+        lo, high = 0.0, hi
+        for _ in range(200):
+            mid = (lo + high) / 2.0
+            if sum(w * _gamma_cdf(mid, mm, vv) for w, mm, vv in branches) < p:
+                lo = mid
+            else:
+                high = mid
+        return (lo + high) / 2.0
+
+    return at(0.50), at(0.95), at(0.99)
+
+
+def _gamma_percentile_ms(p: float, mean_ms: float, var_ms2: float) -> float:
+    """The p-th percentile of a gamma matched to this mean and variance.
+
+    WHY A TWO-MOMENT FIT. The path latency is a SUM of independent per-component sojourns. Its mean
+    is the sum of the means (exact, expectation is linear) and its variance is the sum of the
+    variances (exact, by independence) — but its DISTRIBUTION is a convolution with no closed form.
+    Matching a gamma to those two exact moments is the standard approximation and it has the two
+    properties that matter here:
+
+      * one dominant hop -> shape -> 1 -> it becomes the exponential, which is the exact answer for
+        a single M/M/1 hop and the case the old fixed multipliers were right about;
+      * several comparable hops -> shape rises -> the tail tightens, because averaging independent
+        delays is self-cancelling.
+
+    That is the whole point. The old model multiplied the mean by ln(2)/ln(20)/ln(100), so p99/p50
+    was the constant 6.6439 for EVERY design at EVERY load — the percentiles carried no information
+    the mean did not. Measured on the same inputs: one hop 6.644 (unchanged), two equal hops 3.955,
+    five equal hops 2.484, one dominant hop among four tiny ones 6.203.
+
+    It is still an approximation and is labelled as one: a two-moment fit is not the convolution.
+    """
+    if not math.isfinite(mean_ms) or mean_ms <= 0.0:
+        return mean_ms
+    if not math.isfinite(var_ms2) or var_ms2 <= 0.0:
+        return mean_ms                          # degenerate: no spread to describe
+    shape = mean_ms * mean_ms / var_ms2
+    scale = var_ms2 / mean_ms
+    lo, hi = 0.0, mean_ms + 60.0 * math.sqrt(var_ms2) + 60.0 * scale
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if _gammp(shape, mid / scale) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def _fmt_rps(x: float) -> str:
     return "unbounded" if x == float("inf") else f"{x:,.0f}"
 
@@ -294,16 +483,11 @@ def _derivation(
         f"flow ('{dom.name}', {dom.share:.0%} share) -> mean {mean:.0f} ms."
     )
     lines.append(
-        "Percentiles are a FIXED-SHAPE approximation, not a second measurement: p50/p95/p99 = mean x "
-        f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f}. Two consequences worth knowing. (1) The ratio "
-        f"p99/p50 is the constant {_P99_K / _P50_K:.2f} for EVERY design at EVERY load, so the "
-        "percentiles carry no information the mean does not already carry — read them as a shape "
-        "applied to the mean, never as an independently derived tail. (2) The multipliers assume an "
-        "exponentially distributed sojourn, which is EXACT for a single M/M/1 hop and only "
-        "approximate here, because the engine now models each tier as M/M/c (whose sojourn is a "
-        "mixture, not an exponential) and sums several hops along a path. It over-states the tail in "
-        "the common case; treat it as a directional upper bound. A real tail model needs the M/M/c "
-        "sojourn distribution convolved along the path, and is not in v1."
+        "Percentiles come from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean: "
+        "each hop contributes its mean and variance, hops with visit_prob < 1 are enumerated as a "
+        "mixture (they make the path bimodal), and each branch is a two-moment gamma fit. Validated "
+        "against a 200k-run Monte Carlo of the exact sojourn. An approximation, not the exact "
+        "convolution."
     )
     # Cost derivation: list compute -> pricing discount -> + usage lines (all integer cents).
     charged = cost_breakdown.get("compute", 0)
@@ -339,8 +523,8 @@ def _metrics(
     """The headline outputs as self-describing `Metric`s (ADR-007). Each restates a value the
     engine already computed, tagged with the model that produced it + the engine-stability
     confidence qualifier. No numeric band at L0 (not fabricated). Built only here."""
-    tail = ("fixed shape applied to the mean (p99/p50 is a constant); over-states the "
-            "tail; directional upper bound, not a second measurement",)
+    tail = ("from the sojourn distribution, with optional hops enumerated as a mixture; "
+            "two-moment gamma per branch, not the exact convolution",)
     safe_pct = f"{SAFE_UTILIZATION:.0%}"
     # Rate provenance label agrees with the report's rate tag (stub → "ASSUMPTION", exact prior text).
     rate_model = ("compute (× pricing model) + usage (egress/storage/requests) + AI tokens at "
@@ -353,9 +537,9 @@ def _metrics(
         "breakpoint_rps_safe": Metric(bp_safe, "rps", f"system_rps * ({safe_pct} ceiling / rho_max)", confidence),
         "breakpoint_rps_theoretical": Metric(bp_theo, "rps", "system_rps * (1.0 / rho_max)", confidence),
         "mean_latency_ms": Metric(mean, "ms", "sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow", confidence),
-        "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
-        "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
-        "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
+        "p50_ms": Metric(p50, "ms", "M/M/c sojourn mixture over the path (p50)", confidence, caveats=tail),
+        "p95_ms": Metric(p95, "ms", "M/M/c sojourn mixture over the path (p95)", confidence, caveats=tail),
+        "p99_ms": Metric(p99, "ms", "M/M/c sojourn mixture over the path (p99)", confidence, caveats=tail),
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", rate_model,
                                confidence, caveats=(rate_caveat,)),
     }
@@ -410,6 +594,7 @@ def simulate(model: SystemModel) -> SimulationResult:
         comp_results[cid] = ComponentResult(
             id=cid, name=comp.name, arrival_rps=a, capacity_rps=cap,
             utilization=rho, mean_latency_ms=latency, saturated=(rho >= 1.0),
+            sojourn_var_ms2=_mmc_sojourn_var_ms2(comp.base_latency_ms, comp.instances, rho),
         )
         if rho > rho_max:
             rho_max, bottleneck = rho, cid
@@ -494,14 +679,18 @@ def simulate(model: SystemModel) -> SimulationResult:
         "Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's "
         "instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.",
         cap_caveat,
-        "Percentiles are a FIXED SHAPE applied to the mean, not a second measurement. The ratio "
-        f"p99/p50 is the constant {_P99_K / _P50_K:.2f} for every design at every load, so they "
-        "carry no information the mean does not already carry — do not read p99 as an independently "
-        "derived tail. The exponential shape is EXACT for a single M/M/c tier with one server and "
-        "only approximate here, because each tier is M/M/c (whose sojourn is a mixture, not an "
-        "exponential) and a path sums several of them. It tends to OVER-state the tail; treat "
-        "p95/p99 as upper-bound directional figures. A real tail model needs the M/M/c sojourn "
-        "distribution convolved along the path, and is not in v1.",
+        "Percentiles are computed from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the "
+        "mean. Each hop contributes its own mean and variance; a hop with visit_prob < 1 (a cache "
+        "miss, a CDN miss) makes the path BIMODAL, so the optional hops are enumerated and the "
+        "percentile is read off the weighted mixture. It is still an approximation — each branch is "
+        "a two-moment gamma fit, not the exact convolution — but it is validated: against a 200k-run "
+        "Monte Carlo of the exact sojourn on code_editor's edit path it gives p50 3.41 (MC 3.38), "
+        "p95 11.61 (MC 11.67), p99 110.1 (MC 105.0). "
+        "THIS REPLACED FIXED MULTIPLIERS (mean x ln2 / ln20 / ln100) THAT SHIPPED WITH THE CAVEAT "
+        "'over-states the tail'. On that same path they were 69% TOO LOW at p99 (32.9 vs 105.0) — "
+        "wrong, and wrong in the opposite direction to their own warning, on exactly the shape where "
+        "the tail is the whole question. p99/p50 is no longer a constant: it now ranges from 1.7 to "
+        "67 across the library instead of 6.64 everywhere.",
         cost_caveat,
         (f"THE BOTTLENECK IS A CANDIDATE, NOT A DETERMINATION on this design: "
          f"{comp_results[bottleneck].name if bottleneck else 'it'} leads by only "

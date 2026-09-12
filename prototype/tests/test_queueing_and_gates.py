@@ -235,56 +235,12 @@ class CoverageDisclosureTest(unittest.TestCase):
             ["taking payments"])
 
 
-class TailModelIsHonestlyLabelledTest(unittest.TestCase):
-    """p99/p50 is the constant 6.6439 for every design at every load, because the percentiles are a
-    fixed shape applied to the mean rather than an independently derived tail. That is a real
-    limitation — SysSimulator's flat percentiles are the defect Keystone's teardown convicts it of,
-    and Keystone's are flat in SHAPE too. The difference has to be that Keystone SAYS SO."""
-
-    def test_the_ratio_really_is_constant(self):
-        """If this ever stops being constant, a real tail model landed — update the caveat."""
-        import dataclasses
-        model = url_shortener.build()
-        ratios = set()
-        for mult in (0.1, 0.5, 1.0, 1.2):
-            w = dataclasses.replace(model.workload, system_rps=model.workload.system_rps * mult)
-            r = simulate(dataclasses.replace(model, workload=w))
-            ratios.add(round(r.p99_ms / r.p50_ms, 4))
-        self.assertEqual(len(ratios), 1, "the tail shape is fixed by construction")
-
-    def test_and_the_report_says_the_ratio_is_fixed(self):
-        """The user must not read p99 as a second, independent measurement."""
-        blob = " ".join(simulate(url_shortener.build()).caveats)
-        self.assertIn("p99/p50", blob)
-        self.assertIn("no information the mean does not", blob)
-
-    def test_and_admits_the_exponential_assumption_no_longer_matches_the_queue(self):
-        """It was EXACT for M/M/1. The engine is M/M/c now, so the label has to change too."""
-        blob = " ".join(simulate(url_shortener.build()).caveats)
-        self.assertIn("M/M/c", blob)
-        self.assertIn("upper-bound", blob)
-        # Asserting "M/M/c appears SOMEWHERE" is not enough and briefly wasn't: the headline caveat
-        # still read "M/M/1 per component" while this test passed on the phrase appearing in a
-        # DIFFERENT caveat. An existence check is not an identity check — the stale claim has to be
-        # asserted GONE, not merely outnumbered.
-        self.assertNotIn("M/M/1 per component", blob,
-                         "the headline caveat still describes the old single-server model")
-
-    def test_no_user_facing_string_still_claims_the_old_model(self):
-        """Every surface, not just the caveats — a stale claim in one is a wrong claim."""
-        from keystone.report import render
-        model = url_shortener.build()
-        sim = simulate(model)
-        surfaces = {
-            "caveats": " ".join(sim.caveats),
-            "derivation": " ".join(sim.derivation),
-            "report": render(model, [], sim),
-            "metric models": " ".join(m.model for m in sim.metrics.values()),
-        }
-        for name, text in surfaces.items():
-            with self.subTest(name):
-                self.assertNotIn("M/M/1 per component", text)
-                self.assertNotIn("M/M/1 sojourn", text)
+# `TailModelIsHonestlyLabelledTest` LIVED HERE and has been retired on purpose. It pinned the OLD
+# limitation — that p99/p50 was the constant 6.6439 for every design at every load — and its own
+# docstring said: "If this ever stops being constant, a real tail model landed — update the caveat."
+# One landed (see TailModelIsDerivedNotAssumedTest at the end of this file), so the class asserting
+# the limitation is obsolete rather than failing. Deleting a test that pins a shortcoming is correct
+# ONLY when the shortcoming is gone; the replacement asserts the stronger property in its place.
 
 
 class GroundedMeansTheEngineInputsAreCitedTest(unittest.TestCase):
@@ -380,3 +336,76 @@ class BottleneckIsACandidateNotAVerdictTest(unittest.TestCase):
                 r = simulate(next(e for e in library() if e.key == key).build())
                 us = sorted((c.utilization for c in r.components.values()), reverse=True)
                 self.assertAlmostEqual(r.bottleneck_margin_pts, (us[0] - us[1]) * 100.0, places=9)
+
+
+class TailModelIsDerivedNotAssumedTest(unittest.TestCase):
+    """Percentiles used to be `mean x ln(2)/ln(20)/ln(100)`, so p99/p50 was the constant 6.6439 for
+    every design at every load — the percentiles carried no information the mean did not. They are
+    now read off the M/M/c sojourn distribution, with optional hops enumerated as a mixture because
+    a visit_prob < 1 makes the path bimodal.
+    """
+
+    def test_the_incomplete_gamma_matches_its_closed_forms(self):
+        """P(1,x) = 1-e^-x and P(2,x) = 1-(1+x)e^-x. If this is wrong, every percentile is wrong."""
+        from keystone.simulation import _gammp
+        for x in (0.5, 1.0, 2.0, 4.6051701859880914):
+            self.assertAlmostEqual(_gammp(1.0, x), 1.0 - math.exp(-x), places=10)
+        for x in (1.0, 3.0, 7.0):
+            self.assertAlmostEqual(_gammp(2.0, x), 1.0 - (1.0 + x) * math.exp(-x), places=10)
+
+    def test_single_server_variance_is_the_exponential(self):
+        """Var = mean^2 at c=1 — the case the old model had right must stay right."""
+        from keystone.simulation import _mmc_sojourn_ms, _mmc_sojourn_var_ms2
+        for rho in (0.1, 0.5, 0.85, 0.95):
+            with self.subTest(rho=rho):
+                mean = _mmc_sojourn_ms(10.0, 1, rho)
+                self.assertAlmostEqual(_mmc_sojourn_var_ms2(10.0, 1, rho), mean * mean, places=6)
+
+    def test_a_single_exponential_hop_still_gives_the_old_multipliers(self):
+        """The old constants were the EXACT answer for one M/M/1 hop. Reproduce them, or the new
+        model has broken the one case the old one got right."""
+        from keystone.simulation import _path_percentiles_ms
+        mean = 20.0                                     # S=10, rho=0.5 -> exponential, var = mean^2
+        p50, p95, p99 = _path_percentiles_ms([(mean, mean * mean, 1.0)])
+        self.assertAlmostEqual(p50, mean * math.log(2), delta=mean * 1e-3)
+        self.assertAlmostEqual(p95, mean * math.log(20), delta=mean * 1e-3)
+        self.assertAlmostEqual(p99, mean * math.log(100), delta=mean * 1e-3)
+
+    def test_more_equal_hops_tighten_the_tail(self):
+        """Averaging independent delays is self-cancelling — the physics the old constant denied."""
+        from keystone.simulation import _path_percentiles_ms
+        ratios = []
+        for n in (1, 2, 5):
+            p50, _, p99 = _path_percentiles_ms([(10.0, 100.0, 1.0)] * n)
+            ratios.append(p99 / p50)
+        self.assertGreater(ratios[0], ratios[1])
+        self.assertGreater(ratios[1], ratios[2])
+        self.assertAlmostEqual(ratios[0], math.log(100) / math.log(2), delta=0.02)
+
+    def test_a_rare_slow_hop_is_modelled_as_a_mixture_not_a_blur(self):
+        """The defect that forced the mixture: pooling mean+variance across a 2%-chance 151ms hop
+        gave a p50 of 0.07ms when the truth is ~3.4ms. Verified against a 200k Monte Carlo of the
+        exact sojourn (p50 3.375, p95 11.668, p99 104.985) — the values below are the engine's."""
+        from keystone.blueprint_library import library
+        r = simulate(next(e for e in library() if e.key == "code_editor").build())
+        self.assertAlmostEqual(r.p50_ms, 3.375, delta=0.35)     # MC 3.375
+        self.assertAlmostEqual(r.p95_ms, 11.668, delta=1.2)     # MC 11.668
+        self.assertAlmostEqual(r.p99_ms, 104.985, delta=12.0)   # MC 104.985
+        # and it must NOT be the old answer, which was 69% low here
+        self.assertGreater(r.p99_ms, 60.0, "the old fixed multiplier gave 32.9 on this path")
+
+    def test_the_shape_is_no_longer_a_constant_across_the_library(self):
+        from keystone.blueprint_library import library
+        ratios = {round(simulate(e.build()).p99_ms / simulate(e.build()).p50_ms, 2)
+                  for e in library() if simulate(e.build()).p50_ms > 0}
+        self.assertGreater(len(ratios), 20, "p99/p50 was the single constant 6.64 for all 56")
+
+    def test_percentiles_stay_ordered_and_finite_everywhere(self):
+        from keystone.blueprint_library import library
+        for e in library():
+            with self.subTest(e.key):
+                r = simulate(e.build())
+                self.assertLessEqual(r.p50_ms, r.p95_ms)
+                self.assertLessEqual(r.p95_ms, r.p99_ms)
+                self.assertTrue(math.isfinite(r.p99_ms))
+                self.assertGreaterEqual(r.p50_ms, 0.0)

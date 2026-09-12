@@ -10,7 +10,7 @@
 
 - **Bottleneck:** App tier (t4g.medium x12) (utilisation 69%)
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
-- **Latency (dominant path):** p50 ~8 ms · p95 ~33 ms · p99 ~51 ms (mean 11 ms)
+- **Latency (dominant path):** p50 ~9 ms · p95 ~28 ms · p99 ~40 ms (mean 11 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
 - **Estimated monthly cost:** ~$1,045.00/month
 
@@ -22,19 +22,19 @@
 | breakpoint_rps_safe | 12,240 req/s | system_rps * (85% ceiling / rho_max) | medium |
 | breakpoint_rps_theoretical | 14,400 req/s | system_rps * (1.0 / rho_max) | medium |
 | mean_latency_ms | 11 ms | sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow | medium |
-| p50_ms | 8 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 33 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 51 ms | exponential-tail: mean * ln(100) | medium |
+| p50_ms | 9 ms | M/M/c sojourn mixture over the path (p50) | medium |
+| p95_ms | 28 ms | M/M/c sojourn mixture over the path (p95) | medium |
+| p99_ms | 40 ms | M/M/c sojourn mixture over the path (p99) | medium |
 | monthly_cost | $1,045.00/mo | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at ASSUMPTION rates | medium |
 
 ## Per-flow latency
 
-_Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier's instance count; fixed-shape exponential percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
+_Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier's instance count; percentiles from the sojourn distribution, optional hops as a mixture). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
 
 | Flow | Share | Mean | p50 | p95 | p99 |
 |---|--:|--:|--:|--:|--:|
-| redirect | 99% | 11 ms | 8 ms | 33 ms | 51 ms |
-| create | 1% | 16 ms | 11 ms | 47 ms | 72 ms |
+| redirect | 99% | 11 ms | 9 ms | 28 ms | 40 ms |
+| create | 1% | 16 ms | 14 ms | 35 ms | 48 ms |
 
 ## Component load
 
@@ -99,14 +99,14 @@ _Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier'
 - Bottleneck = highest rho -> App tier (t4g.medium x12) at rho=0.69 (10,000 / 14,400 rps).
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
 - Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 11 ms.
-- Percentiles are a FIXED-SHAPE approximation, not a second measurement: p50/p95/p99 = mean x 0.69/3.00/4.61. Two consequences worth knowing. (1) The ratio p99/p50 is the constant 6.64 for EVERY design at EVERY load, so the percentiles carry no information the mean does not already carry — read them as a shape applied to the mean, never as an independently derived tail. (2) The multipliers assume an exponentially distributed sojourn, which is EXACT for a single M/M/1 hop and only approximate here, because the engine now models each tier as M/M/c (whose sojourn is a mixture, not an exponential) and sums several hops along a path. It over-states the tail in the common case; treat it as a directional upper bound. A real tail model needs the M/M/c sojourn distribution convolved along the path, and is not in v1.
+- Percentiles come from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean: each hop contributes its mean and variance, hops with visit_prob < 1 are enumerated as a mixture (they make the path bimodal), and each branch is a two-moment gamma fit. Validated against a 200k-run Monte Carlo of the exact sojourn. An approximation, not the exact convolution.
 - Monthly cost = compute $1,045.00 = $1,045.00 (integer cents; usage rates ASSUMPTION).
 
 ## Where this is wrong (read before trusting a number)
 
 - Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities are SEED benchmarks tagged ASSUMPTION, not calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
-- Percentiles are a FIXED SHAPE applied to the mean, not a second measurement. The ratio p99/p50 is the constant 6.64 for every design at every load, so they carry no information the mean does not already carry — do not read p99 as an independently derived tail. The exponential shape is EXACT for a single M/M/c tier with one server and only approximate here, because each tier is M/M/c (whose sojourn is a mixture, not an exponential) and a path sums several of them. It tends to OVER-state the tail; treat p95/p99 as upper-bound directional figures. A real tail model needs the M/M/c sojourn distribution convolved along the path, and is not in v1.
+- Percentiles are computed from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean. Each hop contributes its own mean and variance; a hop with visit_prob < 1 (a cache miss, a CDN miss) makes the path BIMODAL, so the optional hops are enumerated and the percentile is read off the weighted mixture. It is still an approximation — each branch is a two-moment gamma fit, not the exact convolution — but it is validated: against a 200k-run Monte Carlo of the exact sojourn on code_editor's edit path it gives p50 3.41 (MC 3.38), p95 11.61 (MC 11.67), p99 110.1 (MC 105.0). THIS REPLACED FIXED MULTIPLIERS (mean x ln2 / ln20 / ln100) THAT SHIPPED WITH THE CAVEAT 'over-states the tail'. On that same path they were 69% TOO LOW at p99 (32.9 vs 105.0) — wrong, and wrong in the opposite direction to their own warning, on exactly the shape where the tail is the whole question. p99/p50 is no longer a constant: it now ranges from 1.7 to 67 across the library instead of 6.64 everywhere.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at ASSUMPTION rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates are a placeholder model class (real prices vary ~100× by model). All these rates are uncited ASSUMPTION seeds until grounded. Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope.
 - The bottleneck leads the next component by 36.1 percentage points, which is wide enough that the ordering survives ordinary input error.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
