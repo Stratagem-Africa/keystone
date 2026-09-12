@@ -428,6 +428,18 @@ svg#edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .modetog{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .modetog button{flex:1;font-size:11.5px;font-weight:700;padding:7px 0;cursor:pointer;background:transparent;color:var(--muted);border:none;transition:.15s}
 .modetog button.on{background:linear-gradient(90deg,rgba(80,120,255,.32),rgba(110,80,255,.26));color:#fff}
+/* right-click sizer */
+.sizer{position:fixed;z-index:60;width:250px;background:rgba(16,22,48,.98);border:1px solid rgba(150,170,240,.25);
+  border-radius:10px;padding:8px;box-shadow:0 18px 44px rgba(0,0,0,.6);backdrop-filter:blur(6px)}
+.sizer-h{font-weight:700;font-size:12.5px;padding:2px 6px}
+.sizer-sub{font-size:11px;color:var(--muted);padding:0 6px 7px;border-bottom:1px solid rgba(150,170,240,.14);margin-bottom:6px}
+.sizer-b{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);
+  font:inherit;font-size:12.5px;padding:7px 6px;border-radius:6px;cursor:pointer}
+.sizer-b small{display:block;font-size:10.5px;color:var(--muted);margin-top:1px}
+.sizer-b:hover:not(:disabled){background:rgba(120,140,240,.16)}
+.sizer-b:disabled{opacity:.4;cursor:not-allowed}
+.sizer-b.primary{margin-top:5px;border-top:1px solid rgba(150,170,240,.14);color:var(--blue)}
+
 /* plain per-node status (shown ONLY in Simple mode) */
 .node .simplestat{display:none;margin-top:6px;font-size:10.5px;font-weight:700}
 .node .simplestat.s-ok{color:#86efac}
@@ -648,6 +660,17 @@ DATA.nodes.forEach(n=>{
   const cap=el('span',null,'capacity '+rps(n.capacity_rps)+'/sec');
   meta.appendChild(u);meta.appendChild(cap);d.appendChild(meta);
   d.onclick=(e)=>{e.stopPropagation();openNode(n);};
+  // RIGHT-CLICK A TIER TO CHANGE ITS SIZE. Asked for directly: "if I right click, can I add more of
+  // that component, and the system auto-includes it and re-optimises?" It can, and it does not need
+  // new intelligence to do it — the engine already sizes and re-simulates. This gesture just asks it.
+  //
+  // The map is a sandboxed iframe (allow-scripts, no same-origin) so it cannot call the API itself.
+  // It posts the request to the parent studio, which re-runs the engine and swaps this map for the
+  // new one. Every number you then see is a fresh simulation of the edited design, never the old
+  // numbers with a box drawn on top.
+  if(!n.synthetic && n.instances!=null){
+    d.oncontextmenu=(e)=>{e.preventDefault();e.stopPropagation();openSizer(n,e.clientX,e.clientY);};
+  }
   // While a journey is focused, hover must NOT clobber it — leave the active-flow highlight intact.
   d.onmouseenter=()=>{if(!activeFlow)hoverNode(n.id);};
   d.onmouseleave=()=>{if(!activeFlow)clearHover();};
@@ -710,6 +733,42 @@ $('#jExit').onclick=()=>clearFlow();
 // ---- detail panel ---------------------------------------------------------
 const panel=$('#panel');
 function kv(parent,k,v,tag){const r=el('div','kv');r.appendChild(el('span','k',k));const vv=el('span','v',v);r.appendChild(vv);parent.appendChild(r);if(tag){const t=el('div','tagline',tag);parent.appendChild(t);} }
+// --- right-click sizer -------------------------------------------------------------------
+let sizerEl=null;
+function closeSizer(){ if(sizerEl){sizerEl.remove();sizerEl=null;} }
+document.addEventListener('click',closeSizer);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSizer();});
+
+function askParent(msg){
+  // The parent may not be listening (the map also opens as a standalone file). Say so rather than
+  // appearing to work — a control that silently does nothing is worse than one that is not there.
+  try{ parent.postMessage(Object.assign({source:'keystone-map'},msg),'*'); }catch(_){}
+}
+
+function openSizer(n,x,y){
+  closeSizer();
+  const m=el('div','sizer'); sizerEl=m;
+  m.style.left=Math.min(x,innerWidth-260)+'px'; m.style.top=Math.min(y,innerHeight-190)+'px';
+  m.onclick=(e)=>e.stopPropagation();
+  m.appendChild(el('div','sizer-h',n.name));
+  m.appendChild(el('div','sizer-sub','running '+n.instances+' — '+pct(n.utilization)+' full'));
+  const add=(label,delta,hint)=>{
+    const b=el('button','sizer-b',label);
+    b.onclick=()=>{ closeSizer(); askParent({type:'resize',id:n.id,instances:Math.max(1,n.instances+delta)}); };
+    if(hint){const s2=el('small',null,hint); b.appendChild(s2);}
+    m.appendChild(b); return b;
+  };
+  add('Add one more',1,'see what it costs and what it fixes');
+  add('Add five',5,'for a tier that is badly under-provisioned');
+  const rm=add('Remove one',-1,'is this over-provisioned?');
+  if(n.instances<=1){ rm.disabled=true; rm.title='Only one left — removing it is a total failure, which this engine does not model.'; }
+  const fix=el('button','sizer-b primary','Fix the whole design for me');
+  fix.appendChild(el('small',null,'size every tier to today\'s load, then re-check it'));
+  fix.onclick=()=>{ closeSizer(); askParent({type:'remediate'}); };
+  m.appendChild(fix);
+  document.body.appendChild(m);
+}
+
 function openNode(n){
   DATA.nodes.forEach(m=>nodeEls[m.id].classList.toggle('sel',m.id===n.id));
   $('#pKind').textContent=n.kind.replace(/_/g,' ')+(n.is_bottleneck?' · BOTTLENECK (fills up first)':'')+(n.is_spof?' · SINGLE POINT OF FAILURE (no backup)':'');

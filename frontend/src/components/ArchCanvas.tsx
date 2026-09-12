@@ -299,7 +299,18 @@ export function ArchCanvas({
             const rps = w.to.arrival_rps;
             const share = systemRps > 0 && rps !== null ? Math.min(1, rps / systemRps) : 0;
             const count = rps === null ? 0 : Math.max(1, Math.min(5, Math.round(share * 5)));
-            const dur = 2.6 - Math.min(1.4, share * 1.4); // busier wire → quicker stream
+            // SPEED ENCODES CONGESTION, and it used to encode the opposite. `dur` got SHORTER as a
+            // wire got busier, so the fuller a tier became the faster its traffic appeared to fly
+            // into it — the reverse of what happens to a real request. Requests now slow as the
+            // component they are heading into fills up: gentle to ~70%, then biting hard, mirroring
+            // the 1/(1-rho) the engine itself computes. Past 100% they crawl, because the queue is
+            // growing faster than it drains.
+            const util = w.to.utilization ?? 0;
+            const drag = util >= 1 ? 14 : 1 / Math.max(0.08, Math.pow(1 - util, 1.6));
+            const dur = Math.min(24, (2.6 - Math.min(1.4, share * 1.4)) * drag);
+            // And colour says it too, for anyone who does not read motion.
+            const flowTint =
+              util >= 1 ? "var(--cv-red)" : util >= 0.85 ? "var(--cv-amber)" : w.color;
             return (
               <g key={w.id} opacity={muted ? 0.18 : 1}>
                 <path
@@ -312,7 +323,7 @@ export function ArchCanvas({
                 />
                 {!reduced &&
                   Array.from({ length: count }).map((_, i) => (
-                    <circle key={i} r={3} fill={w.color}>
+                    <circle key={i} r={util >= 1 ? 4 : 3} fill={flowTint}>
                       <animateMotion
                         dur={`${dur}s`}
                         begin={`${(i * dur) / Math.max(1, count)}s`}
@@ -325,7 +336,7 @@ export function ArchCanvas({
                   ))}
                 {reduced && count > 0 && (
                   // Static equivalent: a solid segment carries "this wire is busy" without motion.
-                  <path d={w.d} fill="none" stroke={w.color} strokeWidth={2} opacity={0.55} />
+                  <path d={w.d} fill="none" stroke={flowTint} strokeWidth={util >= 1 ? 3 : 2} opacity={0.6} />
                 )}
               </g>
             );

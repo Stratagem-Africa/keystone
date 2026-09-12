@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
@@ -439,6 +439,25 @@ class GenerateRequest(BaseModel):
     intent: str = Field(..., min_length=1, max_length=2000)
     render: bool = False   # also return a self-contained interactive HTML map (for the frontend studio)
     sweep: bool = False    # also run the load sweep (one real simulate() per stop) for the load axis
+    # {component_id: instance_count} — "add one of these and show me what happens". The map sends
+    # this when you right-click a tier. Kept as an OVERRIDE on the generated design rather than a
+    # stored edit: this endpoint is stateless, and the engine re-runs from scratch either way, so
+    # the answer you get is a real simulation and not an interpolation.
+    instances: dict[str, int] = Field(default_factory=dict)
+    # "Fix the whole design for me" — let the engine size every tier for today's load instead of
+    # naming counts by hand. This is `remediation.plan_capacity`, which has existed and worked for
+    # weeks with no way to reach it from the canvas.
+    autosize: bool = False
+
+    @field_validator("instances")
+    @classmethod
+    def _sane_instances(cls, v: dict[str, int]) -> dict[str, int]:
+        # Fail closed. 0 instances is a component that does not exist (hard_node_failure — UNMODELLED),
+        # and an unbounded count would let a caller ask for an arbitrarily expensive simulate().
+        for cid, n in v.items():
+            if not isinstance(n, int) or not (1 <= n <= 10_000):
+                raise ValueError(f"instances[{cid}] must be a whole number from 1 to 10,000")
+        return v
 
 
 @app.post("/generate")
@@ -462,6 +481,23 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     """
     try:
         model = generate_architecture(req.intent, provider="stub")  # public surface: offline, $0, no LLM
+        # Apply any right-click "add one of these" BEFORE simulating, so every number downstream —
+        # utilisation, breakpoint, latency, cost — is a real engine result for the edited design,
+        # never the original's numbers with a component drawn on top.
+        for cid, n in (req.instances or {}).items():
+            if cid not in model.components:
+                raise KeyError(f"no component {cid!r} in this design")
+            model.components[cid].instances = n
+        # AFTER the manual edits, not before. "Fix the whole design for me" has to fix what is on
+        # the screen — including the tier you just shrank. Running it first meant the override then
+        # re-broke the design and the button appeared to do nothing.
+        if req.autosize:
+            # Size for the load the design already declares. The plan re-simulates to prove it
+            # holds, and refuses the tiers it cannot fix by adding instances (a single-writer
+            # primary, a third party's quota) — those come back as blockers, not silent no-ops.
+            plan = remediation.plan_capacity(model, model.workload.system_rps)
+            for remedy in plan.remedies:
+                model.components[remedy.component_id].instances = remedy.to_instances
         sim = simulate(model)                                        # simulate() is the sole number source
         arch = build_arch_map(model, sim, sweep=req.sweep or req.render)  # each stop = one real simulate()
         # Render BEFORE attaching catalogue/matched so the embedded JSON island stays the clean arch map

@@ -71,13 +71,44 @@ export function ArchStudio() {
   const [activeFlowIndex, setActiveFlowIndex] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<ArchMapNode | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The intent that produced the map on screen. A ref, not state: the message listener is attached
+  // once and must read the CURRENT intent, not the one captured when it was attached.
+  const intentRef = useRef<string>("");
+  // Sizing overrides accumulated from right-clicks, so two edits in a row compose instead of the
+  // second discarding the first.
+  const sizingRef = useRef<Record<string, number>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  async function generate(text: string) {
+  // The map runs in a sandboxed iframe (allow-scripts, no same-origin), so it cannot call the API
+  // itself — by design. Right-clicking a tier posts its request up here instead, and the studio
+  // re-runs the engine. Nothing is patched in place: the whole design is re-simulated, so the
+  // numbers that come back are a real result for the edited design rather than the old ones with a
+  // component drawn on top.
+  useEffect(() => {
+    function onMapMessage(ev: MessageEvent) {
+      const d = ev.data;
+      if (!d || d.source !== "keystone-map" || !intentRef.current) return;
+      if (d.type === "resize" && typeof d.id === "string" && Number.isInteger(d.instances)) {
+        void generate(intentRef.current, { [d.id]: d.instances });
+      } else if (d.type === "remediate") {
+        void generate(intentRef.current, "auto");
+      }
+    }
+    window.addEventListener("message", onMapMessage);
+    return () => window.removeEventListener("message", onMapMessage);
+  }, []);
+
+  /** `sizing` carries right-click edits: a {componentId: instances} map, or "auto" to let the
+   *  engine size every tier for today's load. Passing nothing starts a fresh design and clears any
+   *  accumulated edits — a new intent must not inherit the last one's instance counts. */
+  async function generate(text: string, sizing?: Record<string, number> | "auto") {
     const brief = text.trim();
     if (!brief) return;
+    intentRef.current = brief;
+    if (sizing === undefined) sizingRef.current = {};
+    else if (sizing !== "auto") sizingRef.current = { ...sizingRef.current, ...sizing };
     if (!API) {
       setErrorMsg(
         "Keystone doesn't know where its API is. The address is baked in when the app is built, not read while it runs — " +
@@ -97,7 +128,16 @@ export function ArchStudio() {
         headers: { "Content-Type": "application/json" },
         // sweep:true → the load axis (one real simulate() per stop). render:false → no HTML string;
         // the map is a React component now, so the self-contained document is no longer needed.
-        body: JSON.stringify({ intent: brief, render: false, sweep: true }),
+        // "auto" asks the engine to size the design itself: `remediation.plan_capacity` works out
+        // what every tier needs for today's load and re-simulates to prove it holds. That already
+        // existed and had simply never been reachable from the canvas.
+        body: JSON.stringify({
+          intent: brief,
+          render: false,
+          sweep: true,
+          ...(sizing === "auto" ? { autosize: true } : {}),
+          ...(Object.keys(sizingRef.current).length ? { instances: sizingRef.current } : {}),
+        }),
         signal: controller.signal,
       });
       if (!res.ok) {
