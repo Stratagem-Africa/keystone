@@ -94,17 +94,74 @@ else
 fi
 export KB_PROVIDER=curated               # cited evidence in the report; uses no LLM
 
+# CORS. The API defaults to allowing http://localhost:3000 only, and this launcher serves the studio
+# on http://127.0.0.1:3000 — which a browser treats as a DIFFERENT ORIGIN. The page loaded, the
+# button worked, and every request was blocked before it left the browser. Both spellings are listed
+# so whichever one you open in works. Still loopback only: nothing outside this machine is allowed.
+export ALLOWED_ORIGINS="http://$BIND:$WEB_PORT,http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT"
+
 cleanup() { dim "shutting down…"; kill $(jobs -p) 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 ( cd prototype && python3 -m uvicorn api.main:app --host "$BIND" --port "$API_PORT" --log-level warning ) &
-( cd frontend && NEXT_PUBLIC_API_URL="http://$BIND:$API_PORT" npm run dev -- --port "$WEB_PORT" >/dev/null 2>&1 ) &
+# PRODUCTION BUILD, NOT `next dev`. This ran the dev server and the studio silently FAILED TO
+# HYDRATE: the page rendered, you could type into the box, and the Generate button stayed disabled
+# forever — because the text reached the DOM while React state never updated. The dev server's
+# hot-reload WebSocket could not connect (ERR_INVALID_HTTP_RESPONSE, retrying endlessly) and took
+# hydration down with it. A dev server is for editing code, not for running an app: it compiles on
+# first request, needs a live socket to the toolchain, and fails in ways a built app cannot.
+#
+# NEXT_PUBLIC_* are inlined AT BUILD TIME, so the API address must be set for the build, not just
+# the server — that is why it appears on both lines below.
+( cd frontend
+  # `set -o pipefail` is on, and `find ... -newer .next/BUILD_ID` ERRORS when that file does not
+  # exist (first run). The failing find made the whole pipeline fail, `set -e` killed this subshell
+  # before it printed anything, and the launcher happily announced a URL that served nothing.
+  # Hence: test for the marker FIRST, and only then ask what is newer than it.
+  # NEXT_PUBLIC_* are inlined into the JS AT BUILD TIME, so a build made with a different API
+  # address — or none at all — is stale even when every source file is older than it. That exact
+  # case shipped: a cached build had no API URL in the bundle, the studio loaded and the Generate
+  # button worked, and the request went nowhere. Source mtimes cannot see it, so the address used
+  # is recorded next to the build and compared.
+  WANT_API="http://$BIND:$API_PORT"
+  needs_build=1
+  if [ -f .next/BUILD_ID ] && [ "$(cat .next/.keystone-api-url 2>/dev/null)" = "$WANT_API" ]; then
+    if [ -z "$(find src public package.json next.config.ts -type f -newer .next/BUILD_ID 2>/dev/null | head -1)" ]; then
+      needs_build=0
+    fi
+  fi
+  if [ "$needs_build" = "1" ]; then
+    printf '\033[2m  building the app (first run, or the code changed) — about a minute…\033[0m\n'
+    if ! NEXT_PUBLIC_API_URL="http://$BIND:$API_PORT" npm run build >/tmp/keystone-build.log 2>&1; then
+      printf '\033[31m  build failed. Last lines of /tmp/keystone-build.log:\033[0m\n'
+      tail -15 /tmp/keystone-build.log
+      exit 1
+    fi
+    printf '%s' "$WANT_API" > .next/.keystone-api-url
+  fi
+  NEXT_PUBLIC_API_URL="http://$BIND:$API_PORT" npx --no-install next start --port "$WEB_PORT" >/dev/null 2>&1
+) &
 
-# Wait for the API rather than sleeping a guessed number of seconds.
+# Wait for BOTH, not just the API. This waited only on /health, so when the frontend subshell died
+# the launcher still printed the URL and everything looked fine until you clicked something.
 for _ in $(seq 1 40); do
   curl -fsS -m 2 "http://$BIND:$API_PORT/health" >/dev/null 2>&1 && break
   sleep 1
 done
+web_up=0
+for _ in $(seq 1 180); do
+  if curl -fsS -m 2 "http://$BIND:$WEB_PORT/studio" >/dev/null 2>&1; then web_up=1; break; fi
+  kill -0 %2 2>/dev/null || break          # the frontend job died — stop waiting on it
+  sleep 1
+done
+if [ "$web_up" != "1" ]; then
+  echo
+  bad "the app did not come up on port $WEB_PORT"
+  echo "     Build log: /tmp/keystone-build.log"
+  echo "     Try by hand:  cd frontend && npm run build"
+  echo
+  exit 1
+fi
 
 # A desktop launch should land you IN the app, not hand you a URL to copy. Only when a real TTY is
 # attached, so a CI or headless run never tries to open a browser.
