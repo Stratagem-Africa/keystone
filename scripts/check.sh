@@ -50,16 +50,26 @@ echo; echo "==> Corpus gate  (curated grounding datapoints pass the curation QA)
 python3 -m keystone.benchmarks.validate_corpus 2>&1 | tail -n 1
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
-if command -v ruff >/dev/null 2>&1; then
-  echo; echo "==> ruff check ."
-  ruff check . || status=1
+# ruff / mypy — run whether installed on PATH OR only importable as a module (`python -m ruff`).
+# A module-only install used to report "skipped" and the gate went GREEN without ever linting —
+# that's how 7 ruff errors + a mypy error sat unnoticed. Only a genuine "not installed at all" now
+# skips, which keeps the $0 zero-dep clean-checkout gate green by design.
+if command -v ruff >/dev/null 2>&1; then ruff_cmd="ruff"
+elif python3 -c "import ruff" >/dev/null 2>&1; then ruff_cmd="python3 -m ruff"
+else ruff_cmd=""; fi
+if [ -n "$ruff_cmd" ]; then
+  echo; echo "==> ruff check .  ($ruff_cmd)"
+  $ruff_cmd check . || status=1
 else
   echo; echo "==> ruff: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
 
-if command -v mypy >/dev/null 2>&1; then
-  echo; echo "==> mypy (prototype/api)"
-  (cd "$root" && mypy) || status=1
+if command -v mypy >/dev/null 2>&1; then mypy_cmd="mypy"
+elif python3 -c "import mypy" >/dev/null 2>&1; then mypy_cmd="python3 -m mypy"
+else mypy_cmd=""; fi
+if [ -n "$mypy_cmd" ]; then
+  echo; echo "==> mypy (prototype/api)  ($mypy_cmd)"
+  (cd "$root" && $mypy_cmd) || status=1
 else
   echo; echo "==> mypy: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
