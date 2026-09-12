@@ -465,6 +465,8 @@ export function ArchStudio() {
                       activeFlowIndex={activeFlowIndex}
                       selectedId={selectedNode?.id ?? null}
                       onSelectNode={(n) => { setSelectedNode(n); setRail("verdict"); }}
+                      onResizeNode={(n, instances) => void generate(intentRef.current, { [n.id]: instances })}
+                      onAutosize={() => void generate(intentRef.current, "auto")}
                     />
                   </div>
                   {frames.length > 0 && (

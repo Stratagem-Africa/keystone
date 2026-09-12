@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ArchMap, ArchMapNode, NodeStatus } from "@/lib/archMap";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
@@ -93,13 +93,23 @@ export interface ArchCanvasProps {
   /** Component currently open in the inspector. */
   selectedId?: string | null;
   onSelectNode?: (node: ArchMapNode) => void;
+  /** Right-click a tier to change how many of it there are. The studio re-runs the ENGINE with the
+   *  new count — nothing is patched in place, so the numbers that come back are a real simulation
+   *  of the edited design. */
+  onResizeNode?: (node: ArchMapNode, instances: number) => void;
+  /** "Fix the whole design for me" — let the engine size every tier for today's load. */
+  onAutosize?: () => void;
 }
+
+/** Where the right-click menu is open, if anywhere. */
+type SizerState = { node: ArchMapNode; x: number; y: number } | null;
 
 export function ArchCanvas({
   arch, frame = null, targetId = null, activeFlowIndex = null,
-  selectedId = null, onSelectNode,
+  selectedId = null, onSelectNode, onResizeNode, onAutosize,
 }: ArchCanvasProps) {
   const reduced = useReducedMotion();
+  const [sizer, setSizer] = useState<SizerState>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [autoFit, setAutoFit] = useState(true);
@@ -107,6 +117,17 @@ export function ArchCanvas({
   // over the top-left of the canvas, so the view has to be movable.
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
+
+  // Dismiss the right-click menu the way every menu is dismissed. Attached once, at the document,
+  // so clicking anywhere — canvas, rail, another card — closes it.
+  useEffect(() => {
+    if (!sizer) return;
+    const close = () => setSizer(null);
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setSizer(null); };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", esc); };
+  }, [sizer]);
   const panStart = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const [showHeader, setShowHeader] = useState(true);
 
@@ -366,6 +387,12 @@ export function ArchCanvas({
               key={p.node.id}
               type="button"
               onClick={() => onSelectNode?.(p.node)}
+              onContextMenu={(e) => {
+                // Only where it means something: the users are not a machine you can add more of.
+                if (p.node.instances == null || !onResizeNode) return;
+                e.preventDefault();
+                setSizer({ node: p.node, x: e.clientX, y: e.clientY });
+              }}
               aria-pressed={selectedId === p.node.id}
               className="cv-panel absolute overflow-hidden text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{
@@ -501,6 +528,65 @@ export function ArchCanvas({
           zoom {Math.round(scale * 100)}%
         </span>
       </div>
+      {/* RIGHT-CLICK SIZER. Fixed-position so it is never clipped by the canvas viewport, and it
+          sits outside the transformed layer so panning or zooming cannot drag it off the pointer. */}
+      {sizer && (
+        <div
+          role="menu"
+          aria-label={`Resize ${sizer.node.name}`}
+          onClick={(e) => e.stopPropagation()}
+          className="cv-panel fixed z-50 w-64 p-2 shadow-2xl"
+          style={{
+            left: Math.min(sizer.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 270),
+            top: Math.min(sizer.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 210),
+          }}
+        >
+          <p className="px-2 text-[12.5px] font-semibold" style={{ color: "var(--cv-ink)" }}>
+            {sizer.node.name}
+          </p>
+          <p className="px-2 pb-2 mb-1.5 text-[11px] border-b" style={{ color: "var(--cv-muted)", borderColor: "var(--cv-line)" }}>
+            running {sizer.node.instances}
+            {sizer.node.utilization != null && ` — ${Math.round(sizer.node.utilization * 100)}% full`}
+          </p>
+          {([
+            ["Add one more", 1, "see what it costs and what it fixes"],
+            ["Add five", 5, "for a tier that is badly under-provisioned"],
+            ["Remove one", -1, "is this over-provisioned?"],
+          ] as const).map(([label, delta, hint]) => {
+            const next = (sizer.node.instances ?? 1) + delta;
+            // One is the floor: removing the last instance is a component that does not exist,
+            // which is hard_node_failure — explicitly UNMODELLED by this engine.
+            const blocked = next < 1;
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={blocked}
+                title={blocked ? "Only one left — removing it is a total failure, which this engine does not model." : undefined}
+                onClick={() => { setSizer(null); onResizeNode?.(sizer.node, next); }}
+                className="block w-full text-left px-2 py-1.5 rounded text-[12.5px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--cv-panel)]"
+                style={{ color: "var(--cv-ink)" }}
+              >
+                {label}
+                <span className="block text-[10.5px]" style={{ color: "var(--cv-muted)" }}>{hint}</span>
+              </button>
+            );
+          })}
+          {onAutosize && (
+            <button
+              type="button"
+              onClick={() => { setSizer(null); onAutosize(); }}
+              className="block w-full text-left px-2 py-1.5 mt-1 rounded text-[12.5px] border-t hover:bg-[var(--cv-panel)]"
+              style={{ color: "var(--cv-blue)", borderColor: "var(--cv-line)" }}
+            >
+              Fix the whole design for me
+              <span className="block text-[10.5px]" style={{ color: "var(--cv-muted)" }}>
+                size every tier for today&apos;s load, then re-check it
+              </span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
