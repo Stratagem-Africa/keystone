@@ -4,12 +4,26 @@
 
 Takes a builder from **intent → validated design**. The simulation engine is deterministic math (free, no AI); the council reasons about design and never emits a number. See `CLAUDE.md` for the working contract and `docs/` for the full spec.
 
-## Run it (Stratagem staff)
-
-**macOS — a Dock icon:**
+## Set it up (once)
 
 ```bash
-./scripts/make-mac-app.sh     # builds Keystone.app; double-click it from then on
+git clone https://github.com/Stratagem-Africa/keystone.git && cd keystone
+./setup.sh
+```
+
+That checks your tools, installs frontend dependencies, builds the macOS app, puts a **Keystone**
+shortcut on your Desktop, and installs a git hook so future `git pull`s keep it in step. Then just
+double-click **Keystone**.
+
+The Claude CLI is optional — `setup.sh` tells you how to add it, and Keystone runs fully without it
+(the engine and all 56 reference designs need no AI at all).
+
+## Run it
+
+**macOS — the Desktop shortcut**, or rebuild it with:
+
+```bash
+./scripts/make-mac-app.sh     # builds Keystone.app
 ```
 
 **Any platform — a command:**

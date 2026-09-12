@@ -56,35 +56,91 @@ PLIST
 # fails invisibly is worse than a shell command that explains itself.
 cat > "$APP/Contents/MacOS/Keystone" <<LAUNCHER
 #!/bin/bash
+# Launched by Finder, which gives a process almost NOTHING: a bare PATH (/usr/bin:/bin:/usr/sbin:
+# /sbin) and none of your shell profile. node, npm and claude are usually installed by Homebrew or a
+# version manager and are NOT on that PATH, so a Finder launch fails where the same script works
+# perfectly from a terminal. That asymmetry is the classic "works for me" bug in a .app wrapper, and
+# it is why this runs the real script through a LOGIN shell rather than calling it directly.
 REPO="$REPO"
+LOG="\$HOME/Library/Logs/Keystone.log"
+mkdir -p "\$(dirname "\$LOG")"
+
 if [ ! -x "\$REPO/scripts/keystone-local.sh" ]; then
-  osascript -e 'display alert "Keystone" message "The checkout moved. Re-run scripts/make-mac-app.sh from the repo."'
+  osascript -e 'display alert "Keystone" message "The checkout has moved or been renamed. Open Terminal, cd to the repo, and re-run ./scripts/make-mac-app.sh"'
   exit 1
 fi
-open -a Terminal "\$REPO/scripts/keystone-local.sh"
+
+# -l makes it a LOGIN shell: it reads ~/.zprofile and ~/.zshrc, so PATH matches what you get in a
+# terminal, and the window STAYS OPEN on failure instead of vanishing.
+#
+# EDITING THIS HEREDOC: the delimiter is UNQUOTED (it must be, so \$REPO expands), which means
+# backticks are EXECUTED — even inside a comment. A backticked phrase in a comment here once
+# spawned a shell that waited forever for input and hung the whole build. Never use them.
+exec /usr/bin/open -a Terminal "\$REPO/scripts/keystone-start.command"
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Keystone"
+
+# Terminal runs a .command file as a LOGIN shell and — crucially — leaves the window open when it
+# exits, so a failure is readable instead of a window that flashes and vanishes.
+cat > "$REPO/scripts/keystone-start.command" <<'CMD'
+#!/bin/zsh -l
+# Opened by Keystone.app. `-l` = login shell, so PATH is the same one you get in a terminal.
+cd "$(dirname "$0")/.."
+LOG="$HOME/Library/Logs/Keystone.log"
+mkdir -p "$(dirname "$LOG")"
+{
+  echo "=== $(date) ==="
+  echo "PATH=$PATH"
+  for t in python3 node npm claude; do
+    printf '%s: %s\n' "$t" "$(command -v $t || echo MISSING)"
+  done
+} >> "$LOG"
+
+if ! ./scripts/keystone-local.sh; then
+  echo
+  echo "  Keystone stopped. The checks above say why."
+  echo "  Full log: $LOG"
+  echo
+  echo "  Most common fix — a tool Finder could not see:"
+  echo "    npm install -g @anthropic-ai/claude-code && claude"
+  echo
+  echo "  Or run with no AI at all:  ./scripts/keystone-local.sh --offline"
+  echo
+  echo "  Press return to close."
+  read -r _
+fi
+CMD
+chmod +x "$REPO/scripts/keystone-start.command"
 
 # Icon: generated from text so nothing binary is committed. Skipped silently if the tools are absent.
 if command -v sips >/dev/null && command -v iconutil >/dev/null; then
   TMP="$(mktemp -d)"; ICONSET="$TMP/Keystone.iconset"; mkdir -p "$ICONSET"
   python3 - "$TMP/icon.png" <<'PY' 2>/dev/null || true
 import struct, zlib, sys
-# A 1024x1024 PNG drawn by hand — deep slate ground, a keystone wedge in amber. No dependencies,
-# no committed binary, and it regenerates identically on every machine.
-W = 1024
-def px(x, y):
-    cx = x - W/2; ty = y / W
-    half = 190 + 300*ty                      # a wedge: narrow at the top, wide at the base
-    if 250 <= y <= 800 and abs(cx) <= half:
-        return (214, 158, 74)
-    return (16, 22, 32)
-rows = b"".join(b"\x00" + b"".join(struct.pack("3B", *px(x, y)) for x in range(W)) for y in range(W))
+# A 512x512 PNG drawn by hand — deep slate ground, a keystone wedge in amber. No dependency and no
+# committed binary; it regenerates identically on every machine.
+#
+# Built a ROW AT A TIME, not a pixel at a time. The per-pixel version took minutes (a function call
+# and a struct.pack for each of a million pixels) and hung the build. The wedge is a single
+# contiguous span on every row, so each row is three byte-runs and the whole image is instant.
+W = 512
+BG = bytes((16, 22, 32))
+FG = bytes((214, 158, 74))
+rows = bytearray()
+for y in range(W):
+    rows.append(0)                                   # PNG per-scanline filter byte: none
+    if 125 <= y <= 400:
+        half = int(95 + 150 * (y / W))               # narrow at the top, wide at the base
+        left = max(0, W // 2 - half)
+        right = min(W, W // 2 + half)
+        rows += BG * left + FG * (right - left) + BG * (W - right)
+    else:
+        rows += BG * W
 def chunk(tag, data):
     return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
 png = (b"\x89PNG\r\n\x1a\n"
        + chunk(b"IHDR", struct.pack(">IIBBBBB", W, W, 8, 2, 0, 0, 0))
-       + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+       + chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
 open(sys.argv[1], "wb").write(png)
 PY
   if [ -f "$TMP/icon.png" ]; then
@@ -96,6 +152,13 @@ PY
   fi
   rm -rf "$TMP"
 fi
+
+# Ad-hoc sign and strip quarantine. An unsigned bundle makes Finder refuse with "cannot be opened
+# because the developer cannot be verified" — the single most likely reason a double-click does
+# nothing. Ad-hoc signing is enough for a local build; it is not notarisation and is not pretending
+# to be.
+xattr -cr "$APP" 2>/dev/null || true
+codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
 touch "$APP"                      # nudge Finder to pick up the new bundle
 echo
