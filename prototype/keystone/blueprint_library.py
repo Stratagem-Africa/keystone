@@ -37,6 +37,7 @@ from .simulation import SAFE_UTILIZATION, simulate
 __all__ = [
     "LibraryEntry", "library", "match", "load_entry", "validate_library_entry",
     "LIBRARY_DIR", "ValidationReport", "keyword_collisions", "byte_gaps", "BYTE_KINDS",
+    "all_matches",
 ]
 
 LIBRARY_DIR = pathlib.Path(__file__).with_name("blueprints") / "library"
@@ -104,6 +105,24 @@ def library() -> tuple[LibraryEntry, ...]:
             path=path,
         ))
     return tuple(out)
+
+
+def all_matches(intent: str) -> list[tuple[LibraryEntry, int, str]]:
+    """EVERY library entry the intent hits, best first — (entry, hit count, longest keyword matched).
+
+    `match()` returns one winner and throws the rest away, which is how "Facebook with a crypto
+    wallet for all users" came back as a Digital Wallet with no social graph in it and nothing said.
+    The library already knew the intent also hit the social blueprints; only the ranking discarded
+    that. Keeping the runners-up lets the report name what it did NOT design.
+    """
+    q = f" {intent.lower().strip()} "
+    out: list[tuple[LibraryEntry, int, str]] = []
+    for entry in library():
+        hits = [k for k in entry.keywords if k and k in q]
+        if hits:
+            out.append((entry, len(hits), max(hits, key=len)))
+    out.sort(key=lambda t: (-t[1], -len(t[2]), t[0].key))
+    return out
 
 
 def match(intent: str) -> LibraryEntry | None:

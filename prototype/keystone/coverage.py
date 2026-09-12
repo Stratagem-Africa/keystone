@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from .model import Assumption
 
-__all__ = ["CAPABILITIES", "missing_capabilities", "declare_coverage_gaps"]
+__all__ = ["CAPABILITIES", "missing_capabilities", "declare_coverage_gaps", "unbuilt_matches"]
 
 # asked-for capability -> (phrases that request it, substrings that would prove it is present,
 #                          what it actually costs you to add, so the gap is actionable)
@@ -121,11 +121,50 @@ def missing_capabilities(intent: str, model) -> list[tuple[str, str]]:
     return out
 
 
+def unbuilt_matches(intent: str, model) -> list[tuple[str, str]]:
+    """(name, summary) for library designs this intent ALSO asked for and did not get.
+
+    The matcher returns ONE blueprint and silently drops the rest. "Facebook with a crypto wallet
+    for all users" came back as a Digital Wallet — correct for the wallet half, with no social graph
+    anywhere and not a word about it. The library already knew the intent hit a social blueprint
+    too; only the ranking threw it away.
+
+    So: ask the library for EVERY entry the intent hits, drop the one we actually built, and report
+    the rest. This is not a guess — each is a design Keystone has, gated and simulatable, that the
+    reader asked for and is not looking at.
+    """
+    from .blueprint_library import all_matches          # local: keeps the import graph flat
+    built = (model.name or "").strip().lower()
+    out: list[tuple[str, str]] = []
+    for entry, _hits, _kw in all_matches(intent):
+        if entry.name.strip().lower() == built:
+            continue
+        out.append((entry.name, entry.summary))
+    return out
+
+
 def declare_coverage_gaps(model, intent: str):
     """Write each missing capability onto the model as a GAP assumption, in place.
 
     Evidence-only: appends assumptions, changes no number. Returns the model for inline use.
     """
+    extra = [
+        Assumption(
+            subject="coverage",
+            statement=(
+                f"YOU ASKED FOR TWO THINGS AND THIS IS ONE OF THEM. Your description also matches "
+                f"Keystone's \"{name}\" design — {summary} — and none of it is in the architecture "
+                f"below. Every figure here describes {model.name} alone. Design the other half "
+                f"separately, then decide how the two systems talk to each other; that boundary is "
+                f"usually where the real work is."
+            ),
+            confidence="high", source="benchmark", provenance="GAP",
+        )
+        for name, summary in unbuilt_matches(intent, model)
+    ]
+    if extra:
+        model.assumptions = list(model.assumptions) + extra
+
     gaps = missing_capabilities(intent, model)
     if not gaps:
         return model

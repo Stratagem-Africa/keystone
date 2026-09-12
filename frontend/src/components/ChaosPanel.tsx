@@ -150,10 +150,27 @@ export function ChaosPanel({
           <div className="mt-3 flex flex-col gap-1">
             <DeltaRow
               label="Average response time (latency)"
-              value={`${active.delta.baseline_latency_ms.toFixed(0)} → ${active.delta.perturbed_latency_ms.toFixed(0)} ms`}
-              tone={active.delta.latency_multiple > 1.5 ? "var(--cv-red)" : undefined}
+              value={
+                active.delta.perturbed_latency_ms == null
+                  ? `${active.delta.baseline_latency_ms.toFixed(0)} ms → no limit`
+                  : `${active.delta.baseline_latency_ms.toFixed(0)} → ${active.delta.perturbed_latency_ms.toFixed(0)} ms`
+              }
+              tone={
+                active.delta.perturbed_latency_ms == null ||
+                (active.delta.latency_multiple ?? 0) > 1.5
+                  ? "var(--cv-red)"
+                  : undefined
+              }
             />
-            <DeltaRow label="Response time vs normal (1.0× = no change)" value={`${active.delta.latency_multiple.toFixed(1)}×`} />
+            <DeltaRow
+              label="Response time vs normal (1.0× = no change)"
+              value={
+                active.delta.latency_multiple == null
+                  ? "off the scale — this breaks the design"
+                  : `${active.delta.latency_multiple.toFixed(1)}×`
+              }
+              tone={active.delta.latency_multiple == null ? "var(--cv-red)" : undefined}
+            />
             <DeltaRow
               label="First part to hit its limit"
               value={active.delta.bottleneck_moved

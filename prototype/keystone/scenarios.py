@@ -273,6 +273,24 @@ def available(model: SystemModel) -> list[tuple[Scenario, str | None]]:
     return out
 
 
+def _runnable_magnitudes(scenario: "Scenario", model: SystemModel, target_id: str | None) -> tuple:
+    """The severities that are actually RUNNABLE against this target.
+
+    `Scenario.magnitudes` is a fixed menu. For instance_loss that menu was offered verbatim against
+    every tier, so the Twitter panel invited you to lose 5 instances from a Notification Queue that
+    has 2 — a button the engine's own precondition would then refuse. Same defect as the cache_cold
+    catalogue bug: the panel must never offer what the model cannot do.
+
+    A tier with n instances can lose at most n-1. Losing ALL of them is a different scenario
+    entirely — `hard_node_failure`, which is in UNMODELLED because a zero-capacity component is
+    outside what this engine can represent.
+    """
+    if scenario.id != "instance_loss" or target_id is None:
+        return scenario.magnitudes
+    n = model.components[target_id].instances
+    return tuple(m for m in scenario.magnitudes if m <= n - 1)
+
+
 def catalogue_for(model: SystemModel) -> list[dict]:
     """The runnable catalogue as plain JSON, for the API/UI.
 
@@ -282,8 +300,10 @@ def catalogue_for(model: SystemModel) -> list[dict]:
     """
     return [
         {**scenario.to_dict(),
+         "magnitudes": list(_runnable_magnitudes(scenario, model, target_id)),
          "target_id": target_id,
          "target_name": model.components[target_id].name if target_id else None,
+         "instances": model.components[target_id].instances if target_id else None,
          "key": scenario.id if target_id is None else f"{scenario.id}:{target_id}"}
         for scenario, target_id in available(model)
     ]

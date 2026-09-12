@@ -37,10 +37,14 @@ export interface ScenarioDelta {
   verdict: string;
   survives: boolean;
   bottleneck_moved: boolean;
-  latency_multiple: number;
+  /** null when the perturbed design is OVERLOADED: past 100% the queue grows without limit, so
+   *  there is no finite multiple. The API has sent null since the unbounded-latency change; this
+   *  type said `number`, so TypeScript could not catch the `.toFixed()` calls that crashed the
+   *  panel on any scenario severe enough to saturate — which "run all 5" always is. */
+  latency_multiple: number | null;
   utilization_delta: number;
   baseline_latency_ms: number;
-  perturbed_latency_ms: number;
+  perturbed_latency_ms: number | null;
   baseline_bottleneck: string;
   perturbed_bottleneck: string;
   baseline_confidence: string;

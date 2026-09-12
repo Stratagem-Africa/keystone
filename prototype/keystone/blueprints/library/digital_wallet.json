@@ -453,7 +453,11 @@
       "paypal",
       "paytm",
       "m-pesa",
-      "peer to peer payments"
+      "peer to peer payments",
+      "cashapp",
+      "revolut",
+      "coinbase",
+      "crypto wallet"
     ]
   }
 }

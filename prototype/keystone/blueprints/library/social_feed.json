@@ -537,7 +537,12 @@
       "event driven feed",
       "materialised feed",
       "facebook feed",
-      "linkedin feed"
+      "linkedin feed",
+      "facebook",
+      "linkedin",
+      "reddit",
+      "social app",
+      "friends feed"
     ]
   }
 }

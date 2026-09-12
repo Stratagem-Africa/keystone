@@ -409,3 +409,69 @@ class TailModelIsDerivedNotAssumedTest(unittest.TestCase):
                 self.assertLessEqual(r.p95_ms, r.p99_ms)
                 self.assertTrue(math.isfinite(r.p99_ms))
                 self.assertGreaterEqual(r.p50_ms, 0.0)
+
+
+class PanelOffersOnlyWhatTheModelCanDoTest(unittest.TestCase):
+    """Reported from the studio: the Twitter chaos panel offered "lose 1-5 instances" against a
+    Notification Queue that has 2. The engine's own precondition would then refuse the run, so the
+    panel was rendering dead buttons — the same defect as the cache_cold catalogue bug."""
+
+    def test_instance_loss_never_offers_more_than_the_tier_has(self):
+        from keystone.blueprints import twitter
+        from keystone.scenarios import catalogue_for
+        model = twitter.build()
+        for entry in catalogue_for(model):
+            if entry["id"] != "instance_loss":
+                continue
+            with self.subTest(entry["target_name"]):
+                n = model.components[entry["target_id"]].instances
+                for mag in entry["magnitudes"]:
+                    self.assertLessEqual(
+                        mag, n - 1,
+                        f"offers losing {mag:.0f} of {n} — losing them all is hard_node_failure, "
+                        f"which is UNMODELLED")
+
+    def test_every_offered_magnitude_actually_runs(self):
+        """The real contract: a card the panel shows must not throw when you press it."""
+        from keystone.blueprints import twitter
+        from keystone.scenarios import catalogue_for, run_scenario
+        model = twitter.build()
+        for entry in catalogue_for(model):
+            for mag in (entry["magnitudes"] or [None]):
+                with self.subTest(f"{entry['id']}:{entry.get('target_id')}@{mag}"):
+                    run_scenario(model, entry["id"], entry.get("target_id"), mag)
+
+
+class AskedForTwoThingsGotOneTest(unittest.TestCase):
+    """"Facebook with crypto wallet for all users" returned a Digital Wallet with no social graph
+    in it and said nothing. The library already knew the intent hit a social blueprint too; only
+    match()'s ranking threw it away."""
+
+    def test_the_other_design_you_asked_for_is_named(self):
+        from keystone.coverage import unbuilt_matches
+        model = generate_architecture("Facebook with crypto wallet for all users", provider="stub")
+        others = [n for n, _ in unbuilt_matches("Facebook with crypto wallet for all users", model)]
+        self.assertTrue(others, "the social half of the request must be reported as not built")
+        self.assertNotIn(model.name, others, "never list the design we actually built")
+
+    def test_it_reaches_the_model_as_a_GAP(self):
+        model = generate_architecture("Facebook with crypto wallet for all users", provider="stub")
+        gaps = [a.statement for a in model.assumptions
+                if a.provenance == "GAP" and a.subject == "coverage"]
+        self.assertTrue(any("ASKED FOR TWO THINGS" in g for g in gaps))
+
+    def test_a_single_subject_request_stays_quiet(self):
+        """Firing on every intent would make it noise nobody reads."""
+        from keystone.coverage import unbuilt_matches
+        for intent in ("a url shortener", "a rate limiter for our api"):
+            with self.subTest(intent):
+                model = generate_architecture(intent, provider="stub")
+                self.assertEqual(unbuilt_matches(intent, model), [])
+
+    def test_household_names_are_recognised(self):
+        """17 of 35 well-known products matched nothing — including Facebook, the most obvious one."""
+        from keystone.blueprint_library import match
+        for name in ("facebook", "tiktok", "linkedin", "reddit", "amazon", "ebay",
+                     "coinbase", "revolut", "venmo", "lyft"):
+            with self.subTest(name):
+                self.assertIsNotNone(match(f"an app like {name}"))
