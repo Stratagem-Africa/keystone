@@ -102,10 +102,13 @@ interface DesignPanelProps {
   activeFlowIndex: number | null;
   onFlow: (i: number | null) => void;
   onClearSelection: () => void;
+  /** Open one of the joint bottleneck candidates. When several tiers are inside the noise, naming
+   *  them is only half the job — the reader needs to get to each one. */
+  onSelectNode?: (node: ArchMapNode) => void;
 }
 
 export function DesignPanel({
-  arch, unmatched = false, selected, activeFlowIndex, onFlow, onClearSelection,
+  arch, unmatched = false, selected, activeFlowIndex, onFlow, onClearSelection, onSelectNode,
 }: DesignPanelProps) {
   const [showWorking, setShowWorking] = useState(false);
   const { meta, verdict } = arch;
@@ -235,7 +238,27 @@ export function DesignPanel({
             {(verdict.bottleneck_contenders?.length ?? 1) > 1 ? (
               <p className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--cv-muted)" }}>
                 before <b style={{ color: "var(--cv-ink)" }}>{verdict.bottleneck_contenders!.length} parts</b> run out of room together —{" "}
-                {verdict.bottleneck_contenders!.join(", ")}. They are within{" "}
+                {verdict.bottleneck_contenders!.map((name, i) => {
+                  const node = arch.nodes.find((n) => n.name === name);
+                  return (
+                    <span key={name}>
+                      {i > 0 && ", "}
+                      {node && onSelectNode ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelectNode(node)}
+                          className="underline underline-offset-2 hover:opacity-80 focus-visible:outline focus-visible:outline-1"
+                          style={{ color: "var(--cv-ink)" }}
+                        >
+                          {name}
+                        </button>
+                      ) : (
+                        name
+                      )}
+                    </span>
+                  );
+                })}
+                . They are within{" "}
                 {(verdict.bottleneck_margin_pts ?? 0).toFixed(1)} points of each other, which is closer
                 than we can tell apart. Treat them as joint suspects and measure before you spend.
               </p>

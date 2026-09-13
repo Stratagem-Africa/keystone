@@ -523,6 +523,7 @@ export function ArchStudio() {
                         activeFlowIndex={activeFlowIndex}
                         onFlow={setActiveFlowIndex}
                         onClearSelection={() => setSelectedNode(null)}
+                      onSelectNode={(n) => setSelectedNode(n)}
                       />
                     ) : (
                       <ChaosPanel

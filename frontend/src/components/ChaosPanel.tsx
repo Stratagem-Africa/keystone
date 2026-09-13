@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
@@ -91,13 +91,28 @@ export function ChaosPanel({
   const setMagnitude = (key: string, m: number) =>
     setSelected((prev) => ({ ...prev, [key]: m }));
 
-  const run = () => {
+  const run = useCallback(() => {
     const specs: ScenarioSpec[] = selectedKeys
       .map((k) => byKey.get(k))
       .filter((s): s is ScenarioOption => Boolean(s))
       .map((s) => ({ scenario_id: s.id, target_id: s.target_id, magnitude: selected[s.key] }));
     if (specs.length) onRun(specs);
-  };
+  }, [selectedKeys, byKey, selected, onRun]);
+
+  // LIVE. Picking a failure used to select it and then wait for you to press Run — "everything we
+  // are selecting isn't responding in real time". Ticking a box is already the question; making
+  // someone confirm it adds a step and teaches nothing. The run fires on its own, debounced so that
+  // dialling a severity up and down does not queue five engine runs.
+  //
+  // The button stays: it re-runs, and it is where "Running…" is reported. A control that shows what
+  // the machine is doing is worth keeping even when it is no longer the only way to start.
+  const selectionKey = JSON.stringify(selected);
+  useEffect(() => {
+    if (!selectedKeys.length) return;
+    const t = setTimeout(run, 350);
+    return () => clearTimeout(t);
+    // `selectionKey` is the value that actually changed; `run` is stable for a given selection.
+  }, [selectionKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
@@ -216,7 +231,7 @@ export function ChaosPanel({
           {running
             ? "Running…"
             : selectedKeys.length === 0
-              ? "Choose a failure to test"
+              ? "Tick a failure — it runs as you pick"
               : selectedKeys.length === 1
                 ? "Run this failure"
                 : `Run all ${selectedKeys.length} at once`}
