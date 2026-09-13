@@ -109,3 +109,22 @@ class RightClickResizeTest(unittest.TestCase):
             with self.subTest(n=n):
                 r = client.post("/generate", json={"intent": "a url shortener", "instances": {"app": n}})
                 self.assertEqual(r.status_code, 422)
+
+    def test_scaling_a_single_writer_primary_is_refused(self):
+        """The canvas must not be able to do what the planner forbids. Adding instances to a SQL
+        primary, a third-party API or a traffic source is a CATEGORY ERROR — and the engine would
+        cheerfully divide the load across them and report a comfortable utilisation that is
+        physically wrong. That would make the right-click gesture a way to manufacture a confident
+        false number, which is the one thing this product exists not to do."""
+        from keystone.remediation import BLOCKED_KINDS
+        r = client.post("/generate", json={"intent": "a url shortener", "instances": {"db": 5}})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("single writer", r.json()["detail"])
+        # and the reason offered is the planner's own, not a second copy that can drift
+        self.assertTrue(any(k.value == "sql_db" for k in BLOCKED_KINDS))
+
+    def test_a_genuine_scale_out_lever_is_still_allowed(self):
+        """Refusing everything would be as useless as refusing nothing."""
+        r = client.post("/generate", json={"intent": "a url shortener", "instances": {"app": 20}})
+        self.assertEqual(r.status_code, 200)
+        self.assertLess(r.json()["verdict"]["bottleneck_utilization"], 0.5)

@@ -487,6 +487,15 @@ def generate_from_intent(req: GenerateRequest) -> dict:
         for cid, n in (req.instances or {}).items():
             if cid not in model.components:
                 raise KeyError(f"no component {cid!r} in this design")
+            kind = model.components[cid].kind
+            # REFUSE what `remediation` refuses. Adding instances to a single-writer primary, a
+            # third party you do not operate, or a traffic source is a CATEGORY ERROR — and the
+            # engine would cheerfully divide the load across them and report a comfortable
+            # utilisation that is physically wrong. Letting the canvas do what the planner forbids
+            # would make the gesture a way to manufacture a confident false number.
+            if kind in remediation.BLOCKED_KINDS:
+                raise ValueError(
+                    f"{model.components[cid].name}: {remediation.BLOCKED_KINDS[kind]}")
             model.components[cid].instances = n
         # AFTER the manual edits, not before. "Fix the whole design for me" has to fix what is on
         # the screen — including the tier you just shrank. Running it first meant the override then

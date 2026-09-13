@@ -104,6 +104,19 @@ export interface ArchCanvasProps {
 /** Where the right-click menu is open, if anywhere. */
 type SizerState = { node: ArchMapNode; x: number; y: number } | null;
 
+/** Kinds where adding instances is a CATEGORY ERROR, not a fix — mirrors
+ *  `remediation.BLOCKED_KINDS`. The API refuses these, so offering them would be a dead button:
+ *  the same defect as a chaos card the engine then declines to run. Short reasons here; the full
+ *  argument (and the options that DO work) is in remediation.py and in the Fix it rail. */
+const CANNOT_SCALE_OUT: Record<string, string> = {
+  sql_db:
+    "A relational primary is a single writer — more copies add no write capacity. Scale it up, move reads to replicas, cache the hot path, or shard.",
+  external_api:
+    "You do not run this one. The levers are a higher tier or rate limit, caching or batching to cut calls, or an async path.",
+  client:
+    "Traffic is demand, not supply — there is no capacity here to add.",
+};
+
 export function ArchCanvas({
   arch, frame = null, targetId = null, activeFlowIndex = null,
   selectedId = null, onSelectNode, onResizeNode, onAutosize,
@@ -548,6 +561,11 @@ export function ArchCanvas({
             running {sizer.node.instances}
             {sizer.node.utilization != null && ` — ${Math.round(sizer.node.utilization * 100)}% full`}
           </p>
+          {CANNOT_SCALE_OUT[sizer.node.kind] && (
+            <p className="px-2 pb-1.5 text-[11px] leading-snug" style={{ color: "var(--cv-amber)" }}>
+              {CANNOT_SCALE_OUT[sizer.node.kind]}
+            </p>
+          )}
           {([
             ["Add one more", 1, "see what it costs and what it fixes"],
             ["Add five", 5, "for a tier that is badly under-provisioned"],
@@ -555,14 +573,20 @@ export function ArchCanvas({
           ] as const).map(([label, delta, hint]) => {
             const next = (sizer.node.instances ?? 1) + delta;
             // One is the floor: removing the last instance is a component that does not exist,
-            // which is hard_node_failure — explicitly UNMODELLED by this engine.
-            const blocked = next < 1;
+            // which is hard_node_failure — explicitly UNMODELLED by this engine. And a kind the
+            // planner refuses to scale is not offered at all rather than erroring on click.
+            const blocked = next < 1 || Boolean(CANNOT_SCALE_OUT[sizer.node.kind]);
             return (
               <button
                 key={label}
                 type="button"
                 disabled={blocked}
-                title={blocked ? "Only one left — removing it is a total failure, which this engine does not model." : undefined}
+                title={
+                  CANNOT_SCALE_OUT[sizer.node.kind] ??
+                  (next < 1
+                    ? "Only one left — removing it is a total failure, which this engine does not model."
+                    : undefined)
+                }
                 onClick={() => { setSizer(null); onResizeNode?.(sizer.node, next); }}
                 className="block w-full text-left px-2 py-1.5 rounded text-[12.5px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--cv-panel)]"
                 style={{ color: "var(--cv-ink)" }}
