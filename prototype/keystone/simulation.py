@@ -9,21 +9,35 @@ Model: an open queueing network (Jackson-style approximation).
   - Bottleneck = component with the highest rho.
   - Breakpoint scales linearly with offered load (open network), so the max
     sustainable system rps is today's rps * (ceiling / rho_max).
-  - Per-component mean sojourn time via M/M/1: W = service / (1 - rho).
-  - Path latency = sum of mean sojourn times along the dominant flow; percentiles
-    via an exponential-tail approximation (acknowledged in caveats).
+  - Per-component mean sojourn time via M/M/c (Erlang-C): W = S + Wq, over the tier's
+    instance count. Reduces to M/M/1 exactly at c=1. Unstable (infinite) at rho >= 1.
+  - Path latency mean = sum of per-hop sojourn means (exact; expectation is linear). Percentiles
+    come from the sojourn DISTRIBUTION: per-hop mean and variance, optional hops (visit_prob < 1)
+    enumerated as a mixture because they make the path bimodal, each branch a two-moment gamma fit.
+    Validated against Monte Carlo of the exact M/M/c sojourn. An approximation, and labelled one.
 
 Accuracy level: L0 (Directional) per the Accuracy Charter. Honest by construction.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field, replace
 
-from keystone.model import Flow, SystemModel
+# ComponentKind is imported for ONE purpose: a prose caveat (see the queue note in `simulate`).
+# The engine's maths remains entirely kind-agnostic — there is no branch on kind anywhere in the
+# numeric path, and a component's behaviour comes from its capacity and service time alone.
+from keystone.model import ComponentKind, Flow, SystemModel
 
 SAFE_UTILIZATION = 0.85   # conventional "run hot" ceiling
-_RHO_CEIL = 0.999         # guard against divide-by-zero as rho -> 1
+# Two components within this many percentage points of utilisation are not meaningfully ranked by
+# THIS model: the inputs that separate them are uncited assumptions carrying far more than 5 points
+# of uncertainty, so the ordering is inside the noise. They are reported as joint contenders rather
+# than a winner and an also-ran.
+_CONTENDER_PTS = 5.0
+_RHO_CEIL = 0.999         # retained ONLY for the breakpoint search; latency no longer clamps (see
+                          # _mmc_sojourn_ms — above rho=1 the wait is infinite and is reported so)
+_ERLANG_C_MAX_SERVERS = 10_000   # beyond this the Erlang-C wait is numerically nil; see _mmc_sojourn_ms
 # Exponential-tail percentile multipliers. Defined once and used by BOTH the engine and its
 # derivation trace, so the "show your work" line can never drift from the math actually applied.
 _P50_K = math.log(2)      # ~0.69
@@ -89,7 +103,7 @@ class Metric:
     EARNED (L1 grounding / L2 calibration / v2 DES replications) and must bracket `value`."""
     value: float
     unit: str               # "rps" | "ms" | "usd_minor_per_month" | "ratio"
-    model: str              # the formula that produced it, e.g. "M/M/1 sojourn W=S/(1-rho)"
+    model: str              # the formula that produced it, e.g. "M/M/c sojourn W=S+Wq (Erlang-C)"
     confidence: str         # the engine-stability qualifier (NOT an input-provenance tag)
     low: float | None = None
     high: float | None = None
@@ -115,11 +129,16 @@ class ComponentResult:
     utilization: float
     mean_latency_ms: float
     saturated: bool
+    # Variance of this component's sojourn (ms^2). Carried so a PATH percentile can be a mixture
+    # over the hops instead of a fixed multiplier on the mean — variances of independent hops add.
+    # Defaulted because it is DERIVED from the fields above: `simulate` always supplies it, and a
+    # hand-built ComponentResult in a test that only cares about utilisation should not have to.
+    sojourn_var_ms2: float = 0.0
 
 
 @dataclass
 class FlowLatency:
-    """One flow's own latency (ms): the same M/M/1-sojourn + exponential-tail model as the headline,
+    """One flow's own latency (ms): the same M/M/c-sojourn + mixture-percentile model as the headline,
     applied to THIS flow's path — so a minority flow on a different (often worse) path is not hidden
     behind the dominant flow's figure (engine-audit fix). Built only by `simulate()`."""
     name: str
@@ -145,6 +164,12 @@ class SimulationResult:
     monthly_cost: int               # integer minor units (USD cents) — harm floor (ADR-008), never float
     components: dict[str, ComponentResult]
     spofs: list[str]
+    # How far ahead the named bottleneck is, in PERCENTAGE POINTS of utilisation, and everyone
+    # within `_CONTENDER_PTS` of it. Measured 2026-09-08: 30 of the 56 library blueprints (54%) name
+    # a bottleneck by 5 points or less and FOUR are exact ties — so the product's single most-read
+    # output was often a coin-flip presented as a determination. See `_contenders`.
+    bottleneck_margin_pts: float
+    bottleneck_contenders: list[str]
     confidence: str
     # Per-flow latency (each flow's own path); the headline mean/p50/p95/p99 above is the dominant flow.
     flow_latencies: list[FlowLatency] = field(default_factory=list)
@@ -175,15 +200,240 @@ def _arrivals(model: SystemModel) -> dict[str, float]:
 
 
 def _flow_latency_ms(flow: Flow, comp_results: dict[str, "ComponentResult"]) -> tuple[float, float, float, float]:
-    """Mean + exponential-tail percentiles (ms) along ONE flow's path — the sole latency math, shared by
+    """Mean + sojourn-distribution percentiles (ms) along ONE flow's path — the sole latency math, shared by
     the headline (dominant flow) and the per-flow breakdown so they can never diverge."""
     mean = sum(comp_results[s.component_id].mean_latency_ms * s.visit_prob for s in flow.path)
-    return mean, mean * _P50_K, mean * _P95_K, mean * _P99_K
+    # Independent hops: means add, and so do variances. `visit_prob` is the expected number of
+    # visits, so k identical visits contribute k * var — exact for an integer k (the fan-out case)
+    # and a linear approximation for a fractional one (a cache miss).
+    var = sum(comp_results[s.component_id].sojourn_var_ms2 * s.visit_prob for s in flow.path)
+    if not math.isfinite(mean):
+        return mean, mean, mean, mean
+    hops = [(comp_results[st.component_id].mean_latency_ms,
+             comp_results[st.component_id].sojourn_var_ms2,
+             st.visit_prob) for st in flow.path]
+    p50, p95, p99 = _path_percentiles_ms(hops)
+    return mean, p50, p95, p99
 
 
-def _mm1_sojourn_ms(service_ms: float, rho: float) -> float:
-    rho = min(rho, _RHO_CEIL)
-    return service_ms / (1.0 - rho)
+def _erlang_c(servers: int, rho: float) -> float:
+    """Probability an arrival must WAIT (Erlang-C), computed via the numerically-stable Erlang-B
+    recursion. The textbook closed form needs a^c / c!, which overflows well before the 320-instance
+    transcode fleet in the library; the recursion never forms either term.
+
+        B(0) = 1 ;  B(k) = a*B(k-1) / (k + a*B(k-1)) ;  C = B(c) / (1 - rho*(1 - B(c)))
+    """
+    a = servers * rho                       # offered load in erlangs
+    b = 1.0
+    for k in range(1, servers + 1):
+        b = (a * b) / (k + a * b)
+    return b / (1.0 - rho * (1.0 - b))
+
+
+def _mmc_sojourn_ms(service_ms: float, servers: int, rho: float) -> float:
+    """Mean time in system for an M/M/c queue: W = S + Wq, with Wq = C(c,rho) / (c*mu*(1 - rho)).
+
+    THIS WAS M/M/1 UNTIL 2026-09-07, and that was a real error, not a simplification. `docs/02` has
+    always advertised "M/M/c utilization"; the code applied the SINGLE-server waiting formula
+    S/(1-rho) to a whole fleet's AGGREGATE utilisation. A 12-instance tier at rho=0.694 does not
+    queue like one server at 69.4% — it queues far better, because an arrival has twelve chances to
+    find a free server. Measured against Erlang-C on the flagship url_shortener that overstated the
+    app tier by 3.12x (26.18ms vs 8.38ms) and the whole path by 2.10x; `blueprints/library/
+    ci_cd.json:282` self-documents ~12x. Every multi-instance tier in all 56 blueprints carried it,
+    so every latency, and every remediation ranked by latency, leaned pessimistic.
+
+    c = 1 reduces to S/(1-rho) EXACTLY (algebraically, not approximately) — `test_simulation`
+    asserts that identity, so the old single-server behaviour is preserved where it was correct.
+
+    Above rho = 1 the queue is UNSTABLE: arrivals outrun the servers and the backlog grows without
+    limit, so the mean is genuinely infinite. It returns `inf` and says so, rather than clamping to
+    a finite figure. The clamp this replaces returned 46,051.7 ms at 100x, 1,000x, 10,000x AND
+    1,000,000x load — a constant that looked like a prediction and was an artifact of `_RHO_CEIL`.
+    """
+    if rho >= 1.0:
+        return math.inf
+    if servers <= 1:
+        return service_ms / (1.0 - rho)
+    if servers > _ERLANG_C_MAX_SERVERS:
+        # C(c,rho) decays exponentially in c at fixed rho<1, so beyond this the wait is numerically
+        # nil and the O(c) recursion is pure cost. Returning the service time is the correct limit.
+        return service_ms
+    c_wait = _erlang_c(servers, rho)
+    wq_ms = c_wait * service_ms / (servers * (1.0 - rho))
+    return service_ms + wq_ms
+
+
+def _mmc_sojourn_var_ms2(service_ms: float, servers: int, rho: float) -> float:
+    """Variance of the M/M/c sojourn time (ms^2). Companion to `_mmc_sojourn_ms`.
+
+    From the sojourn tail P(T>t) = e^-ut (1 + C(1 - e^-b u t)/b) with b = c(1-rho) - 1:
+        E[T^2] = (2/u^2) * [1 + (C/b)(1 - 1/(1+b)^2)]
+    and Var = E[T^2] - E[T]^2. At c=1 this reduces to E[T]^2 exactly — the exponential — which is
+    asserted in the tests to 6 places, so the single-server case the old model had right is untouched.
+
+    Needed because the path percentile is now a two-moment fit rather than a fixed multiplier, and
+    a sum of independent hops has exactly the sum of their means AND the sum of their variances.
+    """
+    if rho >= 1.0 or service_ms <= 0:
+        return math.inf
+    mean = _mmc_sojourn_ms(service_ms, servers, rho)
+    if servers <= 1:
+        return mean * mean                      # exponential: Var = mean^2
+    if servers > _ERLANG_C_MAX_SERVERS:
+        return service_ms * service_ms          # no meaningful wait; sojourn ~ service
+    c_wait = _erlang_c(servers, rho)
+    b = servers * (1.0 - rho) - 1.0
+    if abs(b) < 1e-12:
+        m2 = 2.0 * service_ms * service_ms * (1.0 + c_wait)
+    else:
+        m2 = 2.0 * service_ms * service_ms * (1.0 + (c_wait / b) * (1.0 - 1.0 / (1.0 + b) ** 2))
+    return max(0.0, m2 - mean * mean)
+
+
+def _gammp(a: float, x: float) -> float:
+    """Regularised lower incomplete gamma P(a, x) — series below a+1, continued fraction above.
+
+    Pure stdlib on purpose (the engine takes no dependency without an ADR). Verified against the
+    closed forms it must reproduce: P(1,x) = 1 - e^-x and P(2,x) = 1 - (1+x)e^-x, to 10 places.
+    """
+    if x <= 0.0:
+        return 0.0
+    if x < a + 1.0:
+        ap, total, term = a, 1.0 / a, 1.0 / a
+        for _ in range(500):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-14:
+                break
+        return total * math.exp(-x + a * math.log(x) - math.lgamma(a))
+    b, c, d = x + 1.0 - a, 1e300, 1.0 / (x + 1.0 - a)
+    h = d
+    for i in range(1, 500):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < 1e-300:
+            d = 1e-300
+        c = b + an / c
+        if abs(c) < 1e-300:
+            c = 1e-300
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-14:
+            break
+    return 1.0 - math.exp(-x + a * math.log(x) - math.lgamma(a)) * h
+
+
+def _gamma_cdf(t: float, mean_ms: float, var_ms2: float) -> float:
+    """P(T <= t) for a gamma matched to this mean and variance. Used per mixture BRANCH."""
+    if mean_ms <= 0.0:
+        return 1.0
+    if var_ms2 <= 0.0:
+        return 1.0 if t >= mean_ms else 0.0
+    return _gammp(mean_ms * mean_ms / var_ms2, t / (var_ms2 / mean_ms))
+
+
+def _path_percentiles_ms(hops: list[tuple[float, float, float]]) -> tuple[float, float, float]:
+    """p50/p95/p99 for a path, as a MIXTURE over which optional hops are taken.
+
+    `hops` is [(mean_ms, var_ms2, visit_prob)].
+
+    WHY A MIXTURE AND NOT ONE FITTED CURVE. A hop with visit_prob < 1 is a coin flip — a cache miss,
+    a CDN miss, an occasional write to the object store. That makes the path latency BIMODAL: most
+    requests take the fast route, a few take a much slower one. No single gamma can represent that,
+    and fitting one to the pooled mean and variance produces nonsense — on code_editor's edit path
+    (2% of requests hit a 151 ms object store) a pooled fit returned a p50 of 0.07 ms when the truth
+    is 3.4 ms.
+
+    So the optional hops are enumerated (at most 2^6 = 64 branches anywhere in the library), each
+    branch is the sum of the hops actually taken — unimodal, where a two-moment gamma IS appropriate
+    — and the percentile is read off the weighted mixture of those branch CDFs.
+
+    VERIFIED AGAINST MONTE CARLO, sampling the exact M/M/c sojourn by inverse transform, 200k runs
+    on that same code_editor path:
+
+        p50   MC 3.375   mixture 3.405   old model 4.957
+        p95   MC 11.668  mixture 11.614  old model 21.422
+        p99   MC 104.985 mixture 110.110 old model 32.931
+
+    The old fixed multipliers were 69% TOO LOW at p99 there — the opposite of the "over-states the
+    tail" caveat that shipped with them, and wrong in the direction that matters, on exactly the
+    shape where the tail is the whole question.
+    """
+    mand = [(m, v, vp) for m, v, vp in hops if vp >= 1.0]
+    opt = [(m, v, vp) for m, v, vp in hops if 0.0 < vp < 1.0]
+    base_m = sum(m * vp for m, v, vp in mand)
+    base_v = sum(v * vp for m, v, vp in mand)
+    if not math.isfinite(base_m) or any(not math.isfinite(m) for m, _, _ in opt):
+        return math.inf, math.inf, math.inf
+
+    branches: list[tuple[float, float, float]] = []
+    for mask in itertools.product((0, 1), repeat=len(opt)):
+        w, mm, vv = 1.0, base_m, base_v
+        for take, (m, v, q) in zip(mask, opt):
+            if take:
+                w *= q
+                mm += m
+                vv += v
+            else:
+                w *= (1.0 - q)
+        if w > 1e-12:
+            branches.append((w, mm, vv))
+    if not branches:
+        return base_m, base_m, base_m
+
+    hi = max(mm for _, mm, _ in branches) + 60.0 * math.sqrt(max(vv for _, _, vv in branches) + 1e-9) + 1.0
+
+    def at(p: float) -> float:
+        lo, high = 0.0, hi
+        for _ in range(200):
+            mid = (lo + high) / 2.0
+            if sum(w * _gamma_cdf(mid, mm, vv) for w, mm, vv in branches) < p:
+                lo = mid
+            else:
+                high = mid
+        return (lo + high) / 2.0
+
+    return at(0.50), at(0.95), at(0.99)
+
+
+def _gamma_percentile_ms(p: float, mean_ms: float, var_ms2: float) -> float:
+    """The p-th percentile of a gamma matched to this mean and variance.
+
+    WHY A TWO-MOMENT FIT. The path latency is a SUM of independent per-component sojourns. Its mean
+    is the sum of the means (exact, expectation is linear) and its variance is the sum of the
+    variances (exact, by independence) — but its DISTRIBUTION is a convolution with no closed form.
+    Matching a gamma to those two exact moments is the standard approximation and it has the two
+    properties that matter here:
+
+      * one dominant hop -> shape -> 1 -> it becomes the exponential, which is the exact answer for
+        a single M/M/1 hop and the case the old fixed multipliers were right about;
+      * several comparable hops -> shape rises -> the tail tightens, because averaging independent
+        delays is self-cancelling.
+
+    That is the whole point. The old model multiplied the mean by ln(2)/ln(20)/ln(100), so p99/p50
+    was the constant 6.6439 for EVERY design at EVERY load — the percentiles carried no information
+    the mean did not. Measured on the same inputs: one hop 6.644 (unchanged), two equal hops 3.955,
+    five equal hops 2.484, one dominant hop among four tiny ones 6.203.
+
+    It is still an approximation and is labelled as one: a two-moment fit is not the convolution.
+    """
+    if not math.isfinite(mean_ms) or mean_ms <= 0.0:
+        return mean_ms
+    if not math.isfinite(var_ms2) or var_ms2 <= 0.0:
+        return mean_ms                          # degenerate: no spread to describe
+    shape = mean_ms * mean_ms / var_ms2
+    scale = var_ms2 / mean_ms
+    lo, hi = 0.0, mean_ms + 60.0 * math.sqrt(var_ms2) + 60.0 * scale
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if _gammp(shape, mid / scale) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
 
 
 def _fmt_rps(x: float) -> str:
@@ -229,12 +479,15 @@ def _derivation(
         f"theoretical@100% ~ {_fmt_rps(bp_theo)} req/s."
     )
     lines.append(
-        f"Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant "
+        f"Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant "
         f"flow ('{dom.name}', {dom.share:.0%} share) -> mean {mean:.0f} ms."
     )
     lines.append(
-        "Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x "
-        f"{_P50_K:.2f}/{_P95_K:.2f}/{_P99_K:.2f} (over-states the tail; treat as a directional upper bound)."
+        "Percentiles come from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean: "
+        "each hop contributes its mean and variance, hops with visit_prob < 1 are enumerated as a "
+        "mixture (they make the path bimodal), and each branch is a two-moment gamma fit. Validated "
+        "against a 200k-run Monte Carlo of the exact sojourn. An approximation, not the exact "
+        "convolution."
     )
     # Cost derivation: list compute -> pricing discount -> + usage lines (all integer cents).
     charged = cost_breakdown.get("compute", 0)
@@ -270,7 +523,8 @@ def _metrics(
     """The headline outputs as self-describing `Metric`s (ADR-007). Each restates a value the
     engine already computed, tagged with the model that produced it + the engine-stability
     confidence qualifier. No numeric band at L0 (not fabricated). Built only here."""
-    tail = ("over-states the tail; directional upper bound",)
+    tail = ("from the sojourn distribution, with optional hops enumerated as a mixture; "
+            "two-moment gamma per branch, not the exact convolution",)
     safe_pct = f"{SAFE_UTILIZATION:.0%}"
     # Rate provenance label agrees with the report's rate tag (stub → "ASSUMPTION", exact prior text).
     rate_model = ("compute (× pricing model) + usage (egress/storage/requests) + AI tokens at "
@@ -282,10 +536,10 @@ def _metrics(
         "bottleneck_utilization": Metric(rho_max, "ratio", "max rho = arrival / capacity", confidence),
         "breakpoint_rps_safe": Metric(bp_safe, "rps", f"system_rps * ({safe_pct} ceiling / rho_max)", confidence),
         "breakpoint_rps_theoretical": Metric(bp_theo, "rps", "system_rps * (1.0 / rho_max)", confidence),
-        "mean_latency_ms": Metric(mean, "ms", "sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow", confidence),
-        "p50_ms": Metric(p50, "ms", "exponential-tail: mean * ln(2)", confidence, caveats=tail),
-        "p95_ms": Metric(p95, "ms", "exponential-tail: mean * ln(20)", confidence, caveats=tail),
-        "p99_ms": Metric(p99, "ms", "exponential-tail: mean * ln(100)", confidence, caveats=tail),
+        "mean_latency_ms": Metric(mean, "ms", "sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow", confidence),
+        "p50_ms": Metric(p50, "ms", "M/M/c sojourn mixture over the path (p50)", confidence, caveats=tail),
+        "p95_ms": Metric(p95, "ms", "M/M/c sojourn mixture over the path (p95)", confidence, caveats=tail),
+        "p99_ms": Metric(p99, "ms", "M/M/c sojourn mixture over the path (p99)", confidence, caveats=tail),
         "monthly_cost": Metric(monthly_cost, "usd_minor_per_month", rate_model,
                                confidence, caveats=(rate_caveat,)),
     }
@@ -336,15 +590,23 @@ def simulate(model: SystemModel) -> SimulationResult:
         a = arrivals[cid]
         cap = comp.capacity_rps
         rho = (a / cap) if cap > 0 else float("inf")
-        latency = _mm1_sojourn_ms(comp.base_latency_ms, rho)
+        latency = _mmc_sojourn_ms(comp.base_latency_ms, comp.instances, rho)
         comp_results[cid] = ComponentResult(
             id=cid, name=comp.name, arrival_rps=a, capacity_rps=cap,
             utilization=rho, mean_latency_ms=latency, saturated=(rho >= 1.0),
+            sojourn_var_ms2=_mmc_sojourn_var_ms2(comp.base_latency_ms, comp.instances, rho),
         )
         if rho > rho_max:
             rho_max, bottleneck = rho, cid
         if comp.is_spof:
             spofs.append(comp.name)
+
+    # Margin and contenders — computed before anything downstream reads `bottleneck`.
+    ranked = sorted((r.utilization, cid) for cid, r in comp_results.items())
+    ranked.reverse()
+    margin_pts = ((ranked[0][0] - ranked[1][0]) * 100.0) if len(ranked) > 1 else 100.0
+    contenders = [comp_results[cid].name for u, cid in ranked
+                  if rho_max > 0 and (rho_max - u) * 100.0 <= _CONTENDER_PTS]
 
     if rho_max > 0:
         bp_safe = model.workload.system_rps * (SAFE_UTILIZATION / rho_max)
@@ -414,15 +676,67 @@ def simulate(model: SystemModel) -> SimulationResult:
         "your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03)."
     )
     caveats = [
-        "Analytical queueing approximation (M/M/1 per component), not a discrete-event "
-        "simulation. Async/streaming/multi-region topologies are out of v1 scope.",
+        "Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's "
+        "instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.",
         cap_caveat,
-        "Percentiles use an exponential-tail approximation and tend to OVER-state the tail; "
-        "treat p95/p99 as upper-bound directional figures.",
+        "Percentiles are computed from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the "
+        "mean. Each hop contributes its own mean and variance; a hop with visit_prob < 1 (a cache "
+        "miss, a CDN miss) makes the path BIMODAL, so the optional hops are enumerated and the "
+        "percentile is read off the weighted mixture. It is still an approximation — each branch is "
+        "a two-moment gamma fit, not the exact convolution — but it is validated: against a 200k-run "
+        "Monte Carlo of the exact sojourn on code_editor's edit path it gives p50 3.41 (MC 3.38), "
+        "p95 11.61 (MC 11.67), p99 110.1 (MC 105.0). "
+        "THIS REPLACED FIXED MULTIPLIERS (mean x ln2 / ln20 / ln100) THAT SHIPPED WITH THE CAVEAT "
+        "'over-states the tail'. On that same path they were 69% TOO LOW at p99 (32.9 vs 105.0) — "
+        "wrong, and wrong in the opposite direction to their own warning, on exactly the shape where "
+        "the tail is the whole question. p99/p50 is no longer a constant: it now ranges from 1.7 to "
+        "67 across the library instead of 6.64 everywhere.",
         cost_caveat,
+        (f"THE BOTTLENECK IS A CANDIDATE, NOT A DETERMINATION on this design: "
+         f"{comp_results[bottleneck].name if bottleneck else 'it'} leads by only "
+         f"{margin_pts:.1f} percentage points, and {len(contenders)} components sit within "
+         f"{_CONTENDER_PTS:.0f} points of each other ({', '.join(contenders)}). The inputs that "
+         f"separate them are uncited assumptions carrying far more uncertainty than that, so this "
+         f"ordering is inside the noise — treat them as joint suspects and measure before you spend."
+         if len(contenders) > 1 else
+         f"The bottleneck leads the next component by {margin_pts:.1f} percentage points, which is "
+         f"wide enough that the ordering survives ordinary input error."),
         "Bottleneck identification and the relative ordering of components are far more "
         "reliable than absolute latency/cost numbers.",
     ]
+    # A design whose components carry no price is not a free design — it is an unpriced one, and
+    # "$0.00 / month" beside a 20-component architecture is a confidently wrong headline. The LLM
+    # design path deliberately does not ask the model for cost (ingestion.py sets it to 0, because
+    # the council must never author a number), so this is exactly the case that needs saying rather
+    # than showing. Triggered on the total, so it also covers a canvas topology drawn without prices.
+    if cost_breakdown.get("compute", 0) == 0 and model.components:
+        caveats.append(
+            "COST IS NOT MODELLED for this design: no component carries a price, so the monthly "
+            "total reads as zero. That is missing input, not a free architecture — most likely the "
+            "design came from the LLM path, which is deliberately never asked to produce a number. "
+            "Set per-instance costs on the canvas, or start from a reference blueprint, before "
+            "treating any cost figure here as meaningful."
+        )
+
+    # Honesty gap closed (2026-09-06): `_flow_latency_ms` sums EVERY component's sojourn along the
+    # path, including a queue's. That is right for a synchronous hop and wrong for the usual reason a
+    # queue exists — the producer enqueues and returns, and the consumer drains on its own time. The
+    # engine has no async notion (it never branches on ComponentKind), so rather than quietly report a
+    # background wait as user-facing latency, say so wherever a queue is actually on a modelled path.
+    queued = sorted({
+        comp_results[step.component_id].name
+        for flow in model.flows for step in flow.path
+        if model.components[step.component_id].kind is ComponentKind.QUEUE
+    })
+    if queued:
+        caveats.append(
+            f"Latency here treats {', '.join(queued)} as a SYNCHRONOUS hop — the queue's own wait is "
+            f"added to the request's latency as if the caller blocks on it. If the consumer is "
+            f"asynchronous (the usual reason to add a queue), real user-facing latency is lower than "
+            f"shown, and the backlog and drain time that actually matter are not modelled at all. "
+            f"The v1 engine has no async path; treat any flow through a queue as an upper bound."
+        )
+
     if len(model.flows) > 1:
         # Honesty (engine audit): latency is computed for the DOMINANT (largest-share) flow only, so a
         # lower-share flow on a different (often more congested) path is NOT reflected in these figures.
@@ -445,6 +759,8 @@ def simulate(model: SystemModel) -> SimulationResult:
         monthly_cost=monthly_cost,
         components=comp_results,
         spofs=spofs,
+        bottleneck_margin_pts=margin_pts,
+        bottleneck_contenders=contenders,
         confidence=conf,
         flow_latencies=flow_latencies,
         caveats=caveats,

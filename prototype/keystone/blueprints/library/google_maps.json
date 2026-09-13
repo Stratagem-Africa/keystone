@@ -1,0 +1,534 @@
+{
+  "spec_version": 1,
+  "name": "Google Maps",
+  "workload": {
+    "system_rps": 40000,
+    "description": "40k rps: 72% tile fetches at the edge, plus geocoding, routing and live traffic probes"
+  },
+  "components": [
+    {
+      "id": "cdn",
+      "kind": "cdn",
+      "name": "Tile CDN (raster + vector tiles at the edge)",
+      "per_instance_rps": 40000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Edge load balancer (API traffic)",
+      "per_instance_rps": 30000,
+      "instances": 1,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "api",
+      "kind": "app_server",
+      "name": "API frontend (key auth, quota, request routing)",
+      "per_instance_rps": 2500,
+      "instances": 7,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Route / geocode / live-speed cache (Redis)",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "route",
+      "kind": "app_server",
+      "name": "Route path search (CH/CRP-class speed-up, alternatives)",
+      "per_instance_rps": 350,
+      "instances": 7,
+      "base_latency_ms": 7.0,
+      "monthly_cost_per_instance": 14016,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 14016.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 14016.0,
+          "confidence_high": 14016.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.xlarge \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.192/h x 730 = 14016c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.xlarge"
+      }
+    },
+    {
+      "id": "eta",
+      "kind": "app_server",
+      "name": "Traffic-aware ETA inference (per-horizon models over the candidate path)",
+      "per_instance_rps": 300,
+      "instances": 17,
+      "base_latency_ms": 30.0,
+      "monthly_cost_per_instance": 14016,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 14016.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 14016.0,
+          "confidence_high": 14016.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.xlarge \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.192/h x 730 = 14016c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.xlarge"
+      }
+    },
+    {
+      "id": "geo",
+      "kind": "app_server",
+      "name": "Geocoding & places search (prefix + spatial)",
+      "per_instance_rps": 600,
+      "instances": 6,
+      "base_latency_ms": 18.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "POI / places database (PostgreSQL + PostGIS)",
+      "per_instance_rps": 4000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 3000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "tiles",
+      "kind": "object_store",
+      "name": "Pre-rendered tile origin (S3)",
+      "per_instance_rps": 5500,
+      "instances": 1,
+      "base_latency_ms": 20.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 91000,
+      "storage_gb": 200000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Live traffic probe bus (Kafka)",
+      "per_instance_rps": 10000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 15330,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15330.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15330.0,
+          "confidence_high": 15330.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.21/broker-hour x 730 = 15330c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.m5.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "tile_fetch",
+      "share": 0.72,
+      "path": [
+        {
+          "component_id": "cdn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "tiles",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "geocode_search",
+      "share": 0.12,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "geo",
+          "visit_prob": 0.5
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.5
+        }
+      ]
+    },
+    {
+      "name": "route_request",
+      "share": 0.1,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "route",
+          "visit_prob": 0.4
+        },
+        {
+          "component_id": "eta",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.1
+        }
+      ]
+    },
+    {
+      "name": "traffic_probe",
+      "share": 0.06,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "40,000 rps at peak. 72% map-tile fetches (a single map view pulls a dozen tiles), 12% geocode/places search, 10% route requests, 6% anonymised live-traffic probes uploaded by client devices. The mix is my own estimate. The one published peak:average ratio I can cite for map-shaped traffic is OpenStreetMap's July 2025 tile figures - 36,770 rps average against a 70,669 rps peak hour, a ratio of 1.9 - so a design sized to a peak like this one implies roughly half the load on an average hour.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cdn",
+      "statement": "Tile CDN hit-rate 95%: tiles are immutable per zoom/version, which makes them the most cacheable objects in any consumer product. Only 5% of tile requests reach the origin store. GROUNDED against the only public operational figures for a tile CDN at scale: OpenStreetMap's July 2025 report for tile.openstreetmap.org measures ~97% edge BYTE hit ratio and ~94% edge REQUEST hit ratio, with render-server local caches above 95%. The 95% used here sits inside that measured band.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "cache",
+      "statement": "Route cache hit-rate 60% and geocode cache hit-rate 50%. Routes repeat far more than intuition suggests (commutes, popular POI pairs) but only at a coarse origin/destination granularity, so 60% assumes snapping to a routing-cell grid rather than exact coordinates. READ THIS BEFORE COPYING THE CACHE: that 60% relieves PATH SEARCH ONLY. A cached route's geometry is reusable; its travel time is not, because the ETA is a function of live traffic. So the ETA inference tier is visited on EVERY route request (visit_prob 1.0) while path search is visited only on the 40% that miss. The previous revision of this blueprint had it backwards - it charged the whole cost of a route to path search, which makes the route cache look like the fix for the expensive tier when it is not.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "route",
+      "statement": "PATH SEARCH IS CHEAP, and the previous revision of this blueprint got that badly wrong: it charged 45 ms of service time to 'a contraction-hierarchies query over a continental graph'. Bast et al., 'Route Planning in Transportation Networks' (MSR-TR-2014-4, revised 2016), Table 2, measures exactly that instance - Western Europe, 18.0M vertices, 42.5M arcs, one core of an Intel X5680 at 3.33 GHz - at 0.21 ms for a CH query with path retrieval and no turn costs, 0.30 ms with arc-based turns, and 2.37 ms under the compact turn model; CRP with turns is 1.85 ms. The named algorithm is therefore 19x to 400x cheaper than the figure that was here. This revision charges 7 ms - about 3x the compact-turn figure, for snapping both endpoints and computing a primary plus two alternatives - and derives per-instance throughput from it: ~350 rps sustained is roughly 2.4 of an m6i.xlarge's 4 vCPUs busy. Seven instances carry 1,600 rps. The tens of milliseconds a real route response takes are real; they are earned in the ETA inference tier, not here.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "PostGIS at ~4,000 rps for POI lookup and reverse geocoding. Spatial index scans are far heavier than point lookups, which is why this is a third of the throughput assumed for a plain OLTP primary in other designs.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "Edge tile delivery is roughly 1.8 PB/month (28,800 tile req/s at ~25 KB) and is NOT priced below: like any CDN contract it is bought at rates well under the model's flat $0.09/GB internet rate, and pricing it flat would overstate the bill badly. What IS priced is the metered origin fill - 5% of that volume, ~91 TB/month - plus 200 TB of pre-rendered tile storage. Honest caveat on the byte figure itself: OpenStreetMap measures ~18 KB per tile, not 25 KB, so the volume assumed here is about 1.4x the one published measurement and the ~25 KB remains my own estimate rather than a cited one.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Live traffic probes (2,400/s) flow into a 3-broker bus and are aggregated into the live-speed cache. The aggregation job that turns raw probes into road-segment speeds is a stream/batch workload and is not modelled; only the ingest hop is.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "bottleneck",
+      "statement": "THE BOTTLENECK LABEL IS A CANDIDATE, NOT A DETERMINATION. Every per_instance_rps in this file is an assumption, not a measurement, so the ranking they produce is only as sharp as the gaps between them. In the previous revision five tiers sat within a few points of one another and the engine named the API frontend - the most trivially horizontal tier in the design - which sent the reader to add replicas of the one thing that already scales by adding replicas. This revision fixes the cause rather than the label: the service cost of a route request is moved onto the tier whose mechanism actually carries it (ETA inference), path search is priced at what the published measurements say it costs, and the stateless API tier is provisioned to normal headroom. Read the engine's own bottleneck-margin and contender line before acting: if the margin is small the named tier is one of several, and you should measure your own per-instance capacity before buying anything.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "api",
+      "statement": "The API frontend is 7 stateless instances at ~2,500 rps each, sized for ordinary headroom rather than to the wire, on purpose - see the bottleneck assumption. Both the throughput and the instance count are my own estimates. The SHAPE is corroborated: Google's infrastructure security design doc states that 'any internal service that must publish itself externally uses the GFE as a smart reverse-proxy frontend. The GFE provides public IP address hosting of its public DNS name, DoS protection, and TLS termination' - which is the lb + api pair modelled here.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "route_algorithm",
+      "statement": "NAMING THE ALGORITHM IS AN ASSUMPTION ABOUT THE CLASS OF TECHNIQUE, NOT A FACT ABOUT GOOGLE. Bast et al. section 4: 'Although companies tend to be secretive about the actual algorithms they use, in some cases this is public knowledge. TomTom uses a variant of Arc Flags... Microsoft's Bing Maps use CRP for routing on road networks. OSRM... uses CH for queries. The Transfer Patterns algorithm has been in use for public-transit journey planning on Google Maps since 2010.' So CH is documented for OSRM and CRP for Bing Maps; the only publicly-known Google Maps routing algorithm is Transfer Patterns, and only for transit. The earlier component name attributed contraction hierarchies to Google, which is uncited; this file now models a CH/CRP-class speed-up technique because that is the published state of the art for road networks.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "eta",
+      "statement": "THIS is the tier a route response actually spends its tens of milliseconds in, and it was missing from the previous revision entirely. arXiv:2108.11482 (Derrow-Pinion et al., CIKM 2021, DeepMind/Google) describes the serving path verbatim: 'At serving time, the sequence of supersegments that are in a proposed route are queried sequentially for increasing horizons into the future', with 'a separate model for each horizon h', where road 'segments are on average 50 - 100 meters long, and the supersegments contain on average about 20 road segments'. So every route request runs graph-neural-net inference over its candidate path, and the horizons are queried SEQUENTIALLY - wall time is a chain of model calls, not one. NO per-query latency or throughput figure for this tier is published anywhere I can cite, and I am not implying one exists: the 30 ms of service time and ~300 rps per m6i.xlarge are my own estimates (roughly 10 ms of CPU per request on a batched serving stack, with the sequential horizon chain making wall time about 3x that). They are the tens of milliseconds the previous revision misattributed to path search, moved onto the tier whose mechanism is documented. Confidence on both numbers is LOW; the part worth copying is the SHAPE - a per-request inference tier between path search and the response, which no route cache can relieve.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "tiles",
+      "statement": "The tile path is the best-corroborated part of this design. OpenStreetMap's published July 2025 operational figures for tile.openstreetmap.org: 92 billion tile requests per month, 36,770 rps average, 70,669 rps peak hour, ~18 KB per tile, 1.26 PB/month, ~97% edge byte hit ratio and ~94% edge request hit ratio, with render-server local caches above 95%. This blueprint's 28,800 tile rps, ~25 KB per tile, 95% CDN hit and ~1.8 PB/month land within the same order on four independent parameters, and inside the measured band on the hit ratio. Both tile types modelled at the edge are real per Google's own docs - raster tiles 'generated by Google Maps Platform server-side, then served to your web app', vector tiles 'drawn at load time on the client-side using WebGL'.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GROUNDED"
+    },
+    {
+      "subject": "tiles",
+      "statement": "NOT MODELLED: tile rendering and cache invalidation. The origin here is a PRE-RENDERED object store, which is a legitimate architecture, but it is not the only one and this file never said so: Google states raster tiles are 'generated by Google Maps Platform server-side', and OpenStreetMap runs a renderd farm behind its CDN. Consequence for the reader: this design cannot answer what happens when the base map changes. The re-render and invalidation wave after a map-data update is a large batch workload with no component, no cost and no capacity in this model, and the 95% edge hit rate assumed above is a steady-state figure that an invalidation wave temporarily destroys. Add a render tier and an invalidation path before using this to size a tile stack you intend to keep up to date.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "scope",
+      "statement": "SINGLE REGION, by Keystone's v1 scope freeze. A real mapping product is multi-region with geo-routed traffic, and latency to the nearest region is a first-order part of its design. The engine has no multi-region model, so treat this as one region's worth of capacity and multiply, rather than as a global design.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Turn-by-turn navigation sessions are long-lived, stateful and push-based (a device holds a session and receives reroutes). The engine models independent request arrivals only, so navigation is represented here as the route requests that start and re-plan a trip, not as concurrent sessions. Note what that hides: every re-plan pays the ETA inference cost again, so a navigation-heavy mix loads that tier harder than this request mix implies.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "data_pipeline",
+    "difficulty": "advanced",
+    "summary": "Consumer mapping stack: CDN-cached map tiles, geocoding, cheap graph path-search, a per-request traffic-aware ETA inference tier, and live-traffic probe ingest behind one API.",
+    "keywords": [
+      "google maps",
+      "maps",
+      "mapping",
+      "navigation",
+      "routing engine",
+      "geocoding",
+      "turn by turn",
+      "waze",
+      "apple maps",
+      "map tiles"
+    ]
+  }
+}

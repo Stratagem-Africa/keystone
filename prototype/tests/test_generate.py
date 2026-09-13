@@ -14,14 +14,20 @@ from keystone.simulation import simulate
 
 class TestReferenceMatch(unittest.TestCase):
     def test_twitter_intents_map_to_social_platform(self):
+        # "an app like Instagram" USED TO BE ON THIS LIST, and this test is why it stayed wrong: it
+        # pinned tier-1's answer for an intent tier-1 should not own. The design returned contained a
+        # component named "Tweet Service" — a wrong answer with a green test over it. Instagram now
+        # has its own engine-gated blueprint; see MatcherIdentityTest in test_generic_fallback.
         for intent in ("I want to build a platform like Twitter",
-                       "a social network for photos", "a microblog", "an app like Instagram"):
+                       "a social network for photos", "a microblog"):
             ref = match_reference(intent)
             self.assertIsNotNone(ref, intent)
             self.assertEqual(ref[1], "social platform", intent)
 
     def test_payments_intents_map(self):
-        for intent in ("an online store checkout", "a billing system", "a stripe-style payments API"):
+        # "an online store" alone now routes to the ecommerce blueprint — a checkout is PART of a
+        # storefront, not a storefront. These three name the payment path explicitly.
+        for intent in ("a checkout flow", "a billing system", "a stripe-style payments API"):
             self.assertEqual(match_reference(intent)[1], "payments / checkout", intent)
 
     def test_ticket_and_shortener_intents_map(self):

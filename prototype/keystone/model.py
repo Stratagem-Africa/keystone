@@ -142,7 +142,17 @@ class Component:
 @dataclass
 class FlowStep:
     component_id: str
-    visit_prob: float = 1.0           # P(component is hit on this flow), e.g. cache-miss
+    visit_prob: float = 1.0           # expected visits per request; <1 = cache-miss, >1 = fan-out
+
+    def __post_init__(self) -> None:
+        # visit_prob ABOVE 1 is legitimate and load-bearing — youtube.json models a 6-rendition
+        # transcode fan-out as visit_prob 6.0, and the engine honours it (simulation.py:176). Only
+        # negative and non-finite values are rejected; a negative visit would subtract arrivals from
+        # a component and hand back a lower utilisation for MORE work.
+        if not math.isfinite(self.visit_prob) or self.visit_prob < 0:
+            raise ValueError(
+                f"FlowStep({self.component_id!r}): visit_prob must be finite and >= 0, "
+                f"got {self.visit_prob!r}")
 
 
 @dataclass
@@ -150,6 +160,28 @@ class Flow:
     name: str
     share: float                      # fraction of total requests (Sum of shares == 1.0)
     path: list[FlowStep]
+
+    def __post_init__(self) -> None:
+        """Reject a flow that cannot mean anything.
+
+        `Flow` had NO validation at all: `share=-5.0` was accepted silently, which makes a
+        component's arrival rate NEGATIVE and its utilisation negative — so the engine would report
+        a heavily-loaded system as comfortably idle, with a confident latency attached. The
+        engine-correctness audit added capacity/latency validation on Component and stopped here;
+        this closes the same hole on the flow axis.
+
+        An empty path is rejected for the same reason: a flow that visits nothing carries its share
+        of the offered load to no component, so that share silently vanishes from every arrival
+        total while still counting toward the shares-sum-to-1 check.
+        """
+        if not math.isfinite(self.share) or not (0.0 < self.share <= 1.0):
+            raise ValueError(
+                f"Flow({self.name!r}): share must be a finite fraction in (0, 1], "
+                f"got {self.share!r}")
+        if not self.path:
+            raise ValueError(
+                f"Flow({self.name!r}): path is empty — a flow that visits no component silently "
+                f"drops its share of the offered load")
 
 
 @dataclass

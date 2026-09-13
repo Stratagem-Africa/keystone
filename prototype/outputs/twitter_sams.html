@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Keystone — Twitter-scale platform</title>
+<style>
+  :root{
+    --bg0:#070a16; --bg1:#0b1024; --bg2:#0e1533;
+    --ink:#e7ecff; --muted:#8a93b8; --line:#1d2748; --panel:rgba(14,20,44,.72);
+    --client:#f0abfc; --frontend:#60a5fa; --api:#22d3ee; --service:#c084fc;
+    --data:#4ade80; --external:#fb923c; --infra:#facc15;
+    --f-request:#38bdf8; --f-response:#34d399; --f-data:#a78bfa; --f-event:#fbbf24; --f-auth:#f472b6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg0);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;color:var(--ink)}
+  #stage{position:fixed;inset:0;
+    background:
+      radial-gradient(1200px 800px at 12% -10%, #16204a 0%, transparent 55%),
+      radial-gradient(1100px 700px at 100% 0%, #241a48 0%, transparent 50%),
+      radial-gradient(900px 900px at 50% 120%, #0c1a33 0%, transparent 55%),
+      linear-gradient(180deg,var(--bg1),var(--bg0));
+    cursor:grab;overflow:hidden}
+  #stage.grabbing{cursor:grabbing}
+  #grid{position:absolute;inset:-2000px;background-image:
+      linear-gradient(rgba(120,140,220,.05) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(120,140,220,.05) 1px,transparent 1px);
+    background-size:44px 44px;pointer-events:none}
+  #viewport{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+  svg#edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+
+  /* ---- header ---- */
+  #head{position:fixed;left:18px;top:16px;z-index:20;max-width:min(520px,52vw)}
+  #head h1{margin:0;font-size:20px;letter-spacing:.2px;font-weight:750;
+    background:linear-gradient(90deg,#a5b4fc,#7dd3fc,#6ee7b7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #head .sub{color:var(--muted);font-size:12.5px;margin-top:3px;line-height:1.45}
+  #head .stack{color:#5f6b93;font-size:11px;margin-top:6px}
+
+  .glass{background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid rgba(120,140,220,.16);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+
+  /* ---- control dock ---- */
+  #dock{position:fixed;right:16px;top:16px;z-index:20;width:268px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:12px}
+  #dock .grp{display:flex;flex-direction:column;gap:7px}
+  #dock .lbl{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:#6b76a0;font-weight:700}
+  .pills{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:5px 9px;border-radius:999px;cursor:pointer;
+    border:1px solid rgba(140,160,230,.22);background:rgba(255,255,255,.03);color:var(--muted);user-select:none;transition:.15s}
+  .pill .dot{width:8px;height:8px;border-radius:50%;box-shadow:0 0 8px currentColor}
+  .pill.on{color:var(--ink);background:rgba(255,255,255,.07);border-color:rgba(160,180,255,.4)}
+  .pill:hover{border-color:rgba(160,180,255,.55)}
+  select,input[type=text]{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(140,160,230,.22);
+    color:var(--ink);border-radius:9px;padding:7px 9px;font-size:12.5px;outline:none}
+  select:focus,input:focus{border-color:rgba(120,180,255,.6)}
+  .jbtns{display:flex;flex-direction:column;gap:5px}
+  .jbtn{text-align:left;font-size:12px;padding:8px 10px;border-radius:9px;cursor:pointer;color:var(--ink);
+    border:1px solid rgba(140,160,230,.18);background:rgba(255,255,255,.03);transition:.15s;line-height:1.25}
+  .jbtn:hover{background:rgba(90,120,255,.14);border-color:rgba(140,170,255,.5)}
+  .jbtn.active{background:linear-gradient(90deg,rgba(80,120,255,.28),rgba(110,80,255,.22));border-color:rgba(150,170,255,.7)}
+  .jbtn small{display:block;color:var(--muted);font-size:10.5px;margin-top:2px}
+  .viewbtns{display:flex;gap:6px}
+  .vb{flex:1;text-align:center;font-size:12px;padding:7px 0;border-radius:9px;cursor:pointer;color:var(--muted);
+    border:1px solid rgba(140,160,230,.2);background:rgba(255,255,255,.03)}
+  .vb:hover{color:var(--ink);border-color:rgba(160,180,255,.5)}
+
+  /* ---- legend ---- */
+  #legend{position:fixed;left:18px;bottom:16px;z-index:20;padding:12px 14px;display:flex;gap:20px;align-items:flex-start}
+  #legend .col{display:flex;flex-direction:column;gap:6px}
+  #legend .t{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#6b76a0;font-weight:700;margin-bottom:1px}
+  #legend .row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+  #legend .sw{width:22px;height:0;border-top:3px solid;border-radius:3px}
+  #legend .chip{width:11px;height:11px;border-radius:4px;border:1px solid rgba(255,255,255,.25)}
+
+  /* ---- nodes ---- */
+  .node{position:absolute;width:186px;border-radius:12px;padding:9px 11px;cursor:pointer;
+    background:linear-gradient(180deg,rgba(24,32,64,.92),rgba(14,20,44,.92));
+    border:1px solid rgba(150,170,240,.14);box-shadow:0 6px 18px rgba(0,0,0,.4);
+    transition:transform .16s ease, box-shadow .16s ease, opacity .18s ease; overflow:hidden}
+  .node:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--ac)}
+  .node .top{display:flex;align-items:center;gap:7px}
+  .node .ic{font-size:13px;color:var(--ac);text-shadow:0 0 10px var(--ac);width:14px;text-align:center}
+  .node .nm{font-size:12.5px;font-weight:650;line-height:1.15;letter-spacing:.1px}
+  .node .tech{margin-top:4px;font-size:9.5px;color:#7c86ad;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .node:hover{transform:translateY(-2px) scale(1.025);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 0 1px var(--ac)}
+  .node.dim{opacity:.13;filter:saturate(.4)}
+  .node.hot{box-shadow:0 0 0 1.5px var(--ac),0 10px 34px rgba(0,0,0,.55),0 0 34px -6px var(--ac);opacity:1}
+  .node.sel{box-shadow:0 0 0 2px #fff6,0 10px 34px rgba(0,0,0,.6),0 0 40px -6px var(--ac)}
+
+  /* layer headers (in-canvas) */
+  .lhead{position:absolute;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:var(--ac);
+    opacity:.9;text-shadow:0 0 18px var(--ac);white-space:nowrap}
+  .lhead small{display:block;font-size:9px;letter-spacing:.06em;text-transform:none;color:#5c669099;font-weight:600;margin-top:2px}
+
+  path.edge{fill:none;stroke-linecap:round;transition:stroke-opacity .18s, stroke-width .18s}
+  circle.flow{pointer-events:none}
+
+  /* ---- side panel ---- */
+  #panel{position:fixed;right:16px;top:16px;bottom:16px;width:330px;z-index:30;padding:0;transform:translateX(380px);
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;overflow:hidden}
+  #panel.open{transform:none}
+  #panel .ph{padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+  #panel .ph .ksub{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ac);font-weight:800}
+  #panel .ph h2{margin:6px 0 3px;font-size:18px}
+  #panel .ph .tech{font-size:11.5px;color:var(--muted)}
+  #panel .pb{padding:14px 18px;overflow:auto}
+  #panel .desc{font-size:13px;line-height:1.5;color:#cfd6f5}
+  #panel .conh{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#6b76a0;font-weight:700;margin:16px 0 7px}
+  #panel .con{display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 8px;border-radius:8px;cursor:pointer;color:#c8d0f0}
+  #panel .con:hover{background:rgba(120,150,255,.12)}
+  #panel .con .k{font-size:9px;padding:1px 5px;border-radius:5px;color:#0a0f22;font-weight:800;letter-spacing:.02em}
+  #panel .con .ar{color:var(--muted)}
+  #panel .cls{position:absolute;right:12px;top:12px;cursor:pointer;color:var(--muted);font-size:18px;width:26px;height:26px;
+    display:grid;place-items:center;border-radius:8px}
+  #panel .cls:hover{background:rgba(255,255,255,.08);color:#fff}
+
+  /* ---- journey caption ---- */
+  #jcap{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);z-index:25;opacity:0;
+    padding:11px 16px;max-width:640px;transition:opacity .25s, transform .25s;pointer-events:none}
+  #jcap.show{opacity:1;transform:translateX(-50%)}
+  #jcap .jt{font-size:12px;color:var(--f-request);font-weight:800;letter-spacing:.04em}
+  #jcap .jstep{font-size:13.5px;margin-top:3px;color:#eaf0ff}
+  #jcap .jctrl{display:flex;gap:8px;justify-content:center;margin-top:9px;pointer-events:auto}
+  #jcap .jc{font-size:11.5px;padding:5px 12px;border-radius:8px;cursor:pointer;color:var(--ink);
+    border:1px solid rgba(150,170,255,.3);background:rgba(255,255,255,.05)}
+  #jcap .jc:hover{background:rgba(120,150,255,.2)}
+  #hint{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:10;color:#5c6690;font-size:11px;
+    pointer-events:none;transition:opacity .4s}
+  .credit{position:fixed;right:18px;bottom:14px;z-index:10;color:#4a5478;font-size:10.5px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="grid"></div>
+  <div id="viewport">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div id="head" class="glass" style="padding:13px 16px">
+  <h1 id="ttl">Twitter-scale platform</h1>
+  <div class="sub" id="subttl"></div>
+  <div class="stack" id="stackln"></div>
+</div>
+
+<div id="dock" class="glass">
+  <div class="grp">
+    <div class="lbl">Flows through the lines</div>
+    <div class="pills" id="flowPills"></div>
+  </div>
+  <div class="grp">
+    <div class="lbl">Focus a domain</div>
+    <select id="domainSel"></select>
+  </div>
+  <div class="grp">
+    <div class="lbl">Play a journey</div>
+    <div class="jbtns" id="jbtns"></div>
+  </div>
+  <div class="grp">
+    <div class="lbl">Find</div>
+    <input id="search" type="text" placeholder="Search a component…" autocomplete="off"/>
+  </div>
+  <div class="grp">
+    <div class="viewbtns">
+      <div class="vb" data-v="fit">Fit</div>
+      <div class="vb" data-v="in">Zoom +</div>
+      <div class="vb" data-v="out">Zoom −</div>
+      <div class="vb" data-v="reset">Reset</div>
+    </div>
+  </div>
+</div>
+
+<div id="legend" class="glass">
+  <div class="col" id="legFlows"><div class="t">Flow type</div></div>
+  <div class="col" id="legLayers"><div class="t">Layer</div></div>
+</div>
+
+<div id="panel" class="glass">
+  <div class="cls" id="panelClose">×</div>
+  <div class="ph"><div class="ksub" id="pKind"></div><h2 id="pName"></h2><div class="tech" id="pTech"></div></div>
+  <div class="pb"><div class="desc" id="pDesc"></div><div id="pCons"></div></div>
+</div>
+
+<div id="jcap" class="glass">
+  <div class="jt" id="jcapT"></div>
+  <div class="jstep" id="jcapS"></div>
+  <div class="jctrl">
+    <div class="jc" id="jPrev">‹ Prev</div><div class="jc" id="jPlay">Pause</div>
+    <div class="jc" id="jNext">Next ›</div><div class="jc" id="jStop">Exit journey</div>
+  </div>
+</div>
+<div id="hint">Drag to pan · scroll to zoom · hover a node to trace its flows · click for detail</div>
+<div class="credit">Keystone · engine-validated · self-contained</div>
+
+<script id="arch-data" type="application/json">{"meta": {"title": "Twitter-scale platform", "subtitle": "Keystone \u2014 a validated design from intent \u00b7 L0 (Directional) \u00b7 20 components \u00b7 6 journeys", "generated": "engine", "stack": "bottleneck Tweets DB (primary) (100%) \u00b7 safe ~51,000 req/s \u00b7 $7,440/mo"}, "layers": [{"id": "client", "label": "People", "sub": "users \u0026 clients"}, {"id": "frontend", "label": "Edge", "sub": "CDN + load balancers"}, {"id": "api", "label": "Gateway", "sub": "API gateway + auth"}, {"id": "service", "label": "Services", "sub": "stateless compute"}, {"id": "data", "label": "Data \u0026 Cache", "sub": "caches + databases + storage"}, {"id": "external", "label": "External", "sub": "3rd-party"}, {"id": "infra", "label": "Async", "sub": "queues"}], "flowKinds": [{"id": "request", "label": "Request", "color": "#38bdf8"}, {"id": "response", "label": "Response", "color": "#34d399"}, {"id": "data", "label": "Persist (read/write)", "color": "#a78bfa"}, {"id": "event", "label": "Queue / async", "color": "#fbbf24"}, {"id": "auth", "label": "Gateway / auth", "color": "#f472b6"}], "nodes": [{"id": "users", "label": "Users / Clients", "layer": "client", "group": "People", "tech": "browser + mobile", "description": "People using the platform \u2014 the traffic source."}, {"id": "cdn", "label": "CDN (media + static)", "layer": "frontend", "group": "cdn", "tech": "cdn \u00b7 x1 \u00b7 120,000 rps/inst \u00b7 util 30%", "description": "Serves static content from the edge, close to users. Engine: utilisation 30%, capacity 120,000 rps, $40/mo \u00b7 provenance ASSUMPTION.", "util": 0.3, "status": "ok", "bottleneck": false, "spof": false}, {"id": "lb", "label": "Edge Load Balancer", "layer": "frontend", "group": "load balancer", "tech": "load_balancer \u00b7 x2 \u00b7 80,000 rps/inst \u00b7 util 36%", "description": "Spreads incoming traffic across your servers. Engine: utilisation 36%, capacity 160,000 rps, $50/mo \u00b7 provenance ASSUMPTION.", "util": 0.356, "status": "ok", "bottleneck": false, "spof": false}, {"id": "gw", "label": "API Gateway (auth + routing)", "layer": "api", "group": "api gateway", "tech": "api_gateway \u00b7 x6 \u00b7 12,000 rps/inst \u00b7 util 79%", "description": "The front door \u2014 routes and guards every request. Engine: utilisation 79%, capacity 72,000 rps, $180/mo \u00b7 provenance ASSUMPTION.", "util": 0.792, "status": "ok", "bottleneck": false, "spof": false}, {"id": "web", "label": "Web/Edge API", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x20 \u00b7 6,000 rps/inst \u00b7 util 48%", "description": "The workhorse that runs your app's logic. Engine: utilisation 48%, capacity 120,000 rps, $700/mo \u00b7 provenance ASSUMPTION.", "util": 0.475, "status": "ok", "bottleneck": false, "spof": false}, {"id": "tweetsvc", "label": "Tweet Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x12 \u00b7 4,000 rps/inst \u00b7 util 19%", "description": "The workhorse that runs your app's logic. Engine: utilisation 19%, capacity 48,000 rps, $420/mo \u00b7 provenance ASSUMPTION.", "util": 0.188, "status": "ok", "bottleneck": false, "spof": false}, {"id": "timelinesvc", "label": "Timeline Service (fan-out read)", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x24 \u00b7 5,000 rps/inst \u00b7 util 28%", "description": "The workhorse that runs your app's logic. Engine: utilisation 28%, capacity 120,000 rps, $840/mo \u00b7 provenance ASSUMPTION.", "util": 0.275, "status": "ok", "bottleneck": false, "spof": false}, {"id": "usersvc", "label": "User/Graph Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x8 \u00b7 5,000 rps/inst \u00b7 util 15%", "description": "The workhorse that runs your app's logic. Engine: utilisation 15%, capacity 40,000 rps, $280/mo \u00b7 provenance ASSUMPTION.", "util": 0.15, "status": "ok", "bottleneck": false, "spof": false}, {"id": "mediasvc", "label": "Media Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x6 \u00b7 3,000 rps/inst \u00b7 util 17%", "description": "The workhorse that runs your app's logic. Engine: utilisation 17%, capacity 18,000 rps, $210/mo \u00b7 provenance ASSUMPTION.", "util": 0.167, "status": "ok", "bottleneck": false, "spof": false}, {"id": "searchsvc", "label": "Search Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x8 \u00b7 3,000 rps/inst \u00b7 util 25%", "description": "The workhorse that runs your app's logic. Engine: utilisation 25%, capacity 24,000 rps, $280/mo \u00b7 provenance ASSUMPTION.", "util": 0.25, "status": "ok", "bottleneck": false, "spof": false}, {"id": "fanoutsvc", "label": "Fan-out Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x10 \u00b7 4,000 rps/inst \u00b7 util 22%", "description": "The workhorse that runs your app's logic. Engine: utilisation 22%, capacity 40,000 rps, $350/mo \u00b7 provenance ASSUMPTION.", "util": 0.225, "status": "ok", "bottleneck": false, "spof": false}, {"id": "notifsvc", "label": "Notification Service", "layer": "service", "group": "app server", "tech": "app_server \u00b7 x6 \u00b7 4,000 rps/inst \u00b7 util 12%", "description": "The workhorse that runs your app's logic. Engine: utilisation 12%, capacity 24,000 rps, $210/mo \u00b7 provenance ASSUMPTION.", "util": 0.125, "status": "ok", "bottleneck": false, "spof": false}, {"id": "tlcache", "label": "Timeline Cache (Redis)", "layer": "data", "group": "cache", "tech": "cache \u00b7 x6 \u00b7 120,000 rps/inst \u00b7 util 5%", "description": "Keeps hot data in memory for fast reads. Engine: utilisation 5%, capacity 720,000 rps, $1,080/mo \u00b7 provenance ASSUMPTION.", "util": 0.046, "status": "ok", "bottleneck": false, "spof": false}, {"id": "usercache", "label": "User/Session Cache (Redis)", "layer": "data", "group": "cache", "tech": "cache \u00b7 x3 \u00b7 120,000 rps/inst \u00b7 util 2%", "description": "Keeps hot data in memory for fast reads. Engine: utilisation 2%, capacity 360,000 rps, $540/mo \u00b7 provenance ASSUMPTION.", "util": 0.017, "status": "ok", "bottleneck": false, "spof": false}, {"id": "tweetsdb", "label": "Tweets DB (primary)", "layer": "data", "group": "sql db", "tech": "sql_db \u00b7 x1 \u00b7 9,000 rps/inst \u00b7 util 100%", "description": "The system of record \u2014 your durable data. Engine: utilisation 100%, capacity 9,000 rps, $420/mo \u00b7 provenance ASSUMPTION. BOTTLENECK \u2014 this is the limit. Single point of failure.", "util": 1.0, "status": "saturated", "bottleneck": true, "spof": true}, {"id": "tweetsrepl", "label": "Tweets DB Read Replicas", "layer": "data", "group": "replica", "tech": "replica \u00b7 x4 \u00b7 9,000 rps/inst \u00b7 util 40%", "description": "A read-only copy of the database, sharing the read load. Engine: utilisation 40%, capacity 36,000 rps, $1,200/mo \u00b7 provenance ASSUMPTION.", "util": 0.396, "status": "ok", "bottleneck": false, "spof": false}, {"id": "usersdb", "label": "Users/Graph DB (primary)", "layer": "data", "group": "sql db", "tech": "sql_db \u00b7 x1 \u00b7 9,000 rps/inst \u00b7 util 27%", "description": "The system of record \u2014 your durable data. Engine: utilisation 27%, capacity 9,000 rps, $420/mo \u00b7 provenance ASSUMPTION. Single point of failure.", "util": 0.267, "status": "ok", "bottleneck": false, "spof": true}, {"id": "mediastore", "label": "Media Object Store (S3)", "layer": "data", "group": "object store", "tech": "object_store \u00b7 x1 \u00b7 6,000 rps/inst \u00b7 util 50%", "description": "Stores files and large uploads (images, blobs). Engine: utilisation 50%, capacity 6,000 rps, $20/mo \u00b7 provenance ASSUMPTION.", "util": 0.5, "status": "ok", "bottleneck": false, "spof": false}, {"id": "fanoutq", "label": "Fan-out Queue", "layer": "infra", "group": "queue", "tech": "queue \u00b7 x3 \u00b7 40,000 rps/inst \u00b7 util 10%", "description": "Holds background work to process later. Engine: utilisation 10%, capacity 120,000 rps, $120/mo \u00b7 provenance ASSUMPTION.", "util": 0.1, "status": "ok", "bottleneck": false, "spof": false}, {"id": "notifq", "label": "Notification Queue", "layer": "infra", "group": "queue", "tech": "queue \u00b7 x2 \u00b7 40,000 rps/inst \u00b7 util 4%", "description": "Holds background work to process later. Engine: utilisation 4%, capacity 80,000 rps, $80/mo \u00b7 provenance ASSUMPTION.", "util": 0.037, "status": "ok", "bottleneck": false, "spof": false}, {"id": "pushapi", "label": "Push/Email Provider (batched)", "layer": "external", "group": "external api", "tech": "external_api \u00b7 x1 \u00b7 6,000 rps/inst \u00b7 util 50%", "description": "A third-party service your system depends on. Engine: utilisation 50%, capacity 6,000 rps, $0/mo \u00b7 provenance ASSUMPTION.", "util": 0.5, "status": "ok", "bottleneck": false, "spof": false}], "edges": [{"from": "users", "to": "cdn", "kind": "request", "label": "traffic", "description": "user requests"}, {"from": "users", "to": "lb", "kind": "request", "label": "traffic", "description": "user requests"}, {"from": "cdn", "to": "lb", "kind": "request", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "lb", "to": "gw", "kind": "auth", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "gw", "to": "web", "kind": "request", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "web", "to": "timelinesvc", "kind": "request", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "timelinesvc", "to": "tlcache", "kind": "data", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "tlcache", "to": "tweetsrepl", "kind": "data", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic"}, {"from": "web", "to": "tweetsvc", "kind": "request", "label": "post a tweet", "description": "post a tweet \u2014 15% of traffic"}, {"from": "tweetsvc", "to": "tweetsdb", "kind": "data", "label": "post a tweet", "description": "post a tweet \u2014 15% of traffic"}, {"from": "tweetsdb", "to": "fanoutq", "kind": "event", "label": "post a tweet", "description": "post a tweet \u2014 15% of traffic"}, {"from": "fanoutq", "to": "fanoutsvc", "kind": "request", "label": "post a tweet", "description": "post a tweet \u2014 15% of traffic"}, {"from": "web", "to": "usersvc", "kind": "request", "label": "follow / graph", "description": "follow / graph \u2014 10% of traffic"}, {"from": "usersvc", "to": "usercache", "kind": "data", "label": "follow / graph", "description": "follow / graph \u2014 10% of traffic"}, {"from": "usercache", "to": "usersdb", "kind": "data", "label": "follow / graph", "description": "follow / graph \u2014 10% of traffic"}, {"from": "web", "to": "searchsvc", "kind": "request", "label": "search", "description": "search \u2014 10% of traffic"}, {"from": "searchsvc", "to": "tweetsrepl", "kind": "data", "label": "search", "description": "search \u2014 10% of traffic"}, {"from": "web", "to": "mediasvc", "kind": "request", "label": "upload media", "description": "upload media \u2014 5% of traffic"}, {"from": "mediasvc", "to": "mediastore", "kind": "data", "label": "upload media", "description": "upload media \u2014 5% of traffic"}, {"from": "fanoutq", "to": "notifsvc", "kind": "request", "label": "fan-out notifications", "description": "fan-out notifications \u2014 5% of traffic"}, {"from": "notifsvc", "to": "notifq", "kind": "event", "label": "fan-out notifications", "description": "fan-out notifications \u2014 5% of traffic"}, {"from": "notifq", "to": "pushapi", "kind": "request", "label": "fan-out notifications", "description": "fan-out notifications \u2014 5% of traffic"}], "journeys": [{"id": "j0", "label": "load home timeline", "description": "load home timeline \u2014 55% of traffic.", "steps": ["users", "cdn", "lb", "gw", "web", "timelinesvc", "tlcache", "tweetsrepl"]}, {"id": "j1", "label": "post a tweet", "description": "post a tweet \u2014 15% of traffic.", "steps": ["users", "lb", "gw", "web", "tweetsvc", "tweetsdb", "fanoutq", "fanoutsvc"]}, {"id": "j2", "label": "follow / graph", "description": "follow / graph \u2014 10% of traffic.", "steps": ["users", "lb", "gw", "web", "usersvc", "usercache", "usersdb"]}, {"id": "j3", "label": "search", "description": "search \u2014 10% of traffic.", "steps": ["users", "lb", "gw", "web", "searchsvc", "tweetsrepl"]}, {"id": "j4", "label": "upload media", "description": "upload media \u2014 5% of traffic.", "steps": ["users", "cdn", "lb", "gw", "web", "mediasvc", "mediastore"]}, {"id": "j5", "label": "fan-out notifications", "description": "fan-out notifications \u2014 5% of traffic.", "steps": ["users", "fanoutq", "notifsvc", "notifq", "pushapi"]}]}</script>
+<script>
+"use strict";
+const ARCH = JSON.parse(document.getElementById('arch-data').textContent);
+const LAYER_ORDER = ['client','frontend','api','service','data','external','infra'];
+const LC = {client:'--client',frontend:'--frontend',api:'--api',service:'--service',data:'--data',external:'--external',infra:'--infra'};
+const ICON = {client:'◉',frontend:'▤',api:'⇄',service:'⚙',data:'▦',external:'◈',infra:'⟳'};
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const layerColor = l => cssv(LC[l]);
+const flowColor  = k => cssv('--f-'+k);
+
+document.getElementById('subttl').textContent = ARCH.meta.subtitle;
+document.getElementById('stackln').textContent = ARCH.meta.stack;
+
+const N = {}; ARCH.nodes.forEach(n=>N[n.id]=n);
+const EDGES = ARCH.edges.filter(e=>N[e.from]&&N[e.to]);
+
+/* ---------------- layout ---------------- */
+const NW=186, NH=52, COLW=250, ROWH=74, SPLIT=14, PADX=90, PADY=120;
+(function layout(){
+  const cols=[];
+  LAYER_ORDER.forEach(layer=>{
+    const ns = ARCH.nodes.filter(n=>n.layer===layer)
+      .sort((a,b)=> a.group<b.group?-1:a.group>b.group?1:(a.label<b.label?-1:1));
+    const nsub = Math.max(1, Math.ceil(ns.length/SPLIT));
+    const per = Math.ceil(ns.length/nsub);
+    for(let s=0;s<nsub;s++) cols.push({layer, first:s===0, nodes:ns.slice(s*per,(s+1)*per)});
+  });
+  const maxRows = Math.max(...cols.map(c=>c.nodes.length));
+  cols.forEach((col,ci)=>{
+    col.x = PADX + ci*COLW;
+    const off = (maxRows-col.nodes.length)/2;
+    col.nodes.forEach((n,ri)=>{ n.x=col.x; n.y=PADY+(ri+off)*ROWH; });
+  });
+  window.__cols=cols; window.__maxRows=maxRows;
+  window.__W = PADX*2 + cols.length*COLW;
+  window.__H = PADY*2 + maxRows*ROWH;
+})();
+
+/* ---------------- render nodes + layer heads ---------------- */
+const viewport=document.getElementById('viewport');
+const svg=document.getElementById('edges');
+svg.setAttribute('width',window.__W); svg.setAttribute('height',window.__H);
+const nodeEls={};
+ARCH.nodes.forEach(n=>{
+  const el=document.createElement('div');
+  el.className='node'; el.style.setProperty('--ac',layerColor(n.layer));
+  el.style.left=n.x+'px'; el.style.top=n.y+'px';
+  el.innerHTML=`<div class="top"><span class="ic">${ICON[n.layer]}</span><span class="nm">${n.label}</span></div>
+                <div class="tech">${n.tech||''}</div>`;
+  el.addEventListener('mouseenter',()=>hover(n.id));
+  el.addEventListener('mouseleave',()=>hover(null));
+  el.addEventListener('click',e=>{e.stopPropagation();select(n.id);});
+  viewport.appendChild(el); nodeEls[n.id]=el;
+});
+window.__cols.forEach(col=>{ if(!col.first) return;
+  const h=document.createElement('div'); h.className='lhead';
+  h.style.setProperty('--ac',layerColor(col.layer));
+  h.style.left=col.x+'px'; h.style.top=(PADY-64)+'px'; h.style.width=NW+'px';
+  const L=ARCH.layers.find(l=>l.id===col.layer)||{};
+  h.innerHTML=`${L.label||col.layer}<small>${L.sub||''}</small>`;
+  viewport.appendChild(h);
+});
+
+/* ---------------- edges ---------------- */
+function anchors(a,b){
+  const acx=a.x+NW/2, bcx=b.x+NW/2, right=bcx>=acx;
+  return {sx: right?a.x+NW:a.x, sy:a.y+NH/2, ex: right?b.x:b.x+NW, ey:b.y+NH/2, right};
+}
+const edgePaths=[];
+EDGES.forEach((e,i)=>{
+  const a=N[e.from], b=N[e.to]; const p=anchors(a,b);
+  const dx=Math.max(60,Math.abs(p.ex-p.sx)*0.45);
+  const c1=p.sx+(p.right?dx:-dx), c2=p.ex+(p.right?-dx:dx);
+  const d=`M${p.sx},${p.sy} C${c1},${p.sy} ${c2},${p.ey} ${p.ex},${p.ey}`;
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d',d); path.setAttribute('class','edge');
+  path.setAttribute('stroke',flowColor(e.kind));
+  path.setAttribute('stroke-width','1.4'); path.setAttribute('stroke-opacity','.22');
+  svg.appendChild(path);
+  // sample points for particle motion
+  const len=path.getTotalLength(); const S=Math.max(16,Math.min(64,Math.round(len/22)));
+  const pts=[]; for(let s=0;s<=S;s++){const pt=path.getPointAtLength(len*s/S);pts.push([pt.x,pt.y]);}
+  edgePaths.push({e,path,pts,len});
+});
+function ptAt(pts,t){ t=(t%1+1)%1; const f=t*(pts.length-1); const i=Math.floor(f), r=f-i;
+  const a=pts[i], b=pts[Math.min(i+1,pts.length-1)]; return [a[0]+(b[0]-a[0])*r, a[1]+(b[1]-a[1])*r]; }
+
+/* particle pool: each edge gets forward + (request→) response dot */
+const dots=[];
+edgePaths.forEach((ep,i)=>{
+  const mk=(kind,dir)=>{const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('r','2.7'); c.setAttribute('class','flow'); c.setAttribute('fill',flowColor(kind));
+    c.style.filter='drop-shadow(0 0 5px '+flowColor(kind)+')'; svg.appendChild(c);
+    dots.push({c,ep,kind,dir,off:Math.random()}); };
+  mk(ep.e.kind, 1);
+  if(ep.e.kind==='request') mk('response', -1);         // response travels back up the request line
+  else if(ep.e.kind==='data') { const c=dots[dots.length-1]; c.off=(c.off+0.5)%1; } // stagger a 2nd feel
+});
+
+/* ---------------- state ---------------- */
+const flowOn = {request:true,response:true,data:true,event:true,auth:true};
+let hotId=null, selId=null, domain='__all', journey=null;
+const adj = {}; ARCH.nodes.forEach(n=>adj[n.id]={in:[],out:[]});
+EDGES.forEach(e=>{ adj[e.from].out.push(e); adj[e.to].in.push(e); });
+
+function edgeVisibleBase(e){
+  if(!flowOn[e.kind] && !(e.kind==='request'&&flowOn.response)) {
+    // request line still shown if response toggle on; else hidden when its kind off
+    if(!(e.kind==='request' && flowOn.response)) return false;
+  }
+  if(domain!=='__all'){ if(N[e.from].group!==domain && N[e.to].group!==domain) return false; }
+  return true;
+}
+function neighborsOf(id){ const s=new Set([id]); adj[id].out.forEach(e=>s.add(e.to)); adj[id].in.forEach(e=>s.add(e.from)); return s; }
+
+function apply(){
+  const focus = journey ? journey.set : (hotId? neighborsOf(hotId) : (selId? neighborsOf(selId):null));
+  const jEdgeKey = journey ? journey.edgeKeys : null;
+  // nodes
+  ARCH.nodes.forEach(n=>{
+    const el=nodeEls[n.id]; el.classList.remove('dim','hot','sel');
+    let visibleDomain = domain==='__all' || n.group===domain;
+    if(!visibleDomain){ el.classList.add('dim'); }
+    if(focus){ if(focus.has(n.id)){ if(n.id===hotId||n.id===selId) el.classList.add('hot'); } else el.classList.add('dim'); }
+    if(n.id===selId) el.classList.add('sel');
+  });
+  // edges + dots
+  edgePaths.forEach(ep=>{
+    const e=ep.e; let show=edgeVisibleBase(e);
+    let hi=false;
+    if(journey){ hi = jEdgeKey.has(e.from+'>'+e.to); show = hi; }
+    else if(focus){ const touch = focus.has(e.from)&&focus.has(e.to)&&(e.from===hotId||e.to===hotId||e.from===selId||e.to===selId);
+                    if(!touch) show=false; else hi=true; }
+    ep.show=show; ep.hi=hi;
+    ep.path.style.display = show?'':'none';
+    ep.path.setAttribute('stroke-opacity', hi?'.85':'.2');
+    ep.path.setAttribute('stroke-width', hi?'2.4':'1.3');
+  });
+  dots.forEach(d=>{
+    const e=d.ep.e; let on = d.ep.show;
+    if(on){ if(d.dir>0) on = flowOn[e.kind]; else on = (e.kind==='request' && flowOn.response); }
+    d.c.style.display = on?'':'none'; d.on=on;
+  });
+}
+
+/* ---------------- animation ---------------- */
+let t0=performance.now();
+function frame(now){
+  const t=(now-t0)/1000;
+  for(const d of dots){
+    if(!d.on) continue;
+    const speed = d.ep.hi? 0.28 : 0.14;
+    let tt = (t*speed + d.off);
+    if(d.dir<0) tt = 1-((t*speed+d.off)%1);
+    const [x,y]=ptAt(d.ep.pts, tt);
+    d.c.setAttribute('cx',x); d.c.setAttribute('cy',y);
+    d.c.setAttribute('r', d.ep.hi? 3.6 : 2.6);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------------- interactions ---------------- */
+function hover(id){ if(journey) return; hotId=id; apply(); }
+function select(id){
+  selId=id; hotId=null; const n=N[id];
+  document.getElementById('pKind').textContent = (ARCH.layers.find(l=>l.id===n.layer)||{}).label+' · '+n.group;
+  document.getElementById('pKind').style.color = layerColor(n.layer);
+  document.getElementById('pName').textContent = n.label;
+  document.getElementById('pTech').textContent = n.tech||'';
+  document.getElementById('pDesc').textContent = n.description||'';
+  const cons=document.getElementById('pCons'); cons.innerHTML='';
+  const mk=(title,list,dir)=>{ if(!list.length) return; const h=document.createElement('div'); h.className='conh'; h.textContent=title; cons.appendChild(h);
+    list.forEach(e=>{ const other = dir==='out'?e.to:e.from; const row=document.createElement('div'); row.className='con';
+      row.innerHTML=`<span class="k" style="background:${flowColor(e.kind)}">${e.kind}</span>
+        <span class="ar">${dir==='out'?'→':'←'}</span><span>${N[other].label}</span>`;
+      row.title=e.description||e.label; row.onclick=()=>{select(other);centerOn(other);}; cons.appendChild(row); }); };
+  mk('Calls / sends →', adj[id].out,'out');
+  mk('Called / fed by ←', adj[id].in,'in');
+  document.getElementById('panel').classList.add('open');
+  apply(); centerOn(id,true);
+}
+document.getElementById('panelClose').onclick=()=>{document.getElementById('panel').classList.remove('open');selId=null;apply();};
+document.getElementById('stage').addEventListener('click',()=>{ if(selId){selId=null;document.getElementById('panel').classList.remove('open');apply();} });
+
+/* flow pills */
+const fp=document.getElementById('flowPills');
+ARCH.flowKinds.forEach(f=>{ const el=document.createElement('div'); el.className='pill on'; el.dataset.k=f.id;
+  el.innerHTML=`<span class="dot" style="color:${f.color};background:${f.color}"></span>${f.label}`;
+  el.onclick=()=>{ flowOn[f.id]=!flowOn[f.id]; el.classList.toggle('on',flowOn[f.id]); apply(); };
+  fp.appendChild(el); });
+/* legend */
+const lf=document.getElementById('legFlows');
+ARCH.flowKinds.forEach(f=>{ const r=document.createElement('div'); r.className='row';
+  r.innerHTML=`<span class="sw" style="border-color:${f.color}"></span>${f.label}`; lf.appendChild(r); });
+const ll=document.getElementById('legLayers');
+ARCH.layers.forEach(l=>{ const r=document.createElement('div'); r.className='row';
+  r.innerHTML=`<span class="chip" style="background:${layerColor(l.id)}"></span>${l.label}`; ll.appendChild(r); });
+/* domain select */
+const ds=document.getElementById('domainSel');
+const groups=[...new Set(ARCH.nodes.map(n=>n.group))].sort();
+ds.innerHTML='<option value="__all">All domains</option>'+groups.map(g=>`<option value="${g}">${g}</option>`).join('');
+ds.onchange=()=>{ domain=ds.value; apply(); if(domain!=='__all') fitNodes(ARCH.nodes.filter(n=>n.group===domain)); };
+/* search */
+document.getElementById('search').addEventListener('input',e=>{
+  const q=e.target.value.trim().toLowerCase(); if(!q) return;
+  const hit=ARCH.nodes.find(n=>n.label.toLowerCase().includes(q)||n.id.includes(q));
+  if(hit){ select(hit.id); } });
+
+/* ---------------- journeys ---------------- */
+const jb=document.getElementById('jbtns');
+ARCH.journeys.forEach(j=>{ const el=document.createElement('div'); el.className='jbtn'; el.dataset.j=j.id;
+  el.innerHTML=`${j.label}<small>${j.steps.length} hops</small>`;
+  el.onclick=()=>startJourney(j); jb.appendChild(el); });
+let jTimer=null, jIdx=0, jPlaying=true;
+function edgeBetween(a,b){ return EDGES.find(e=>e.from===a&&e.to===b) || EDGES.find(e=>(e.from===a&&e.to===b)||(e.from===b&&e.to===a)); }
+function startJourney(j){
+  document.querySelectorAll('.jbtn').forEach(b=>b.classList.toggle('active',b.dataset.j===j.id));
+  const set=new Set(j.steps); const pairs=[]; const edgeKeys=new Set();
+  for(let i=0;i<j.steps.length-1;i++){ pairs.push([j.steps[i],j.steps[i+1]]); }
+  journey={j,set,edgeKeys,pairs}; jIdx=0; jPlaying=true;
+  document.getElementById('jcap').classList.add('show');
+  document.getElementById('jcapT').textContent=j.label;
+  document.getElementById('panel').classList.remove('open'); selId=null; hotId=null;
+  fitNodes(j.steps.map(s=>N[s]).filter(Boolean),true);
+  document.getElementById('jPlay').textContent='Pause';
+  jStep(0); scheduleJ();
+}
+function jStep(i){
+  jIdx=(i+journey.pairs.length)%journey.pairs.length;
+  journey.edgeKeys.clear();
+  // reveal cumulative path up to current step for context, emphasise current
+  for(let k=0;k<=jIdx;k++){ journey.edgeKeys.add(journey.pairs[k][0]+'>'+journey.pairs[k][1]); }
+  const [a,b]=journey.pairs[jIdx];
+  document.getElementById('jcapS').innerHTML =
+    `<b style="color:${layerColor(N[a].layer)}">${N[a].label}</b> &rarr; <b style="color:${layerColor(N[b].layer)}">${N[b].label}</b>` +
+    `<br><span style="color:#aab4dd;font-size:12px">${(edgeBetween(a,b)||{}).description||''}</span>`;
+  // dim all nodes except journey; hot the two endpoints
+  apply();
+  ARCH.nodes.forEach(n=>{ const el=nodeEls[n.id]; el.classList.toggle('hot', n.id===a||n.id===b); });
+}
+function scheduleJ(){ clearTimeout(jTimer); if(!journey||!jPlaying) return;
+  jTimer=setTimeout(()=>{ if(jIdx>=journey.pairs.length-1){ jStep(0);} else jStep(jIdx+1); scheduleJ(); }, 2100); }
+function stopJourney(){ journey=null; clearTimeout(jTimer);
+  document.getElementById('jcap').classList.remove('show');
+  document.querySelectorAll('.jbtn').forEach(b=>b.classList.remove('active')); apply(); }
+document.getElementById('jStop').onclick=stopJourney;
+document.getElementById('jNext').onclick=()=>{ if(journey){jPlaying=false;document.getElementById('jPlay').textContent='Play';jStep(jIdx+1);} };
+document.getElementById('jPrev').onclick=()=>{ if(journey){jPlaying=false;document.getElementById('jPlay').textContent='Play';jStep(jIdx-1);} };
+document.getElementById('jPlay').onclick=()=>{ if(!journey)return; jPlaying=!jPlaying;
+  document.getElementById('jPlay').textContent=jPlaying?'Pause':'Play'; if(jPlaying) scheduleJ(); };
+
+/* ---------------- pan / zoom ---------------- */
+let scale=1, tx=0, ty=0;
+function setT(){ viewport.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; }
+function clampScale(s){ return Math.max(.18,Math.min(2.4,s)); }
+const stage=document.getElementById('stage');
+stage.addEventListener('wheel',e=>{ e.preventDefault();
+  const r=stage.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+  const ns=clampScale(scale*(e.deltaY<0?1.12:0.89));
+  tx = mx-(mx-tx)*(ns/scale); ty = my-(my-ty)*(ns/scale); scale=ns; setT();
+},{passive:false});
+let drag=null;
+stage.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,tx,ty}; stage.classList.add('grabbing');
+  const h=document.getElementById('hint'); if(h) h.style.opacity='0'; });
+window.addEventListener('pointermove',e=>{ if(!drag)return; tx=drag.tx+(e.clientX-drag.x); ty=drag.ty+(e.clientY-drag.y); setT(); });
+window.addEventListener('pointerup',()=>{ drag=null; stage.classList.remove('grabbing'); });
+function fitNodes(list,anim){ if(!list.length) return;
+  const xs=list.map(n=>n.x), ys=list.map(n=>n.y);
+  const minx=Math.min(...xs)-40, maxx=Math.max(...xs)+NW+40, miny=Math.min(...ys)-60, maxy=Math.max(...ys)+NH+60;
+  const w=maxx-minx, h=maxy-miny; const r=stage.getBoundingClientRect();
+  const s=clampScale(Math.min((r.width-360)/w,(r.height-120)/h,1.6));
+  const ns=s; const nx = (r.width-360)/2 - (minx+w/2)*ns + 40; const ny=r.height/2-(miny+h/2)*ns;
+  animateTo(nx,ny,ns,anim!==false);
+}
+function fitAll(){ fitNodes(ARCH.nodes,false); }
+function centerOn(id,anim){ const n=N[id]; const r=stage.getBoundingClientRect();
+  const nx=(r.width-360)/2-(n.x+NW/2)*scale; const ny=r.height*0.42-(n.y+NH/2)*scale; animateTo(nx,ny,scale,anim); }
+function animateTo(nx,ny,ns,anim){ if(anim===false){tx=nx;ty=ny;scale=ns;setT();return;}
+  const sx=tx,sy=ty,ss=scale,t0=performance.now(),d=520;
+  (function a(now){ let k=Math.min(1,(now-t0)/d); k=1-Math.pow(1-k,3);
+    tx=sx+(nx-sx)*k; ty=sy+(ny-sy)*k; scale=ss+(ns-ss)*k; setT(); if(k<1)requestAnimationFrame(a); })(performance.now()); }
+document.querySelectorAll('.vb').forEach(b=>b.onclick=()=>{ const v=b.dataset.v; const r=stage.getBoundingClientRect();
+  if(v==='fit'){fitAll();} else if(v==='reset'){domain='__all';ds.value='__all';stopJourney();selId=null;
+    document.getElementById('panel').classList.remove('open');apply();fitAll();}
+  else{ const ns=clampScale(scale*(v==='in'?1.2:0.83)); const mx=r.width/2,my=r.height/2;
+    tx=mx-(mx-tx)*(ns/scale);ty=my-(my-ty)*(ns/scale);scale=ns;setT(); } });
+
+apply(); fitAll();
+</script>
+
+<style>
+  #kverdict{position:fixed;left:18px;bottom:70px;z-index:21;max-width:360px;padding:12px 15px}
+  #kverdict .kt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#f472b6;font-weight:800;margin-bottom:7px}
+  #kverdict .kr{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:3px 0;border-bottom:1px dashed rgba(150,170,255,.16)}
+  #kverdict .kr b{color:#eaf0ff;font-variant-numeric:tabular-nums}
+  .node .kbadge{position:absolute;right:7px;top:6px;font-size:7.5px;font-weight:800;padding:1px 5px;border-radius:5px}
+  .node.k-hot{box-shadow:0 0 0 1.4px #fb923c,0 6px 18px rgba(0,0,0,.45)!important}
+  .node.k-sat{box-shadow:0 0 0 1.6px #f87171,0 6px 20px rgba(0,0,0,.5)!important}
+</style>
+<div id="kverdict" class="glass"></div>
+<script>
+(function(){
+  var V={bn:"Tweets DB (primary)",bnu:1.0,safe:51000,cost:7440,spofs:["Tweets DB (primary)", "Users/Graph DB (primary)"]};
+  var kv=document.getElementById('kverdict');
+  kv.innerHTML='<div class="kt">Engine verdict - every number computed, not guessed</div>'
+    +'<div class="kr"><span>Bottleneck</span><b>'+V.bn+' ('+Math.round(V.bnu*100)+'%)</b></div>'
+    +'<div class="kr"><span>Max safe load</span><b>~'+V.safe.toLocaleString()+' req/s</b></div>'
+    +'<div class="kr"><span>Est. monthly cost</span><b>$'+V.cost.toLocaleString()+'</b></div>'
+    +'<div class="kr"><span>Single points of failure</span><b>'+(V.spofs.join(', ')||'none')+'</b></div>';
+  ARCH.nodes.forEach(function(n){ var el=nodeEls[n.id]; if(!el)return;
+    if(n.status==='hot')el.classList.add('k-hot'); if(n.status==='saturated')el.classList.add('k-sat');
+    if(n.bottleneck||n.spof){var b=document.createElement('div');b.className='kbadge';
+      b.style.background=n.bottleneck?'rgba(248,113,113,.22)':'rgba(167,139,250,.22)';
+      b.style.color=n.bottleneck?'#fca5a5':'#c4b5fd';b.textContent=n.bottleneck?'BN':'SPOF';el.appendChild(b);} });
+})();
+</script>
+</body>
+</html>

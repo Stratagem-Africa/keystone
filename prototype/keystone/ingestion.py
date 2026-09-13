@@ -604,11 +604,16 @@ def make_ingestor(provider: str | None = None, model: str | None = None,
     from keystone.llm import make_llm, known_providers  # lazy: transport built only for a live provider
     if provider not in known_providers():
         raise ValueError(
-            f"Unknown INGEST_PROVIDER={provider!r}. Use one of: stub | claude | "
+            f"Unknown INGEST_PROVIDER={provider!r}. Use one of: stub | claude | claude_cli | "
             "openai | openrouter | gemini | groq | cerebras | xai | github | ollama."
         )
     ingest_model = model or os.getenv("INGEST_MODEL")
-    if not ingest_model:
+    # The local Claude Code CLI reads its own default model from the user's settings, so an explicit
+    # INGEST_MODEL is optional there — unlike a raw API transport, where a missing model has to be
+    # an error because there is no sensible cross-vendor default. Mirrors `make_council`.
+    if provider == "claude_cli":
+        ingest_model = ingest_model or ""
+    if not ingest_model and provider != "claude_cli":
         raise ValueError(
             f"INGEST_PROVIDER={provider!r} needs an explicit model — set INGEST_MODEL "
             "(e.g. gemini-2.0-flash, llama-3.3-70b-versatile, llama3.2:3b)."

@@ -73,6 +73,15 @@ class TestDivergenceOverlay(unittest.TestCase):
     def test_base_engine_numbers_intact(self):
         # Prime directive: the overlay must not disturb the engine values the base map carries.
         for n in self.arch["nodes"]:
+            if n.get("synthetic"):
+                # The "Your users" node is DISPLAY ONLY — it is not a component, the engine never
+                # sees it, and it must never carry an engine number. Asserted below rather than
+                # merely skipped, so a synthetic node can never smuggle a fabricated figure in.
+                self.assertIsNone(n["utilization"])
+                self.assertIsNone(n["capacity_rps"])
+                self.assertIsNone(n["mean_latency_ms"])
+                self.assertEqual(n["monthly_cost_cents"], 0)
+                continue
             self.assertEqual(n["utilization"], self.sim.components[n["id"]].utilization)
             self.assertEqual(n["arrival_rps"], self.sim.components[n["id"]].arrival_rps)
 

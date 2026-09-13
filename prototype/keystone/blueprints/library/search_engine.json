@@ -1,0 +1,368 @@
+{
+  "spec_version": 1,
+  "name": "Search Engine",
+  "workload": {
+    "system_rps": 19000,
+    "description": "19k requests/s: 98% full searches (~18,620/s), 2% document indexing (~380 docs/s). Keystroke/autocomplete traffic is sized in the `typeahead` blueprint, not here."
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Edge load balancer",
+      "per_instance_rps": 40000,
+      "instances": 1,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "api",
+      "kind": "app_server",
+      "name": "Query frontend (parse, rewrite, rank fusion, snippets)",
+      "per_instance_rps": 2000,
+      "instances": 13,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Query-result cache (Redis)",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "index",
+      "kind": "app_server",
+      "name": "Index shard fleet (inverted index, scatter-gather)",
+      "per_instance_rps": 400,
+      "instances": 22,
+      "base_latency_ms": 22.0,
+      "monthly_cost_per_instance": 14016,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 14016.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 14016.0,
+          "confidence_high": 14016.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.xlarge \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.192/h x 730 = 14016c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.xlarge"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Doc-server fleet (titles, snippets, metadata; sharded by doc id, replicated)",
+      "per_instance_rps": 600,
+      "instances": 14,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 12000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Indexing pipeline bus (Kafka)",
+      "per_instance_rps": 8000,
+      "instances": 3,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Corpus + index segment snapshots (S3)",
+      "per_instance_rps": 3500,
+      "instances": 1,
+      "base_latency_ms": 30.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 400000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "search_query",
+      "share": 0.98,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "index",
+          "visit_prob": 0.35
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.35
+        }
+      ]
+    },
+    {
+      "name": "index_document",
+      "share": 0.02,
+      "path": [
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "index",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "19,000 requests/s at peak: 98% full searches (~18,620/s) and 2% document indexing (~380 docs/s). The search rate is unchanged from the previous version of this file (~18,600/s); what left is the autocomplete slice, which is now DELIBERATELY NOT MODELLED here. It was sized at 5% of traffic, i.e. 0.054 autocomplete requests per search, while Keystone's own `typeahead` blueprint states the opposite in its workload assumption ('a user typing an eight-character query issues five or six requests') \u2014 the two files in one library disagreed by ~102x on the same ratio. Monaco (WTMC 2019) measured directly that on Google, Baidu and Yandex 'an HTTP GET request is made upon each key press that results in a visible change to the query input field'. At five requests per search, keystroke traffic alone is several times this query frontend's entire fleet capacity, so modelling it here would make the front door the constraint and bury the search path. It is a different system with a different shape (per-keystroke arrival rate, ~40% edge absorption, a sub-100 ms p99 requirement) and it is sized in the `typeahead` blueprint. Read the two together.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Query-result cache hit-rate 65% (miss path visit_prob 0.35). Search traffic is heavily Zipfian \u2014 a small head of popular queries repeats constantly \u2014 so a high hit rate is achievable with a short TTL, and only the misses pay for a scatter-gather. BE CAREFUL WITH THIS NUMBER: 65% is ABOVE the top of the only band Google has published. Dean's WSDM 2009 keynote (Google) says the cache servers 'cache both index results and doc snippets - hit rates typically 30-60%', and names level of personalization as one of the three drivers. It is kept at 65% because it is the input the rest of this design was sized against, but treat it as optimistic and uncited, not as evidence. It is the largest single lever in the file: at Dean's 45% midpoint the miss traffic rises ~1.6x, which is roughly 34 index nodes and 21 doc-server nodes at the same headroom instead of 22 and 14. If your queries are personalised, size against the LOW end of Dean's band, not this number.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "index",
+      "statement": "Shard-fleet capacity is stated in QUERIES/s, not shard-lookups/s. A query scatter-gathers across all 10 shards; a node sustaining ~4,000 shard-lookups/s therefore contributes ~400 queries/s of fleet throughput. The engine's visit_prob is a probability in [0,1] and cannot carry a >1 fan-out ratio, so the fan-out is folded into the capacity input and declared here instead of being hidden.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "index",
+      "statement": "Tail latency, not throughput, is what actually breaks scatter-gather search: a query is as slow as its slowest shard, so p99 across 10 shards is far worse than a single shard's p99. The engine composes per-component M/M/c sojourn times along a path and has NO fan-out/join model, so the latency it reports for this design is optimistic \u2014 and the M/M/c fix of 2026-09-07 made it MORE so, because correcting the multi-server queueing lowered every per-component waiting term. The missing slowest-shard effect is unchanged and still dominates. Treat the utilisation and instance count as the usable output and measure tail latency for real.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The snippet phase is one document fetch PER RESULT, not one per query. A results page carries ~10 results, so a cache-missing query fans out to ~10 doc lookups. The previous version of this file modelled it as 'a point lookup by document id' \u2014 k = 1 \u2014 served by a SINGLE PostgreSQL node, and that is the defect this revision fixes: the doc tier overtakes the index fleet at only k = 1.14 and a single node saturates at k = 1.47, so one node is unsound for any k above ~1.5 and at k = 10 it is many times past its capacity. Capacity is therefore stated in QUERIES/s with the fan-out folded in \u2014 the same convention the index row already declares \u2014 so a node sustaining ~6,000 snippet fetches/s contributes ~600 queries/s of fleet throughput. That 6,000 is REASONED, not published: no vendor publishes a per-node docserver rate. It is below the ~10,000 bare keyed reads/s this file previously assumed, because generating a snippet means reading the stored document text and marking the query terms, which is materially more work per row than returning a value by key. It is still a keyed read, not a scan \u2014 if snippet generation moves to a scan, this row is the first to fail.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "Fleet shape: sharded by doc id and replicated \u2014 14 nodes read as ~7 doc-id shards x 2 replicas, which is why this row is no longer a single point of failure. Barroso, Dean and H\u00f6lzle (IEEE Micro, Mar-Apr 2003, 'Web Search for a Planet') describe the docservers as 'partition[ed] ... by randomly distributing documents into smaller shards', with 'multiple server replicas responsible for handling each shard' behind 'a load balancer', and note that 'Index servers typically have less disk space than document servers' \u2014 the doc fleet is the BIG fleet in a real search engine, not one database box. storage_gb is set to 2x the ~6 TB logical corpus for the two replicas; the real fleet keeps 'dozens of copies of the Web across its clusters', so read the storage line as a floor. Google's docservers are a custom store; this row is priced as a comparable managed PostgreSQL node class because that is the price the catalogue can actually cite \u2014 the citation grounds the PRICE, not the capacity.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "GAP \u2014 unit mismatch on the write path: the indexing flow visits this tier at visit_prob 1.0, so one document write is charged as a whole ~10-result fan-out unit. That over-states the write cost by roughly 10x (~380 units where ~38 is the truth, about 5% of the tier's arrivals). The error is CONSERVATIVE \u2014 it makes the fleet look busier than it is \u2014 and the index row carries the same wart for the same reason, but a reader sizing a write-heavy corpus refresh should know the model cannot express two different service units for one component.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "bottleneck",
+      "statement": "Read the tier ranking as a near-tie, not a verdict. Once the snippet fan-out is modelled honestly, the doc-server fleet and the index fleet carry the same miss traffic and land within a few points of each other, and both are sized to the same 85% headroom target \u2014 whichever one the engine names first is decided by a small margin. The teaching point is that they are CO-EQUAL constraints and the doc fleet is the larger, hotter one; the previous version's claim that a single database node sat comfortably below the index fleet was an artefact of dropping the per-result fan-out on the doc side while declaring it on the index side.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "400 TB of corpus and index-segment snapshots at 3,500 PUT/s, the documented S3 per-prefix write ceiling. Index builds read from here; the build fleet itself is a batch workload and is not modelled.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Indexing runs continuously at ~380 docs/s (2% of 19,000 rps) through a 3-broker bus. Near-real-time indexing means a new document is searchable within a refresh interval (seconds), not instantly; the engine models neither the refresh interval nor index-freshness lag.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "data_pipeline",
+    "difficulty": "advanced",
+    "summary": "Scatter-gather search over a sharded inverted index, fronted by a query-result cache, with a continuous near-real-time indexing pipeline.",
+    "keywords": [
+      "search engine",
+      "full text search",
+      "inverted index",
+      "elasticsearch",
+      "opensearch",
+      "solr",
+      "lucene",
+      "site search",
+      "google search",
+      "search infrastructure"
+    ]
+  }
+}

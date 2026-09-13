@@ -1,0 +1,421 @@
+{
+  "spec_version": 1,
+  "name": "Ticket Booking System",
+  "workload": {
+    "system_rps": 8000,
+    "description": "Steady state: 90% browse / 7% book / 3% my-tickets"
+  },
+  "components": [
+    {
+      "id": "cdn",
+      "kind": "cdn",
+      "name": "CDN (event pages, seat maps)",
+      "per_instance_rps": 80000,
+      "instances": 1,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Load balancer",
+      "per_instance_rps": 40000,
+      "instances": 2,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "app",
+      "kind": "app_server",
+      "name": "Booking app tier",
+      "per_instance_rps": 2000,
+      "instances": 6,
+      "base_latency_ms": 10.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Seat-availability cache (Redis)",
+      "per_instance_rps": 80000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 4745.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.065/h x 730 = 4745c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.medium"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Booking queue (serialises seat writes)",
+      "per_instance_rps": 8000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Seat-inventory DB (row-locked writes)",
+      "per_instance_rps": 3000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "replica",
+      "kind": "replica",
+      "name": "Read replica (browse, order history)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "pay",
+      "kind": "app_server",
+      "name": "Payment path (PSP rate-limit allowance)",
+      "per_instance_rps": 100,
+      "instances": 8,
+      "base_latency_ms": 150.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "browse",
+      "share": 0.9,
+      "path": [
+        {
+          "component_id": "cdn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 0.5
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 0.5
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 0.5
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.06
+        }
+      ]
+    },
+    {
+      "name": "book",
+      "share": 0.07,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "pay",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "my_tickets",
+      "share": 0.03,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.3
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "8,000 req/s at steady state, 90% browse / 7% book / 3% order lookup. This is the QUIET shape. The defining stress of a ticketing system is the flash sale, when traffic multiplies AND browsing collapses into buying \u2014 run that as a what-if against this baseline rather than reading the baseline as the worst case.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cdn",
+      "statement": "Event pages and seat maps are cacheable, so an assumed 50% of browse traffic is served at the edge and never reaches the origin (browse visits lb / app / cache at 0.5, and the replica at 0.06). This is a STATED DESIGN INPUT, not a measurement: Keystone found no published edge hit-rate figure for a ticketing site, so 50% is deliberately pessimistic for content this static \u2014 replace it with your own CDN hit-rate report before trusting the sizing. It is load-bearing. This blueprint previously ran every browse request through the CDN AND on to the app tier \u2014 a 0% offload \u2014 which made the app tier the busiest component and would have sent a reader out to buy app servers it does not need. Above roughly a one-third edge hit rate the constraint moves onto the payment path, which is where a real ticketing system meets its wall.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "One seat-inventory primary sized at ~3,000 writes/s. A seat decrement takes a row lock, so inventory writes do not scale by adding app servers, and the single primary is a single point of failure this design accepts. CORRECTION \u2014 this blueprint previously called the primary 'deliberately the lowest capacity in the design' and 'the component a flash sale actually breaks'; both were wrong against its own component list. At the stated 8,000 req/s with a 7% book share the design charges 560 cards/s, against 3,000 writes/s of primary capacity but only 800 charges/s of assumed PSP allowance \u2014 the payment path is the tighter of the two by a wide margin, and it is what a flash sale hits first. The row-locked primary is the SECOND wall, and the one you genuinely cannot buy your way out of by adding instances.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Booking writes are serialised through a queue so two buyers cannot take the same seat. The engine models the queue as a service centre with a rate; it does NOT model ordering, hold timers, or the oversell that a lost message would cause. Correctness of the reservation protocol is out of scope here.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Seat-availability reads are served from Redis with an assumed ~88% hit rate on the browse traffic that reaches the origin (browse replica visit_prob 0.06 = 0.12 Redis misses \u00d7 the 0.5 of browse that misses the CDN edge). During a sale the availability map churns on every purchase, so this hit rate is optimistic exactly when it matters most.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pay",
+      "statement": "'Payment service' is the tier YOU run, but its throughput is set by the PSP, not by your connection pool \u2014 which was this blueprint's second defect: it was sized at 400 charges/s per instance from ~150 ms per charge and ~60 in-flight requests, a measure of your own pool that ignores the ceiling the vendor enforces. Stripe documents a live-mode limit of 100 requests/second per account globally (25/s for individual endpoints), returns HTTP 429 with a Stripe-Rate-Limited-Reason header, names 'a sudden increase in charge volume, such as a flash sale' as a cause and tells you to contact support in advance (https://docs.stripe.com/rate-limits). The tier is therefore modelled as 8 units of that documented 100/s = 800 charges/s of allowance, against the 560 charges/s this workload generates. Read the 8 as a REQUIREMENT this design places on its PSP \u2014 a raised limit agreed before the sale, or charge volume spread across several merchant accounts or providers \u2014 not as a vendor capability Keystone has verified; there is no published figure for what a ticketing platform is actually granted. On one account at the published default, 560 charges/s is 5.6\u00d7 over the ceiling and the design does not run at all. Keystone still assigns no per-instance price to the third party itself \u2014 inventing one would be a fabricated number \u2014 so the cost line prices only the payment-service instances you run.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "psp_ceiling",
+      "statement": "NOT MODELLED \u2014 read this as the gap it is. The engine models the PSP allowance as a queue that degrades gracefully (M/M/c). A vendor rate limit is a cliff, not a queue: past it you get an immediate HTTP 429 and the charge does not happen, so response time stays flat while the FAILURE rate jumps. The v1 engine has no way to express that, so read the payment tier's utilisation as 'share of your agreed PSP allowance consumed' and treat anything approaching 100% as an outage, not as a slow checkout. A second gap rides along: because that tier's capacity now encodes vendor allowance rather than CPU, its instance count also drives the cost line as if each 100/s allowance unit were one m6i.large payment-service box. At ~150 ms per charge that is more compute than the tier needs, so the payment tier's cost here is a ceiling, not an estimate.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "waiting_room",
+      "statement": "No virtual waiting room / queue-it front door is modelled. Every real high-demand ticketing system has one, and it is the mechanism that keeps the numbers in this model from being fiction on sale day.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "App tier at ~2,000 req/s per instance across a mixed read/write handler set. With the edge now absorbing half of browse, 6 instances is well above what this steady state needs; that headroom is kept ON PURPOSE for the flash-sale what-if the workload assumption asks you to run, not because the baseline demands it. If you only ever serve the traffic described here, this tier is the first place to take instances out \u2014 and, before this fix, the place a reader would wrongly have added them.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "event_driven",
+    "difficulty": "intermediate",
+    "summary": "Browse-heavy event pages behind an edge cache, in front of a row-locked seat inventory and a rate-limited payment path that a sale saturates first.",
+    "keywords": [
+      "ticket booking",
+      "ticketing",
+      "book tickets",
+      "event tickets",
+      "seat booking",
+      "seat reservation",
+      "ticketmaster",
+      "eventbrite",
+      "box office"
+    ]
+  }
+}

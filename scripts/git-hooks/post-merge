@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Runs after every `git pull` / `git merge`. Keeps the desktop app and dependencies in step with the
+# code you just pulled, so nobody has to remember a rebuild step.
+#
+# Versioned on purpose: `.git/hooks` is not tracked by git, so a hook left there would exist only on
+# the machine that made it. `setup.sh` points git here with `core.hooksPath`, which means the hook
+# arrives WITH the repo and everyone actually has it.
+#
+# Deliberately quiet and never fatal — a hook that fails a pull is a hook people disable.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 0
+
+# Only if the frontend's dependency manifest actually changed.
+if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^frontend/package\(-lock\)\?\.json$'; then
+  printf '\033[2m  keystone: frontend dependencies changed — running npm install…\033[0m\n'
+  ( cd frontend && npm install --silent ) >/dev/null 2>&1 \
+    && printf '\033[2m  keystone: dependencies up to date\033[0m\n' \
+    || printf '\033[33m  keystone: npm install failed — run it by hand in frontend/\033[0m\n'
+fi
+
+# The .app is a launcher pointing at this checkout, so it only needs rebuilding when the launcher
+# itself changes — not on every code pull.
+if [ "$(uname)" = "Darwin" ] && [ -d "$HOME/Applications/Keystone.app" ]; then
+  if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^scripts/\(make-mac-app\.sh\|keystone-local\.sh\)$'; then
+    ./scripts/make-mac-app.sh "$HOME/Applications" >/dev/null 2>&1 \
+      && printf '\033[2m  keystone: desktop app rebuilt\033[0m\n'
+  fi
+fi
+exit 0

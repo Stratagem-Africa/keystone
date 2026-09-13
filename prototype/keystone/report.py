@@ -266,7 +266,8 @@ def render(model: SystemModel, adrs: list[ADR], sim: SimulationResult,
     if len(sim.flow_latencies) > 1:
         L.append("## Per-flow latency")
         L.append("")
-        L.append("_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). "
+        L.append("_Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier's "
+                 "instance count; percentiles from the sojourn distribution, optional hops as a mixture). "
                  "The headline latency above is the **dominant** flow; a minority flow on a different "
                  "path can differ sharply — confirm the path that matters to your users._")
         L.append("")

@@ -4,6 +4,7 @@ Run from prototype/:  python3 -m unittest discover -s tests -v
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import random
 import unittest
@@ -132,7 +133,21 @@ class TestSimulation(unittest.TestCase):
                 sim = simulate(model)
                 for cid, r in sim.components.items():
                     self.assertTrue(math.isfinite(r.utilization) and r.utilization >= 0.0)
-                    self.assertTrue(math.isfinite(r.mean_latency_ms) and r.mean_latency_ms >= 0.0)
+                    # Latency is finite BELOW saturation and infinite at or above it. This invariant
+                    # used to demand finiteness UNCONDITIONALLY, which was satisfiable only because
+                    # the engine clamped rho at 0.999 — so the test was pinning the clamp artifact
+                    # as a contract, and the bug (46,051.7ms returned identically at 100x, 1,000x
+                    # and 1,000,000x load) was untestable by construction. An overloaded queue has
+                    # no finite mean; saying it does is the lie, not the omission.
+                    if r.utilization < 1.0:
+                        self.assertTrue(
+                            math.isfinite(r.mean_latency_ms) and r.mean_latency_ms >= 0.0,
+                            f"{r.name}: stable (rho={r.utilization}) must have finite latency")
+                    else:
+                        self.assertEqual(
+                            r.mean_latency_ms, math.inf,
+                            f"{r.name}: saturated (rho={r.utilization}) must report unbounded "
+                            f"latency, never a clamped constant")
                 self.assertLessEqual(sim.p50_ms, sim.p95_ms)
                 self.assertLessEqual(sim.p95_ms, sim.p99_ms)
                 if sim.bottleneck_id is not None:
@@ -193,3 +208,96 @@ class TestEngineAuditFixes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QueueLatencyHonestyTest(unittest.TestCase):
+    """A queue's sojourn is summed into user-facing latency, because the engine has no async path.
+
+    That is right for a synchronous hop and wrong for the usual reason a queue exists. Until the v2
+    discrete-event engine can model a drain, the honest move is to say so wherever a queue actually
+    sits on a modelled flow — silence would present a background wait as user latency (docs/03).
+    """
+
+    MARKER = "SYNCHRONOUS hop"
+
+    def test_caveat_appears_when_a_queue_is_on_a_flow(self):
+        result = simulate(ticket_booking.build())
+        queues = [c.name for c in ticket_booking.build().components.values()
+                  if c.kind is ComponentKind.QUEUE]
+        self.assertTrue(queues, "fixture must contain a queue for this test to mean anything")
+        hits = [c for c in result.caveats if self.MARKER in c]
+        self.assertEqual(len(hits), 1, "exactly one queue caveat")
+        for name in queues:
+            self.assertIn(name, hits[0], "the caveat must name the queue it is about")
+        self.assertIn("backlog", hits[0].lower())
+
+    def test_no_caveat_when_there_is_no_queue(self):
+        result = simulate(url_shortener.build())
+        self.assertFalse([c for c in result.caveats if self.MARKER in c],
+                         "a design without a queue must not carry a queue caveat")
+
+    def test_the_engine_maths_stays_kind_agnostic(self):
+        """The caveat is prose. If a future change makes a NUMBER depend on kind, this fails —
+        the engine's contract is that behaviour comes from capacity and service time alone."""
+        import inspect
+        import keystone.simulation as sim
+        source = inspect.getsource(sim)
+        numeric = source.split("caveats = [")[0]   # everything before the caveat block
+        self.assertNotIn("ComponentKind.", numeric,
+                         "the numeric path must not branch on ComponentKind")
+
+
+class UnpricedDesignHonestyTest(unittest.TestCase):
+    """A design with no prices is UNPRICED, not free.
+
+    The LLM design path never asks the model for a cost (ingestion.py sets it to 0 — the council
+    must not author numbers), so an intent-designed architecture reports $0.00/month. Left silent,
+    that is a confidently wrong headline sitting beside a real 20-component design.
+    """
+
+    MARKER = "COST IS NOT MODELLED"
+
+    def test_a_priced_design_carries_no_cost_caveat(self):
+        self.assertFalse([c for c in simulate(url_shortener.build()).caveats if self.MARKER in c])
+
+    def test_an_unpriced_design_says_so(self):
+        model = url_shortener.build()
+        free = dataclasses.replace(model, components={
+            k: dataclasses.replace(c, monthly_cost_per_instance=0)
+            for k, c in model.components.items()})
+        result = simulate(free)
+        hits = [c for c in result.caveats if self.MARKER in c]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(result.monthly_cost, 0, "the number is still zero — the caveat explains it")
+        self.assertIn("not a free architecture", hits[0])
+
+
+class HandBuiltBlueprintsMeetTheSameGateTest(unittest.TestCase):
+    """The library gate is applied to `blueprints/library/*.json` and was NEVER applied to the
+    hand-built tier-1 blueprints — so `twitter.build()` shipped at rho EXACTLY 1.000 (9,000 writes/s
+    onto a 9,000 rps primary), a reference architecture that cannot serve its own stated load. It
+    looked fine only because the old rho=0.999 latency clamp printed a comfortable 51ms for it.
+
+    Same rule, same reason, now on both: "a reference architecture that is already saturated as
+    shipped is not a reference, it is a bug someone will copy" (blueprint_library.py:12-14).
+    """
+
+    def test_no_hand_built_blueprint_ships_saturated(self):
+        from keystone.blueprints import payments, ticket_booking, twitter, url_shortener
+        from keystone.simulation import SAFE_UTILIZATION
+        for build in (url_shortener.build, payments.build, ticket_booking.build, twitter.build):
+            model = build()
+            with self.subTest(model.name):
+                r = simulate(model)
+                self.assertLessEqual(
+                    r.bottleneck_utilization, SAFE_UTILIZATION,
+                    f"{model.name}: '{r.bottleneck_name}' at {r.bottleneck_utilization:.1%} exceeds "
+                    f"the {SAFE_UTILIZATION:.0%} ceiling — it cannot ship as a reference design")
+
+    def test_and_therefore_every_one_has_a_finite_latency(self):
+        """The direct consequence, asserted separately so a regression names the right cause."""
+        from keystone.blueprints import payments, ticket_booking, twitter, url_shortener
+        for build in (url_shortener.build, payments.build, ticket_booking.build, twitter.build):
+            model = build()
+            with self.subTest(model.name):
+                self.assertTrue(math.isfinite(simulate(model).mean_latency_ms))

@@ -3,6 +3,10 @@
 # test/lint signal that gates every merge. Zero-dependency: the engine + council +
 # ingestion + reconciliation tests need no pip install and no API key ($0).
 #
+# Covers BOTH halves of the repo. It used to be Python-only, which meant no eslint, no tsc and no
+# `next build` ever ran here — a lint error reached main in #140, and a CSS regression that only
+# manifested in `next dev` went unnoticed for weeks. See scripts/check-frontend.sh.
+#
 #   scripts/check.sh        # run from anywhere in the repo
 #
 # Exit 0 = safe to merge (after review). Non-zero = do not merge.
@@ -46,20 +50,34 @@ echo; echo "==> Corpus gate  (curated grounding datapoints pass the curation QA)
 python3 -m keystone.benchmarks.validate_corpus 2>&1 | tail -n 1
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 
-if command -v ruff >/dev/null 2>&1; then
-  echo; echo "==> ruff check ."
-  ruff check . || status=1
+# ruff / mypy — run whether installed on PATH OR only importable as a module (`python -m ruff`).
+# A module-only install used to report "skipped" and the gate went GREEN without ever linting —
+# that's how 7 ruff errors + a mypy error sat unnoticed. Only a genuine "not installed at all" now
+# skips, which keeps the $0 zero-dep clean-checkout gate green by design.
+if command -v ruff >/dev/null 2>&1; then ruff_cmd="ruff"
+elif python3 -c "import ruff" >/dev/null 2>&1; then ruff_cmd="python3 -m ruff"
+else ruff_cmd=""; fi
+if [ -n "$ruff_cmd" ]; then
+  echo; echo "==> ruff check .  ($ruff_cmd)"
+  $ruff_cmd check . || status=1
 else
   echo; echo "==> ruff: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
 
-if command -v mypy >/dev/null 2>&1; then
-  echo; echo "==> mypy (prototype/api)"
-  (cd "$root" && mypy) || status=1
+if command -v mypy >/dev/null 2>&1; then mypy_cmd="mypy"
+elif python3 -c "import mypy" >/dev/null 2>&1; then mypy_cmd="python3 -m mypy"
+else mypy_cmd=""; fi
+if [ -n "$mypy_cmd" ]; then
+  echo; echo "==> mypy (prototype/api)  ($mypy_cmd)"
+  (cd "$root" && $mypy_cmd) || status=1
 else
   echo; echo "==> mypy: skipped (not installed — pip install 'keystone[dev,api,db]')"
 fi
 
+# Frontend half of the gate. Kept in its own script so it can be run alone during UI work, and so a
+# missing node_modules skips cleanly instead of failing a Python-only clone.
+echo
+"$root/scripts/check-frontend.sh" || status=1
 
 echo
 if [ "$status" -eq 0 ]; then

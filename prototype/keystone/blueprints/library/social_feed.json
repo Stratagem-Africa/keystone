@@ -1,0 +1,548 @@
+{
+  "spec_version": 1,
+  "name": "Social Media Feed",
+  "workload": {
+    "system_rps": 25000,
+    "description": "Event-driven feed: writes publish to a bus, stream workers materialise per-user feeds, reads are cache-served"
+  },
+  "components": [
+    {
+      "id": "gw",
+      "kind": "api_gateway",
+      "name": "API gateway (auth, throttle, route)",
+      "per_instance_rps": 20000,
+      "instances": 2,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 21600000000,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "read",
+      "kind": "app_server",
+      "name": "Feed read API",
+      "per_instance_rps": 2500,
+      "instances": 12,
+      "base_latency_ms": 9.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "ingest",
+      "kind": "app_server",
+      "name": "Event ingest API (producer)",
+      "per_instance_rps": 3000,
+      "instances": 2,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka event bus",
+      "per_instance_rps": 30000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 15330,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15330.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15330.0,
+          "confidence_high": 15330.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.21/broker-hour x 730 = 15330c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.m5.large"
+      }
+    },
+    {
+      "id": "graph",
+      "kind": "app_server",
+      "name": "Social graph service (follower lists)",
+      "per_instance_rps": 5000,
+      "instances": 2,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "builder",
+      "kind": "app_server",
+      "name": "Feed materialiser (stream consumer)",
+      "per_instance_rps": 158,
+      "instances": 10,
+      "base_latency_ms": 20.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis materialised per-user feeds",
+      "per_instance_rps": 100000,
+      "instances": 3,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL source of truth (posts, graph) - 2 shards",
+      "per_instance_rps": 8000,
+      "instances": 2,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 6000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Event archive / cold storage",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 20.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 25000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "read_feed",
+      "share": 0.95,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "read",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.08
+        }
+      ]
+    },
+    {
+      "name": "publish_post",
+      "share": 0.015,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ingest",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "graph",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "builder",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 150.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "engagement_event",
+      "share": 0.03,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ingest",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "builder",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "archive_read",
+      "share": 0.005,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "read",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "25,000 req/s peak. Mix: 95% feed reads (~23,750/s), 1.5% publish (~375 posts/s), 3% engagement events (~750/s), 0.5% archive/analytics reads. CORRECTED from an earlier 72/18/8/2 mix, which implied a 2.8:1 read:write ratio. Two primary sources put a real feed one to two orders of magnitude further read-heavy than that: Facebook's TAO paper (USENIX ATC'13), from a random sample of 6.5 million requests over a 40-day period, states 'Reads dominate, with only 0.2% of requests involving a write'; and Raffi Krikorian's 'Twitter Timelines at Scale' deck gives '>300k qps' of poll-based timeline reads against '~5K/sec' tweets on a daily average, about 60:1. Engagement is now set ABOVE publish because TAO's measured write breakdown is 52.5% assoc (edge/engagement) adds versus 16.5% obj (object/post) adds, roughly 3:1 - the old mix had it backwards. The old mix also implied 4,500 posts/s, close to Twitter's ENTIRE global tweet rate in 2012, while serving only ~6% of Twitter's timeline QPS: not internally coherent as one system. The exact 95/1.5/3/0.5 split is an ASSUMPTION chosen to sit inside those two published ratios, not a measured mix.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "read",
+      "statement": "Feed read API sized at ~2,500 rps/instance - assemble an already-materialised feed from the cache, hydrate and serialise JSON (the sibling twitter_clone uses 2,000 rps/instance for a comparable tier). At the corrected 95%-read mix this tier carries ~23,875 rps and is the binding constraint of the design; the reader who wants more headroom should add read instances or trim the payload, NOT buy stream consumers. It is sized at 12 instances rather than 11 because 11 would put the tier above the library's 85% run-hot ceiling at this load, and a reference architecture that ships saturated is a bug people copy. No public rps-per-instance figure exists for a feed-assembly tier, so the 2,500 is an ASSUMPTION.",
+      "confidence": "low",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "FAN-OUT IS NOW EXPLICIT AT THE CACHE. Each published post becomes ~150 per-follower feed writes, so the publish flow visits the feed cache at visit_prob 150.0 (the same device youtube.json uses for a 6-rendition transcode fan-out). Previously that flow visited the cache at 1.0 while the 150x lived only in the materialiser's capacity, which understated the cache's real write load by ~28x - and on this design's OWN stated fan-out the cache, not the materialiser, was then the binding constraint. The two encodings are NOT double counting: the materialiser's derated capacity prices the CPU and network cost of issuing 150 writes per consumed message (its arrival count stays literal messages), while the cache's visit multiplier counts the writes that actually land on it.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "graph",
+      "statement": "ADDED: a social graph service (follower lists) on the publish path, before the materialiser. The fan-out cannot happen without reading the author's follower list, and that read is what sets the whole write-amplification cost - leaving it out hid the single most important dependency of a fan-out-on-write design. It is read once per published post (visit_prob 1.0); the materialised read path never touches it, which is exactly what fan-out-on-write buys you. Its price is copied from the m6i.large row already grounded on the Feed read API and the materialiser in this same file - no price was invented. Its capacity (~5,000 follower-list reads/s per instance) and 3 ms service time are ASSUMPTIONS: nobody publishes a follower-list-read throughput. Two instances are for availability and for holding the graph working set, not for throughput.",
+      "confidence": "low",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ingest",
+      "statement": "The producer tier takes only the write flows - ~1,125 req/s under the corrected mix. Two instances are the HA minimum, not a throughput sizing. The previous four were sized for the old 4,500-posts/s mix and would now sit near idle, which is the kind of over-provisioning a reference design should not teach.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "The event archive is fed only by the publish flow, so correcting the mix cuts the archived event rate ~12x (4,500/s to 375/s) and the stated volume is scaled by the same factor (300,000 GB to 25,000 GB) at an unchanged retention window. The 12x RATIO follows from the corrected mix; the ABSOLUTE figure is an ASSUMPTION, because this reference publishes neither a retention policy nor an average archived-object size.",
+      "confidence": "low",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The SQL source-of-truth storage is deliberately NOT rescaled with the corrected mix and stays at 6,000 GB: it is assumed to be dominated by users and the follower graph, which grow with population rather than with post rate. The split between post rows and graph rows is not modelled, so this figure carries more uncertainty than the compute sizing does.",
+      "confidence": "low",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "scope",
+      "statement": "TRADE-OFF THE READER MUST SEE: fan-out-on-write, the pattern this blueprint models, is the MINORITY published choice at large scale, and the alternative is not modelled here. Facebook's Multifeed redesign (engineering.fb.com, 10 Mar 2015) builds News Feed at READ time - 'each aggregator fanned out the request to all the leaves to fetch data, rank and filter data', with 'usually 20 leaf servers ... make up one full replica'. LinkedIn's FollowFeed (31 Mar 2016) explicitly rejected materialisation because 'data size with this model was 62 times greater than pull based architecture', on top of the cost of regenerating every pre-materialised feed each time the relevance model changes. Treat this design as one of two valid shapes: the 150x write amplification, the Redis feed tier and the materialiser fleet are the PRICE of a cheap read path, and a read-time (pull) design trades them for a much heavier read tier and a fan-out-on-read query.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "scope",
+      "statement": "Media delivery (a CDN and an image/video path) is OUT of this reference. That is a deliberate L0 simplification rather than an oversight - media bytes never touch the materialiser or the feed cache, so they cannot move this design's bottleneck - but they WOULD dominate the egress bill, so the cost figure here excludes media delivery entirely and is a floor for a real photo/video feed.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "builder",
+      "statement": "The materialiser is NOT the constraint here - the feed read API is, and that correction is the point of this blueprint. The materialiser consumes one bus message per event: a post fans out to ~150 follower feeds, an engagement event is a 1:1 counter update. Its per-instance capacity is RECONCILED with the sibling twitter_clone blueprint, which sizes the same class of worker at ~8,000 timeline-cache writes/s per instance. At the corrected mix (375 posts/s + 750 engagements/s = ~50.7 cache writes per consumed message on average) that same 8,000 writes/s budget clears ~158 messages/s per instance. The previous 900 messages/s implied ~93,700 cache writes/s per instance - 11.7x the sibling's figure for the same component, a contradiction inside one corpus with no source behind it. No vendor publishes a per-instance fan-out-worker throughput; 8,000 writes/s is this corpus's own stated budget carried across for consistency, not a measurement, so this stays an ASSUMPTION with low confidence. Note the blended figure moves with the post:engagement ratio - change the mix and this capacity must be re-derived.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Feed reads are 100% cache-served by design (that is the point of materialising); 8% miss to the source of truth for backfill after an eviction or a cold user",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The source of truth is 2 SHARDS - two instances that each take half the writes. Unlike a Multi-AZ standby, a shard really does add capacity, so modelling it as instances=2 is honest. Each shard is still a single writer with no modelled standby",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "The event bus runs 3 brokers for quorum. Under the corrected mix it carries only the write flows, ~1,125 msg/s, against 3 x 30,000 msg/s of broker capacity: brokers here are an availability choice, not a throughput one. (The earlier '~6,500 msg/s, ~7% loaded' line belonged to the old write-heavy mix and is withdrawn.) The 30,000 msg/s per broker is corroborated by LinkedIn's published Kafka scale (Oct 2019) - '>4,000 brokers', '>100 Kafka clusters', '7 trillion messages per day' - which divides to ~20,000 msg/s per broker on average, so 30,000 is a same-order sizing rather than an invented one.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "gw",
+      "statement": "COST WARNING: at ~21.6 billion requests/month a per-request API gateway is ~$64,800/month - about 20x the entire compute fleet. That is the honest consequence of putting a managed gateway in front of a 25k-rps read path. An ALB plus in-app auth is materially cheaper and is the first thing to challenge in this design",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pricing",
+      "statement": "Monthly usage volumes (egress/storage/requests) are derived from AVERAGE load = peak / 3; capacity and instance counts are sized to PEAK. A single system_rps cannot carry both, so the peak:average ratio is stated here rather than hidden in a volume.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "The engine models steady-state arrivals, not backlog. A consumer running below capacity is shown as healthy; it does NOT model queue-depth growth, consumer lag, or the recovery time after a partition outage. Those are the failure modes that actually hurt an event-driven feed and they are out of scope here",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "scope",
+      "statement": "Ranking/ML scoring, notifications and the moderation pipeline are OUT of this reference. The feed is chronological-with-materialisation",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "event_driven",
+    "difficulty": "advanced",
+    "summary": "Event-driven feed where writes publish to a bus and stream workers materialise per-user feeds.",
+    "keywords": [
+      "social media feed",
+      "news feed",
+      "activity feed",
+      "feed service",
+      "fanout on write",
+      "timeline service",
+      "event driven feed",
+      "materialised feed",
+      "facebook feed",
+      "linkedin feed",
+      "facebook",
+      "linkedin",
+      "reddit",
+      "social app",
+      "friends feed"
+    ]
+  }
+}

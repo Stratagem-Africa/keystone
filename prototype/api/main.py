@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.council import make_council
@@ -23,6 +23,10 @@ from keystone.simulation import simulate
 from keystone.ingestion import scan_and_redact_secrets, IngestError
 from keystone.topology import build_model_from_topology
 from keystone.arch_map import build_arch_map, render_html
+from keystone import scenarios as chaos
+from keystone import remediation
+from keystone import export as spec
+from keystone import loadtest
 from keystone.generate import generate_architecture, match_reference, reference_catalogue
 from api.auth import AuthUser, get_current_user
 from api.jobs import create_job, get_job
@@ -123,6 +127,8 @@ class SimulateRequest(BaseModel):
     system_rps: float = Field(10_000, gt=0, le=10_000_000)
     nodes: list[dict] = Field(default_factory=list)
     edges: list[list[str]] = Field(default_factory=list)
+    render: bool = False   # also return the self-contained interactive HTML map (so an edit re-renders it)
+    sweep: bool = False    # also run the load sweep (one real simulate() per stop) for the load axis
 
 
 @app.post("/simulate")
@@ -134,20 +140,324 @@ def simulate_topology(req: SimulateRequest) -> dict:
     nothing to protect; it's a calculator). Add auth if it ever persists or reads user data.
     Prime directive intact: `build_model_from_topology` only builds INPUTS; `simulate()` is the sole
     source of every number. Fail-closed: an invalid topology yields a clean 400, never a 500/crash.
+
+    With `render: true` the response also carries `html` — the same self-contained interactive map
+    `render_html` produces (same XSS-hardening as /generate), so an edited topology re-renders the
+    beautiful animated map, not just the JSON verdict.
     """
     try:
         model = build_model_from_topology(
             {"name": req.name, "system_rps": req.system_rps, "nodes": req.nodes, "edges": req.edges})
-    except (IngestError, ValueError, KeyError) as e:
+        sim = simulate(model)
+        arch = build_arch_map(model, sim, sweep=req.sweep or req.render)  # each stop = one real simulate()
+        html = render_html(arch, title=req.name) if req.render else None
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
         raise HTTPException(status_code=400, detail=f"invalid topology: {e}")
-    sim = simulate(model)
-    return _sanitize(build_arch_map(model, sim))
+    if html is not None:
+        arch["html"] = html
+    # The chaos catalogue THIS model can truthfully run (plus what we refuse to fake), so the
+    # panel renders exactly what POST /scenario will accept — a card is never a dead button.
+    arch["scenarios"] = chaos.catalogue_for(model)
+    arch["unmodelled"] = chaos.UNMODELLED
+    return _sanitize(arch)
+
+
+class ScenarioSpecIn(BaseModel):
+    """One scenario in a compound: which one, aimed where, dialled how far."""
+    scenario_id: str = Field(..., min_length=1, max_length=64)
+    target_id: str | None = Field(None, max_length=128)
+    magnitude: float | None = None
+
+
+class ScenarioRequest(SimulateRequest):
+    """The design to perturb, plus which scenario to run.
+
+    The design arrives one of two ways, and they are NOT interchangeable:
+
+    * `intent` — rebuild the generated architecture from the same deterministic, offline path
+      `/generate` used. Use this whenever the user is looking at a generated design.
+    * `nodes`/`edges` — a canvas topology, for a design the user has edited.
+
+    Why the distinction matters: `build_model_from_topology` reconstructs flows with every step at
+    `visit_prob = 1.0`, because a drawn canvas carries no branch probabilities. A generated
+    blueprint does carry them (a 10% cache-miss path, say). Rebuilding a generated design from its
+    topology therefore yields a *different model* — one where `cache_cold` is a no-op — so the
+    catalogue offered for the generated design would not match what actually ran. Passing `intent`
+    keeps the scenario's baseline identical to the design on screen.
+    """
+    intent: str | None = Field(None, max_length=2000)
+    # Single form.
+    scenario_id: str | None = Field(None, min_length=1, max_length=64)
+    target_id: str | None = Field(None, max_length=128)
+    magnitude: float | None = None
+    # Compound form: several scenarios at once ("the cache is cold AND the database is slow").
+    # A compound is not the sum of its parts' verdicts — each perturbation changes the arrivals the
+    # next one lands on — so they are composed into ONE model and the engine runs once on it.
+    specs: list[ScenarioSpecIn] | None = None
+
+    @model_validator(mode="after")
+    def _one_form_only(self):
+        if bool(self.scenario_id) == bool(self.specs):
+            raise ValueError("provide exactly one of `scenario_id` or `specs`")
+        return self
+
+
+class LoadTestRequest(SimulateRequest):
+    """The design to generate a load-test plan for. Same intent-vs-topology rule as /scenario."""
+    intent: str | None = Field(None, max_length=2000)
+    base_url: str = Field("http://localhost:8080", max_length=500)
+    duration_s: int = Field(60, gt=0, le=3600)
+
+
+@app.post("/loadtest")
+def emit_loadtest(req: LoadTestRequest) -> dict:
+    """Emit a k6 script whose thresholds ARE the engine's predictions.
+
+    The only artifact in this space that can exist: a load test can assert a threshold only if
+    something made a falsifiable prediction first. Running it tries to prove the engine wrong, and
+    the summary feeds `keystone.actuals` — the L0 → L1 calibration path (docs/03).
+
+    Deterministic renderer, no LLM. Every numeric literal in the emitted file is a declared constant
+    naming its source, and `limits` states what the test cannot prove (notably that k6 measures
+    client-observed wall time, which includes a network the engine does not model).
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+        sim = simulate(model)
+        plan = loadtest.build_plan(model, sim, duration_s=req.duration_s)
+        script = loadtest.render_k6(plan, base_url=req.base_url)
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not build a load-test plan: {e}")
+
+    slug = "".join(ch if ch.isalnum() else "-" for ch in model.name.lower()).strip("-") or "design"
+    return _sanitize({
+        "script": script,
+        "filename": f"{slug}.k6.js",
+        "scenarios": [dict(s) for s in plan.scenarios],
+        "literals": [{"name": x.name, "value": x.value, "source": x.source, "why": x.why}
+                     for x in plan.literals],
+        "limits": list(loadtest.EMITTER_LIMITS),
+    })
+
+
+class ExportRequest(SimulateRequest):
+    """The design to serialise. Same intent-vs-topology rule as /scenario and /remediate."""
+    intent: str | None = Field(None, max_length=2000)
+
+
+@app.post("/export")
+def export_spec(req: ExportRequest) -> dict:
+    """Serialise a design to the spec file docs/05 §4 specifies — the artifact you commit.
+
+    Inputs only: the spec carries the model, never a verdict, so re-importing it and running the
+    engine reproduces the run rather than replaying a stale one. Stateless, unauthenticated, and it
+    persists nothing — the file is the user's to keep.
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not export: {e}")
+    slug = "".join(ch if ch.isalnum() else "-" for ch in model.name.lower()).strip("-") or "design"
+    return _sanitize({
+        "spec": spec.to_dict(model),
+        "filename": f"{slug}.keystone.json",
+        "orphans": spec.orphans(model),   # unwired components: a design smell worth showing
+    })
+
+
+class ImportRequest(BaseModel):
+    """A previously exported spec file."""
+    spec: dict
+
+
+@app.post("/import")
+def import_spec(req: ImportRequest) -> dict:
+    """Load a spec file → the engine's verdict + architecture map, exactly as if freshly designed.
+
+    Fail-closed: an unknown spec version, an unknown component kind, a dangling flow reference or a
+    model the engine would reject yields a clean 400 naming the problem — never a partial load.
+    """
+    try:
+        model = spec.from_dict(req.spec)
+        sim = simulate(model)
+        arch = build_arch_map(model, sim, sweep=True)
+    except spec.ExportError as e:
+        raise HTTPException(status_code=400, detail=f"invalid spec file: {e}")
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"spec could not be simulated: {e}")
+    arch["scenarios"] = chaos.catalogue_for(model)
+    arch["unmodelled"] = chaos.UNMODELLED
+    arch["orphans"] = spec.orphans(model)
+    return _sanitize(arch)
+
+
+class RemediateRequest(SimulateRequest):
+    """The design to size, plus the load to size it for. Same intent-vs-topology rule as /scenario."""
+    intent: str | None = Field(None, max_length=2000)
+    target_rps: float | None = Field(None, gt=0, le=10_000_000)
+
+
+@app.post("/remediate")
+def remediate(req: RemediateRequest) -> dict:
+    """Given a design and a load, propose the smallest instance change that keeps it under the ceiling.
+
+    Same stateless-calculator contract as /simulate and /scenario (no auth, no persistence).
+
+    Prime directive intact: `remediation.plan_capacity` chooses only INPUTS (instance counts) and
+    re-runs `simulate()` to decide whether they worked; `before` and `after` are two real engine runs
+    and the cost delta is their difference in integer minor units. Where a component cannot honestly
+    be sized by adding instances — a single-writer primary, a third-party dependency — the planner
+    returns a BLOCKER carrying the architectural options rather than a fabricated number.
+    """
+    try:
+        if req.intent:
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+        plan = remediation.plan_capacity(model, req.target_rps)
+        after_arch = build_arch_map(
+            dataclasses.replace(
+                model,
+                components={
+                    **model.components,
+                    **{r.component_id: dataclasses.replace(
+                        model.components[r.component_id], instances=r.to_instances)
+                       for r in plan.remedies},
+                },
+                workload=dataclasses.replace(model.workload, system_rps=plan.target_rps),
+            ),
+            plan.after,
+        )
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"could not plan capacity: {e}")
+
+    return _sanitize({
+        "target_rps": plan.target_rps,
+        "ceiling": plan.ceiling,
+        "holds": plan.holds,
+        "verdict": plan.verdict,
+        "remedies": [r.to_dict() for r in plan.remedies],
+        "blockers": [b.to_dict() for b in plan.blockers],
+        "monthly_cost_delta_cents": plan.monthly_cost_delta_cents,
+        "before": {
+            "bottleneck_name": plan.before.bottleneck_name,
+            "bottleneck_utilization": plan.before.bottleneck_utilization,
+            "mean_latency_ms": plan.before.mean_latency_ms,
+            "monthly_cost_cents": plan.before.monthly_cost,
+            "confidence": plan.before.confidence,
+        },
+        "after": {
+            "bottleneck_name": plan.after.bottleneck_name,
+            "bottleneck_utilization": plan.after.bottleneck_utilization,
+            "mean_latency_ms": plan.after.mean_latency_ms,
+            "monthly_cost_cents": plan.after.monthly_cost,
+            "confidence": plan.after.confidence,
+        },
+        "after_map": after_arch,   # the fixed design, ready to render on the canvas
+        "limits": list(plan.limits),
+        "derivation": plan.derivation,
+    })
+
+
+@app.post("/scenario")
+def run_chaos_scenario(req: ScenarioRequest) -> dict:
+    """Run a chaos scenario as a counterfactual: simulate the design, then simulate it perturbed.
+
+    Same stateless-calculator contract as /simulate (no auth, no persistence, no secrets).
+
+    Prime directive intact: `keystone.scenarios` only ever returns a modified `SystemModel`;
+    `simulate()` runs twice and is the sole author of every number on both sides. The `delta`
+    block is arithmetic over those two engine runs and carries its own derivation trace.
+    Fail-closed: an unknown scenario, a wrong-kind target, or one the model cannot express yields
+    a clean 400 — never a silent no-op that would show an unchanged design as "survived".
+    """
+    try:
+        if req.intent:
+            # Same deterministic offline path /generate used, so the baseline is byte-for-byte the
+            # design on screen — including flow branch probabilities a topology cannot carry.
+            model = generate_architecture(req.intent, provider="stub")
+        else:
+            model = build_model_from_topology(
+                {"name": req.name, "system_rps": req.system_rps,
+                 "nodes": req.nodes, "edges": req.edges})
+        if req.specs:
+            specs = [chaos.ScenarioSpec(s.scenario_id, s.target_id, s.magnitude) for s in req.specs]
+        elif req.scenario_id is not None:   # narrows str | None -> str for mypy; the validator guarantees it
+            specs = [chaos.ScenarioSpec(req.scenario_id, req.target_id, req.magnitude)]
+        else:   # unreachable — the model_validator requires exactly one of scenario_id / specs
+            raise HTTPException(status_code=400, detail="provide exactly one of `scenario_id` or `specs`")
+        result = chaos.run_compound(model, specs)
+        perturbed_model = model
+        for spec in specs:
+            perturbed_model = chaos.apply_scenario(
+                perturbed_model, spec.scenario_id, spec.target_id, spec.magnitude)
+        baseline_arch = build_arch_map(model, result.baseline, sweep=req.render)
+        perturbed_arch = build_arch_map(perturbed_model, result.perturbed, sweep=req.render)
+    except (IngestError, ValueError, KeyError, ArithmeticError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid scenario request: {e}")
+
+    return _sanitize({
+        "scenario": {
+            "id": result.scenario_id, "name": result.scenario_name,
+            "category": result.category, "question": result.question, "caveat": result.caveat,
+            "target_id": result.target_id, "target_name": result.target_name,
+            "applied": list(result.applied),
+        },
+        "baseline": baseline_arch,
+        "perturbed": perturbed_arch,
+        "delta": {
+            "verdict": result.verdict,
+            "survives": result.survives,
+            "bottleneck_moved": result.bottleneck_moved,
+            "latency_multiple": result.latency_multiple,
+            "utilization_delta": result.utilization_delta,
+            "baseline_latency_ms": result.baseline.mean_latency_ms,
+            "perturbed_latency_ms": result.perturbed.mean_latency_ms,
+            "baseline_bottleneck": result.baseline.bottleneck_name,
+            "perturbed_bottleneck": result.perturbed.bottleneck_name,
+            "baseline_confidence": result.baseline.confidence,
+            "perturbed_confidence": result.perturbed.confidence,
+            "derivation": result.derivation,
+        },
+    })
 
 
 class GenerateRequest(BaseModel):
     """A one-line intent ("a platform like Twitter") to turn into a deep architecture."""
     intent: str = Field(..., min_length=1, max_length=2000)
     render: bool = False   # also return a self-contained interactive HTML map (for the frontend studio)
+    sweep: bool = False    # also run the load sweep (one real simulate() per stop) for the load axis
+    # {component_id: instance_count} — "add one of these and show me what happens". The map sends
+    # this when you right-click a tier. Kept as an OVERRIDE on the generated design rather than a
+    # stored edit: this endpoint is stateless, and the engine re-runs from scratch either way, so
+    # the answer you get is a real simulation and not an interpolation.
+    instances: dict[str, int] = Field(default_factory=dict)
+    # "Fix the whole design for me" — let the engine size every tier for today's load instead of
+    # naming counts by hand. This is `remediation.plan_capacity`, which has existed and worked for
+    # weeks with no way to reach it from the canvas.
+    autosize: bool = False
+
+    @field_validator("instances")
+    @classmethod
+    def _sane_instances(cls, v: dict[str, int]) -> dict[str, int]:
+        # Fail closed. 0 instances is a component that does not exist (hard_node_failure — UNMODELLED),
+        # and an unbounded count would let a caller ask for an arbitrarily expensive simulate().
+        for cid, n in v.items():
+            if not isinstance(n, int) or not (1 <= n <= 10_000):
+                raise ValueError(f"instances[{cid}] must be a whole number from 1 to 10,000")
+        return v
 
 
 @app.post("/generate")
@@ -171,8 +481,25 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     """
     try:
         model = generate_architecture(req.intent, provider="stub")  # public surface: offline, $0, no LLM
+        # Apply any right-click "add one of these" BEFORE simulating, so every number downstream —
+        # utilisation, breakpoint, latency, cost — is a real engine result for the edited design,
+        # never the original's numbers with a component drawn on top.
+        for cid, n in (req.instances or {}).items():
+            if cid not in model.components:
+                raise KeyError(f"no component {cid!r} in this design")
+            model.components[cid].instances = n
+        # AFTER the manual edits, not before. "Fix the whole design for me" has to fix what is on
+        # the screen — including the tier you just shrank. Running it first meant the override then
+        # re-broke the design and the button appeared to do nothing.
+        if req.autosize:
+            # Size for the load the design already declares. The plan re-simulates to prove it
+            # holds, and refuses the tiers it cannot fix by adding instances (a single-writer
+            # primary, a third party's quota) — those come back as blockers, not silent no-ops.
+            plan = remediation.plan_capacity(model, model.workload.system_rps)
+            for remedy in plan.remedies:
+                model.components[remedy.component_id].instances = remedy.to_instances
         sim = simulate(model)                                        # simulate() is the sole number source
-        arch = build_arch_map(model, sim)
+        arch = build_arch_map(model, sim, sweep=req.sweep or req.render)  # each stop = one real simulate()
         # Render BEFORE attaching catalogue/matched so the embedded JSON island stays the clean arch map
         # (build the map once — no redundant recompute on the hot path).
         html = render_html(arch, title=req.intent[:80]) if req.render else None
@@ -181,6 +508,8 @@ def generate_from_intent(req: GenerateRequest) -> dict:
     ref = match_reference(req.intent)
     arch["matched"] = ref[1] if ref else None       # which reference architecture (null = generic fallback)
     arch["catalogue"] = reference_catalogue()        # the offline options, for a "try one of these" hint
+    arch["scenarios"] = chaos.catalogue_for(model)   # the chaos panel for this generated design
+    arch["unmodelled"] = chaos.UNMODELLED
     if html is not None:
         arch["html"] = html
     return _sanitize(arch)

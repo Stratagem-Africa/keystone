@@ -50,9 +50,21 @@ class TestSimulateEndpoint(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_nonpositive_rps_rejected_at_edge(self):
-        bad = dict(_TOPO); bad["system_rps"] = 0
+        bad = dict(_TOPO)
+        bad["system_rps"] = 0
         r = client.post("/simulate", json=bad)
         self.assertEqual(r.status_code, 422)   # pydantic gt=0 rejects before the handler
+
+    def test_render_flag_returns_self_contained_html(self):
+        # render:true → the studio can re-render the animated map for an edited topology.
+        r = client.post("/simulate", json={**_TOPO, "render": True})
+        self.assertEqual(r.status_code, 200)
+        html = r.json().get("html", "")
+        self.assertTrue(html.lstrip().lower().startswith("<!doctype html"))
+        self.assertIn("arch-data", html)
+
+    def test_render_omitted_by_default(self):
+        self.assertNotIn("html", client.post("/simulate", json=_TOPO).json())
 
 
 if __name__ == "__main__":

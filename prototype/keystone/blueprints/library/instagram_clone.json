@@ -1,0 +1,626 @@
+{
+  "spec_version": 1,
+  "name": "Instagram Clone",
+  "workload": {
+    "system_rps": 15000,
+    "description": "Photo-first social app; CDN object delivery dominates the request mix, image-rendition CPU dominates compute, and every post fans out one feed row per follower"
+  },
+  "components": [
+    {
+      "id": "cdn",
+      "kind": "cdn",
+      "name": "CDN edge (photo delivery)",
+      "per_instance_rps": 150000,
+      "instances": 1,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 1580000,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Application load balancer",
+      "per_instance_rps": 25000,
+      "instances": 2,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "api",
+      "kind": "app_server",
+      "name": "API tier (feed, profile, explore, engage)",
+      "per_instance_rps": 1800,
+      "instances": 3,
+      "base_latency_ms": 11.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis feed + entity cache",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "feed_store",
+      "kind": "sql_db",
+      "name": "Feed store (wide-column; materialised per-follower feeds)",
+      "per_instance_rps": 8000,
+      "instances": 3,
+      "base_latency_ms": 0.2,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL primary (posts, users, graph)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 4000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "replica",
+      "kind": "replica",
+      "name": "Read replicas (feed backfill, explore)",
+      "per_instance_rps": 8000,
+      "instances": 2,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka upload + fan-out task bus",
+      "per_instance_rps": 30000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "media",
+      "kind": "app_server",
+      "name": "Image rendition workers (4 renditions + moderation hash)",
+      "per_instance_rps": 2.2,
+      "instances": 18,
+      "base_latency_ms": 900.0,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "fanout",
+      "kind": "app_server",
+      "name": "Feed fan-out workers (write one feed row per follower)",
+      "per_instance_rps": 7.5,
+      "instances": 6,
+      "base_latency_ms": 267.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store (originals + renditions)",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 150.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 158000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "feed_scroll",
+      "share": 0.08,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "feed_store",
+          "visit_prob": 4.5
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.15
+        }
+      ]
+    },
+    {
+      "name": "media_fetch",
+      "share": 0.8,
+      "path": [
+        {
+          "component_id": "cdn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 0.1
+        }
+      ]
+    },
+    {
+      "name": "profile_or_explore",
+      "share": 0.03,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.4
+        }
+      ]
+    },
+    {
+      "name": "engage",
+      "share": 0.088,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "upload_post",
+      "share": 0.002,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "media",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fanout",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "feed_store",
+          "visit_prob": 200.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "cdn",
+      "statement": "CDN hit-rate 90% on media; ~150 KB average delivered object across the grid-thumbnail / feed-size / full-size mix (this reference is an image-only pipeline, so there is no video segment in that mix)",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Feed cache hit-rate 85%; profile/explore 60%. Instance count (2) is set by working-set MEMORY and HA, not rps",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The SQL primary is modelled as ONE instance because there is one writer. A Multi-AZ standby is assumed in a real deployment but is NOT modelled as a second instance: it serves no traffic, and the engine would credit it with capacity it does not have. The engine will therefore flag the primary as a single point of failure - that flag is correct about failover, not about capacity.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pricing",
+      "statement": "Monthly usage volumes (egress/storage/requests) are derived from AVERAGE load = peak / 3; capacity and instance counts are sized to PEAK. A single system_rps cannot carry both, so the peak:average ratio is stated here rather than hidden in a volume.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pricing",
+      "statement": "Delivery egress is priced at the model's single flat internet-egress rate ($0.09/GB, the US first paid tier). At the petabyte-per-month volume this design implies, a real committed CDN contract is roughly 5-10x cheaper, so the egress line is an UPPER BOUND, not a quote. The volume (GB/month) is the engineering claim; the rate is not negotiated here.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "scope",
+      "statement": "Stories, DMs, Reels ranking and the recommendation model are OUT of this reference. Explore is modelled as a cached read, not as a live ranking call",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "15,000 req/s peak. The MIX has been re-derived so the shares are internally consistent: 80% media_fetch (CDN object GETs), 8% feed scroll, 3% profile/explore, 8.8% engagement, 0.2% upload (~30 uploads/s peak, ~864k posts/day at average load). Two corrections drive it. (a) media_fetch is now ~10x feed_scroll: a feed response returns a page of ~10 posts, each needing at least one image plus an avatar, so roughly ten CDN objects are fetched per feed API call. The previous 38%/42% split was 0.90 CDN GETs per feed call, which is arithmetically impossible for a photo feed. (b) engagement:upload is now 44:1, Instagram's own published ratio - 4,200,000,000 likes per day (Carl Meyer, 'Instagram Under The Hood', Django Under The Hood, Nov 2016) against '95 million per day' photos and videos shared (Instagram, reported by TechCrunch, 21 Jun 2016) - not the 6:1 this file used. The old 1% upload share (150 uploads/s) was ~5x too high relative to engagement.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "NOT MODELLED - The single system_rps denominator MIXES TWO REQUEST CLASSES - CDN object GETs and API calls - so a share in this file is comparable to the other shares here but NOT to any published API-only request figure. Splitting the denominator (a separate arrival rate for the edge tier) is the correct fix and the engine does not support it today.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "media",
+      "statement": "Rendition capacity is now derived from a PUBLISHED CPU cost instead of an invented rate. Flickr measured 'over 225ms to resize a 2048px JPEG down to 1600px' (code.flickr.net, 25 Jun 2015); four renditions is ~0.9 CPU-seconds per upload, and that same budget is being asked to carry JPEG decode, EXIF strip and the perceptual moderation hash, which the 225ms does not include. A 2-vCPU c7g.large therefore clears 2 / 0.9 = ~2.2 uploads/s - not the 12/s this file previously asserted, a 5.5x correction. Service time is ~900 ms (four renditions in sequence), which is self-consistent: 2.2 rps x 0.9 s = 2 jobs in flight on 2 vCPUs. The old 12/s and the old 150 uploads/s were two large errors pointing in opposite directions; correcting either one alone made this model WORSE, so they are corrected together.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "media",
+      "statement": "NOT MODELLED - VIDEO TRANSCODE IS OUT OF THIS REFERENCE and the omission is too large to leave implicit. Meta published '86.17 seconds of CPU time to transcode a 23-second video to 720p' (engineering.fb.com, 4 Nov 2022) - about 96x what an image upload costs here. At 30 uploads/s, if even 10% were video the transcode fleet alone would need ~130 further 2-vCPU instances and would dwarf every other component in this design. So this blueprint models an IMAGE-ONLY pipeline, which is what a photo-first reference should be. The previous single rate covered '~4 image renditions, OR a short-video transcode' - one number spanning a ~100x range, which could not be right for both. Anyone adding video should first reach for Meta's optimised path, which repackages the client's existing encode instead of re-encoding at '0.36s user' / '2.22s system' = ~2.58 CPU-s, a ~33x reduction.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fanout",
+      "statement": "FEED DISTRIBUTION IS NOW MODELLED. Rick Branson (Instagram), 'Messaging at Scale at Instagram', PyCon US 2013, names the async workload as 'Feed distribution, social sharing, spam and malicious user detection, search indexing' on 'RabbitMQ & Celery' at 'thousands of tasks every second' - feed distribution is fan-out-on-WRITE and is the flagship async task. This design writes one feed row per follower at post time; the multiplier is explicit as visit_prob 200.0 on the upload_post -> feed_store hop, so 30 uploads/s becomes 6,000 feed-row writes/s. That is 4.4x the ENTIRE load this design puts on the Postgres primary (1,350 rps), which is exactly why the feed rows live in a separate append-only store. The previous version of this file had NO fan-out step at all: upload_post stopped at the media worker and nothing wrote to followers, while feeds were read from Redis with a 15% fallthrough to replicas (fan-out-on-READ). Fan-out-on-read is a legitimate architecture - but it was being chosen for the reader silently, and it is the largest scaling decision in a photo-social system.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fanout",
+      "statement": "The fan-out worker rate is the LEAST-EVIDENCED number in this design and there is NO published figure for it - said plainly rather than dressed up. Reasoned: one task writes 200 feed rows, batched ~50 rows per round trip to the feed store, and a 2-vCPU worker sustaining ~1,500 batched row-writes/s therefore clears 7.5 posts/s (~267 ms per task, ~2 tasks in flight). Sensitivity is high and a reader should re-size against their own measurement: at 5,000 rows/s per worker this fleet is 2 instances; at 500 rows/s it is 16.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "feed_store",
+      "statement": "The feed store is a wide-column, append-only store (Cassandra-shaped) holding materialised per-follower feeds; Instagram's own stack slide lists Cassandra alongside Postgres (Carl Meyer, Django Under The Hood 2016). Keystone has no wide-column component KIND, so it is modelled with the sql_db kind at the same per-node rate this file already uses for a durable row store (8,000 ops/s on a db.r6g.large) - the kind label is a modelling limitation, not a claim that feeds live in Postgres. Its rate is counted in ROW operations, not requests, so the amplification stays visible on both sides: 200 rows written per post, and ~4.5 rows read per feed API call (a ~30-row page, fetched on the 15% feed-cache miss). Three shards, because two would break the 85% ceiling with one shard down.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "api",
+      "statement": "API tier ~1,800 rps/instance (feed assembly from cache plus signed media URLs). The fleet drops from 8 instances to 3 because the corrected mix moves 80% of arrivals to the CDN: the API tier now carries 3,000 rps, not the 9,300 the old share table implied. The 8-instance fleet had been sized against a denominator that counted CDN object GETs as API calls.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "sizing",
+      "statement": "Every fleet here is sized to the SMALLEST instance count that still holds the 85% ceiling with one instance down (N-1), so no count is a round number picked for looks: API 3 (2 instances carry the 3,000 rps at 83%, but lose the ceiling completely with one of them down), rendition workers 18 (17 would be 85.2% degraded), fan-out 6, feed store 3. The exceptions are stated elsewhere: the SQL primary is 1 because there is one writer, and the cache (2), read replicas (2) and Kafka brokers (3) are set by working-set memory, read isolation and the availability-zone floor rather than by rps - which is why they run at a few percent of capacity here.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "Object-store base latency raised from 20 ms to 150 ms, the midpoint of AWS's own published 'consistent small object latencies (and first-byte-out latencies for larger objects) of roughly 100-200 milliseconds' (S3 performance-optimisation docs). Storage re-derived at the corrected upload rate: ~864k posts/day x ~183 days x ~1 MB per post (original plus four renditions) = ~158 TB, down from the 800 TB that assumed 4.3M posts/day.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "DISCLOSURE, not an error: the declared 20,000 rps object-store capacity is above what AWS documents per prefix - 'at least 3,500 PUT/COPY/POST/DELETE or 5,500 GET/HEAD requests per second per partitioned Amazon S3 prefix'. 'There are no limits to the number of prefixes in a bucket', so the capacity is reachable, but ONLY with a key layout that spreads objects across prefixes. This design carries 1,230 rps there, which one prefix covers, so it is not binding today - the reader who raises the media_fetch share is the one who needs to know.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pricing",
+      "statement": "CDN egress volume re-derived from the corrected object-fetch rate: 12,000 CDN GETs/s at peak / 3 = 4,000/s average, x ~150 KB average object, x 2,628,000 s in a 730-hour month = ~1.58 PB/month, up from the 740 TB the old 0.90-objects-per-feed-call ratio produced. The ~150 KB average is UNCHANGED and still low-confidence, and it is self-consistent with the new count: a ~10-object feed page is ~1.5 MB, which is a plausible photo feed page.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "latency",
+      "statement": "MODELLING LIMITATION: the engine walks a flow as a sequence, so upload_post's reported latency is the whole PUBLISH PIPELINE - object PUT, DB write, enqueue, rendition, fan-out, feed writes - not the user's tap-to-acknowledgement. The user's wait ends after the object PUT and the DB row (~170 ms of that path); everything after the queue is asynchronous and shows up here as time-to-visible, not time-to-respond. Read the upload_post figure as 'how long until followers can see the post'.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "advanced",
+    "summary": "Photo-first social app: CDN object delivery dominates the request mix, image-rendition CPU dominates compute, and each post fans out one feed row per follower.",
+    "keywords": [
+      "instagram",
+      "instagram clone",
+      "photo sharing",
+      "photo feed",
+      "photo app",
+      "image feed",
+      "social photo",
+      "pinterest",
+      "flickr"
+    ]
+  }
+}

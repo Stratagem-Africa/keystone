@@ -1,0 +1,327 @@
+{
+  "spec_version": 1,
+  "name": "CI/CD Pipeline",
+  "workload": {
+    "system_rps": 6,
+    "description": "Low request rate, very long jobs: the runner fleet is the whole system"
+  },
+  "components": [
+    {
+      "id": "gw",
+      "kind": "api_gateway",
+      "name": "API gateway (webhooks, status API, artifact URLs)",
+      "per_instance_rps": 20000,
+      "instances": 2,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 5184000,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL (runs, jobs, logs index, run state)",
+      "per_instance_rps": 3000,
+      "instances": 1,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 800,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Job dispatch queue",
+      "per_instance_rps": 5000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "runner",
+      "kind": "app_server",
+      "name": "Build runner fleet (one job per runner at a time)",
+      "per_instance_rps": 0.0033333333,
+      "instances": 190,
+      "base_latency_ms": 300000.0,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store (artifacts, build caches, logs)",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 20.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 40000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "assumption",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "push_build",
+      "share": 0.08,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "runner",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "status_poll",
+      "share": 0.55,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "artifact_io",
+      "share": 0.25,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.2
+        }
+      ]
+    },
+    {
+      "name": "log_tail",
+      "share": 0.12,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "6 req/s peak - CI is a LOW-request, HIGH-work system. Mix: 55% status/badge polling, 25% artifact and cache I/O, 12% log tailing, 8% build triggers (~0.48 builds/s peak, ~14,000 builds/day at average load)",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "runner",
+      "statement": "A runner executes ONE job at a time and the average job takes 5 minutes, so a runner's capacity is 1/300 = 0.0033 jobs/s. Its base_latency_ms is 300,000 - a build really does take five minutes, and the engine is being told the truth rather than a number that looks like a web request. 190 runners hold ~0.48 builds/s at 76% utilisation",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "runner",
+      "statement": "The fleet is sized for PEAK and billed 24/7 at on-demand list price, because the engine models neither autoscaling nor spot. A real fleet scales toward zero off-peak and runs interruptible instances; both together cut this line by roughly 75-85%. Read ~$9.4k/month as the honest ceiling for a statically-provisioned fleet, not as what you would pay",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Everything except the runners sits near 0% utilisation, and that is the correct answer, not a modelling error: the request tier of a CI system is trivial. Sizing here is driven by job DURATION, not by request rate",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "3 brokers for quorum/HA. At ~0.5 jobs/s the queue is effectively idle; it exists for durability of dispatch, not throughput",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The SQL primary is modelled as ONE instance because there is one writer. A Multi-AZ standby is assumed in a real deployment but is NOT modelled as a second instance: it serves no traffic, and the engine would credit it with capacity it does not have. The engine will therefore flag the primary as a single point of failure - that flag is correct about failover, not about capacity.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "40 TB: artifacts, dependency caches and logs with a ~30-day retention",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pricing",
+      "statement": "Monthly usage volumes (egress/storage/requests) are derived from AVERAGE load = peak / 3; capacity and instance counts are sized to PEAK. A single system_rps cannot carry both, so the peak:average ratio is stated here rather than hidden in a volume.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "LATENCY FOR THE BUILD FLOW IS WRONG AND WE KNOW WHY. The engine's per-component sojourn time is an M/M/1 form, service_time / (1 - rho), applied to the fleet's AGGREGATE utilisation. With one server that is right; with 190 servers at 76% it is not - Erlang-C says a job almost never waits, yet the engine inflates a 300-second build to a ~3,700-second p95 (~12x). Read the runner's 76% utilisation and the capacity headroom, which ARE correct; ignore the push_build flow's latency figure. The headline latency of this design is unaffected: the dominant flow is status polling (55% of requests, ~21 ms), which touches no runner.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "What a CI user actually feels is queue WAIT on a bursty morning-commit spike. The engine models steady-state arrivals, not backlog: it will not tell you how deep the job queue gets at 09:05 or how long it takes to drain. Treat 76% as headroom, not as a promise about wait time.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "event_driven",
+    "difficulty": "intermediate",
+    "summary": "Webhook-triggered build pipeline where a long-job runner fleet, not request rate, sets the capacity.",
+    "keywords": [
+      "ci cd",
+      "ci/cd",
+      "continuous integration",
+      "build pipeline",
+      "jenkins",
+      "github actions",
+      "gitlab ci",
+      "buildkite",
+      "circleci",
+      "build system",
+      "deployment pipeline",
+      "ci pipeline",
+      "cicd",
+      "continuous deployment",
+      "deploy pipeline"
+    ]
+  }
+}

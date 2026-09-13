@@ -1,0 +1,346 @@
+{
+  "spec_version": 1,
+  "name": "Distributed Cache",
+  "workload": {
+    "system_rps": 150000,
+    "description": "150k ops/s; Redis Cluster (3 primary shards + 3 replicas, NO proxy tier - slot-aware clients connect straight to the node owning the key), read-through to a Postgres origin whose read replica absorbs the misses"
+  },
+  "components": [
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis Cluster primary shards (3 hash-slot ranges, serve reads AND writes)",
+      "per_instance_rps": 100000,
+      "instances": 3,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "creplica",
+      "kind": "cache",
+      "name": "Redis Cluster replica nodes (failover standbys; carry the async replication stream, not the read stream)",
+      "per_instance_rps": 100000,
+      "instances": 3,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Origin Postgres primary (source of truth)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "dbrep",
+      "kind": "replica",
+      "name": "Origin read replica (serves cache-miss fills)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "get",
+      "share": 0.9,
+      "path": [
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "dbrep",
+          "visit_prob": 0.04
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 0.04
+        },
+        {
+          "component_id": "creplica",
+          "visit_prob": 0.04
+        }
+      ]
+    },
+    {
+      "name": "set",
+      "share": 0.06,
+      "path": [
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "creplica",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "invalidate",
+      "share": 0.02,
+      "path": [
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "creplica",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "origin_write",
+      "share": 0.02,
+      "path": [
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "creplica",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "architecture",
+      "statement": "ARCHITECTURE CHOICE - this file commits to Redis Cluster, and therefore has NO proxy tier. The Redis Cluster specification states its first design goal verbatim: 'High performance and linear scalability up to 1000 nodes. There are no proxies, asynchronous replication is used, and no merge operations are performed on values.' (redis.io, Redis Cluster specification). Routing does not disappear, it MOVES INTO THE CLIENT: a slot-aware client holds the hash-slot map and opens a connection straight to the node that owns the key, following MOVED/ASK redirects. An earlier version of this blueprint put an mcrouter/Envoy-style consistent-hashing proxy in front of nodes it also called 'Redis Cluster', and that proxy came out as the binding tier - sending the reader to go and scale a tier this deployment does not have. If you are actually running memcached + mcrouter then a proxy tier is real and belongs in your model; this file is not that design.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "architecture",
+      "statement": "NOT MODELLED - the calling application tier and anything in front of it. Because routing lives in the Redis client library, there is no separate network hop between the application and the shard for this file to size, so the previous entry tier was removed rather than kept as an L4 load balancer: a single LB VIP in front of a cluster-mode deployment breaks the direct-to-slot path that MOVED redirects assume. Budget the app tier separately - this blueprint sizes the cache and the origin it protects, nothing else.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "150,000 cache ops/s peak, 90% GET / 6% SET / 2% explicit invalidate / 2% write-through to the origin.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "The 90/6/2/2 split is a teaching default, NOT a measured trace. The OSDI '20 Twitter study of in-memory caching (Yang, Yue, Rashmi; '153 in-memory cache clusters') reports that real cache workloads are bimodal rather than uniformly read-heavy - 'many are far more write-heavy or more skewed than previously shown' - and the published twitter/cache-trace corpus names 'write-heavy workloads: cluster12, cluster15, cluster31, cluster37' among '54 clusters in Mar 2020'. If yours is one of those, re-run with a higher SET share: writes land on the primaries and their replicas, not on the origin read path, so the load moves to a different tier.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "96% hit rate on the GET path - a teaching default, with no measured figure behind it. A GET goes to the primary owning the key's hash slot (`cache`, visit_prob 1.0). The 4% that miss read the origin read replica AND write the value back to that primary, which is why `dbrep` carries visit_prob 0.04 and `cache` carries a SECOND 0.04 step on the same flow, with the fill replicated to `creplica` at 0.04. Hit rate is the strongest lever in this design: it is the direct multiplier on everything downstream of a miss, so a move from 96% to 92% doubles the origin read rate.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "creplica",
+      "statement": "READS GO TO THE PRIMARIES by default; the replicas here are failover capacity, not a read tier. The Redis Cluster spec: 'Normally replica nodes will redirect clients to the authoritative master for the hash slot involved in a given command, however clients can use replicas in order to scale reads using the READONLY command. READONLY tells a Redis Cluster replica node that the client is ok reading possibly stale data.' An earlier version of this blueprint routed 100% of GETs to READONLY replicas without stating that cost, which also left the primaries looking almost idle. If you do enable READONLY, you are accepting stale reads by the spec's own words: 'Redis Cluster uses asynchronous replication between nodes... There is always a window of time when it is possible to lose writes during partitions.'",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "creplica",
+      "statement": "NO INVALIDATION BUS. An earlier version fanned every write through a Kafka topic out to each shard and replica; that duplicates work Redis Cluster already does, since 'asynchronous replication is used' between a primary and its replicas by the spec's own first design goal. `creplica` therefore carries the WRITE stream only (SET, invalidate, write-through, and cache fills) and none of the read stream. Caveat on the latency figure: that replication is asynchronous and off the client's critical path, but the engine adds every step's service time to its flow, so the modelled GET/SET latency slightly OVERSTATES what a client sees. Trust the arrival rate on `creplica`, not its latency contribution.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "100,000 ops/s per cache node is chosen INSIDE the range redis.io publishes for its own benchmark rather than lifted from a single run: the Redis benchmarks page reports 'SET: 180180.17 requests per second, p50=0.143 msec' and 'LPUSH: 188323.91 requests per second, p50=0.135 msec' on its reference setup, and '72144.87 requests per second' for the variant spreading load over a 100k random keyspace. 100k sits between those and is deliberately conservative for a shared production node running a mixed command set. It remains an ASSUMPTION about YOUR hardware - nothing here was measured on it - so the component provenance stays ASSUMPTION and only the price is GROUNDED.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Shard count (3 primaries + 3 replicas) is set by DATASET SIZE and failover topology, not by request rate - which is why the primaries sit at low utilisation. Sizing a Redis Cluster on rps alone would under-provision memory and cause evictions the engine does not model.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "NOT MODELLED - MEMORY, TTL AND EVICTION, which is what actually sizes a cache. This engine sizes every tier in requests per second; nothing in the model represents working-set bytes, per-key TTL or the eviction policy. The OSDI '20 Twitter study of '153 in-memory cache clusters' found that 'TTL is an important and sometimes defining parameter of cache working sets'. Read the primaries' low utilisation as 'rps is not what constrains this tier', NOT as 'these nodes are oversized': size them from working set, TTL and eviction rate first, then check that rps still fits.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "dbrep",
+      "statement": "NOT MODELLED - STAMPEDE / THUNDERING-HERD CONTROL. The engine applies a steady-state 4% miss rate; it cannot express many concurrent misses on the SAME hot key all reaching the origin at once. Facebook's memcache paper (Nishtala et al., NSDI '13) introduced leases for exactly this and measured the difference: without them a susceptible key set drove 'a peak database query rate of 17K/s', versus '1.3K/s' with them. The origin read replica in this design is provisioned at 8,000 rps, so an unmitigated stampede of that size would exceed it outright even though the steady-state figures below fit.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "creplica",
+      "statement": "NOT MODELLED - FAILURE-PATH CAPACITY. Every tier here is sized for the healthy case. The same NSDI '13 memcache paper describes a Gutter pool that 'accounts for approximately 1% of the memcached servers in a cluster' and reports it 'reduces the rate of client-visible failures by 99% and converts 10%-25% of failures into hits each day'. Nothing equivalent exists in this model: if a primary shard is lost here, its replica is promoted and takes that shard's full load, and every request that misses during the gap falls through to the origin.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "NOT MODELLED - KEY-LEVEL SKEW. The engine spreads arrivals uniformly across the 3 primaries; real key distributions are not uniform. The NSDI '13 memcache paper notes that 'a single key can account for 20% of a server's requests'. A hot slot therefore puts one node far above whatever utilisation is shown for the tier as a whole, and the hash-slot map cannot split a single key across nodes - the fix is client-side replication of that key or a local cache in front, neither of which is in this model.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "The engine models steady-state throughput. A distributed cache's two most dangerous failure modes - a COLD cache after a flush (every GET becomes an origin read: all 135,000 GET rps onto an origin read replica provisioned for 8,000) and a hot-slot imbalance - are not steady-state, so run them as explicit what-if scenarios rather than reading them off this baseline.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "infrastructure",
+    "difficulty": "intermediate",
+    "summary": "Redis Cluster read-through cache (sharded primaries + failover replicas, no proxy tier) in front of a Postgres origin whose read replica absorbs the misses.",
+    "keywords": [
+      "distributed cache",
+      "redis",
+      "redis cluster",
+      "memcached",
+      "cache cluster",
+      "caching layer",
+      "elasticache",
+      "consistent hashing",
+      "in-memory cache"
+    ]
+  }
+}

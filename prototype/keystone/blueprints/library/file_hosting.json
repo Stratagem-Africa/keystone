@@ -1,0 +1,446 @@
+{
+  "spec_version": 1,
+  "name": "File Hosting Service",
+  "workload": {
+    "system_rps": 3000,
+    "description": "Dropbox-shaped sync/share: long-poll change notification dominates, then metadata listing and bulk bytes via object storage"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Load balancer",
+      "per_instance_rps": 30000,
+      "instances": 1,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "app",
+      "kind": "app_server",
+      "name": "File API \u2014 auth, metadata, presigning (m6i.large x3)",
+      "per_instance_rps": 700,
+      "instances": 3,
+      "base_latency_ms": 18.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "notify",
+      "kind": "app_server",
+      "name": "Long-poll notification service \u2014 sync cursors (m6i.large x3)",
+      "per_instance_rps": 700,
+      "instances": 3,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Folder-listing and session cache",
+      "per_instance_rps": 40000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 4745.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.065/h x 730 = 4745c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.medium"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL \u2014 file tree, versions, ACLs, share links",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 7.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store \u2014 file blobs",
+      "per_instance_rps": 5500,
+      "instances": 1,
+      "base_latency_ms": 100.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 76000,
+      "storage_gb": 200000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Post-upload pipeline: virus scan, thumbnails, sync fan-out",
+      "per_instance_rps": 5000,
+      "instances": 3,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "sync_poll",
+      "share": 0.58,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "notify",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.1
+        }
+      ]
+    },
+    {
+      "name": "list_folder",
+      "share": 0.2,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.25
+        }
+      ]
+    },
+    {
+      "name": "download_file",
+      "share": 0.13,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.25
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "upload_file",
+      "share": 0.065,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "share_link",
+      "share": 0.025,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "3,000 req/s peak across ~1M active users, and the LONG-POLL IS THE TRAFFIC: 58% sync polls, 20% folder listings, 13% downloads, 6.5% uploads, 2.5% share-link operations. The poll share is arithmetic, not taste. Dropbox's own SDK contract (dropbox-sdk-java v3.0.x, DbxUserFilesRequests.listFolderLongpoll) documents a longpoll timeout that 'must be greater than or equal to 30 and be less than or equal to 480' seconds, defaulting to 30, plus up to 90s of jitter. 1M resident clients at the MOST CHARITABLE legal hold (480s + 90s jitter, ~570s average) return ~1,754 polls/s \u2014 58% of this budget. The previous 3% (90 rps) implied a ~3.1-hour poll interval, which the documented API does not permit, and it understated the one flow that actually sizes this design by ~19x. See the separate GAP for what the DEFAULT 30s hold does to this number.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "75% hit-rate on folder listings AND on the per-object metadata read that precedes a download \u2014 they are the same rows, so caching one and not the other was an oversight: download_file now goes through the cache at 75% like list_folder, instead of an uncached read on the most frequent metadata lookup in the system. Sync polls hit the cache 90% of the time (the answer is usually 'nothing changed'), which is what keeps a 1,740 rps poll load off PostgreSQL.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "BYTES DO NOT FLOW THROUGH THE APP TIER. Clients get a presigned URL and talk to the object store directly, so the app tier is sized for metadata operations only. The engine still counts one store visit per download/upload, which is the request, not the byte stream",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "Egress 76,000 GB/month is derived, not observed: ~390 downloads/s at peak (13% of 3,000), an assumed 30% average-to-peak ratio (~117/s) and a 256 KB average object. It was 175,000 GB when downloads were modelled at 900/s; re-scoping the workload around the long-poll moved the download rate, so this moved with it. A media-heavy mix moves it by an order of magnitude again.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "At the default $0.09/GB internet rate, egress is the LARGEST line in this design \u2014 larger than all compute combined. That is the real economics of file hosting. Volume CDN or R2-style zero-egress contracts change it materially and are not modelled",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Every upload publishes one event to a 3-broker Kafka cluster for virus scanning, thumbnailing and sync fan-out to the user's other devices. The ASYNC WORKERS behind the queue are not modelled as components \u2014 the v1 engine models request paths, not background consumers, so their capacity is not checked here",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "Object-store REQUEST charges are not modelled (only storage and egress are). The engine carries a single request rate, and it is API-gateway shaped ($3.00 per million); S3 GET is roughly $0.40 per million and PUT roughly $5.00 per million, so a single rate cannot represent both honestly. At 585 store operations/s (down from 1,350 when downloads were over-weighted) this is still a real omission, on the order of several hundred dollars a month against a ~$12k bill \u2014 an estimate from the published per-million rates, not a computed figure.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "notify",
+      "statement": "Long-poll is modelled as a REQUEST, not a held connection: the engine is an open queueing network and cannot represent ~1 million idle sockets. Sizing is therefore driven by poll RETURN rate, and the real constraint on this tier is file-descriptor/memory per connection, which this model does NOT capture. (Reused from dropbox.json, which models the same tier.) Read the 83% utilisation as 'this is the tier you scale', not as a connection budget.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "notify",
+      "statement": "The notification tier is 3x m6i.large at an assumed 700 rps each \u2014 the SAME six app nodes as before, re-split 3 File API / 3 notify rather than six File API, so total compute is unchanged and only the shape moved. 700 rps/instance is copied from the File API tier because the same instance class is assumed; a poll return is cheaper per request than a metadata call, so this is deliberately conservative. There is no published per-instance long-poll throughput figure for this workload, so this is a reasoned number, not a measured one.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "workload",
+      "statement": "THIS DESIGN IS SIZED AT THE MOST FORGIVING LEGAL POLL INTERVAL, AND THAT IS A CHOICE THE READER INHERITS. At the SDK's DEFAULT 30s timeout the same 1M clients return ~33,333 polls/s \u2014 11x this entire 3,000 rps budget, and ~16x the notification tier modelled here. Nothing in this blueprint scales to that; it would need a different tier (persistent connections, push rather than poll) and a different order of magnitude of hardware. If your clients use the default hold, this reference under-provisions you by roughly 19x on the poll path.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "store",
+      "statement": "base_latency_ms 100 follows AWS's published guidance for S3 Standard \u2014 'consistent small object latencies (and first-byte-out latencies for larger objects) of roughly 100-200 milliseconds' (docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html). The low end of the published range is used. The previous 25 ms was 4-8x optimistic on the two byte paths (download, upload) and understated reported end-to-end latency; it would only be defensible for an Express-class store, which the $0.09/GB S3 Standard cost model here does not price.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "5,500 rps IS NOT A WALL \u2014 the engine just has to model it as one. AWS publishes 'at least 3,500 PUT/COPY/POST/DELETE or 5,500 GET/HEAD requests per second per partitioned Amazon S3 prefix', and the same page says 'There are no limits to the number of prefixes in a bucket' (10 prefixes => 55,000 reads/s). So this is a PER-PREFIX read figure being used as a single fixed instance ceiling, and it is applied to a mixed GET+PUT load whose write side actually caps at 3,500 per prefix. At the modelled 585 store ops/s (~11%) neither bites; at ~4x this scale both would, and the fix is prefix spread, not a bigger store.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "intermediate",
+    "summary": "Sync-and-share file service: a long-poll notification tier carries most of the traffic, metadata in Postgres, blobs in object storage via presigned URLs.",
+    "keywords": [
+      "file hosting",
+      "file sharing",
+      "file storage",
+      "cloud storage",
+      "share large files",
+      "wetransfer",
+      "box.com",
+      "store files online"
+    ]
+  }
+}

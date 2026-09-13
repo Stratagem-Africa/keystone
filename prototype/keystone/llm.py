@@ -166,7 +166,7 @@ _OPENAI_COMPATIBLE = {
 def known_providers() -> frozenset:
     """Every provider name `make_llm` accepts — one source of truth so callers (e.g. the council
     factory) can validate a provider up front and give a clear 'unknown provider' error."""
-    return frozenset({"claude", "anthropic"} | set(_OPENAI_COMPATIBLE))
+    return frozenset({"claude", "anthropic", "claude_cli"} | set(_OPENAI_COMPATIBLE))
 
 
 def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LLM:
@@ -178,6 +178,11 @@ def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LL
     p = provider.strip().lower()
     if p in ("claude", "anthropic"):
         return AnthropicLLM(model, meter=meter, provider=p)
+    if p == "claude_cli":
+        # The locally installed Claude Code CLI, driven by the person whose subscription it is.
+        # No API key, no metered spend. Refuses to run in a server process — see keystone/llm_cli.py.
+        from .llm_cli import ClaudeCliLLM
+        return ClaudeCliLLM(model, meter=meter)
     if p == "ollama":
         base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         if not base.endswith("/v1"):
@@ -191,5 +196,5 @@ def make_llm(provider: str, model: str, *, meter: CostMeter | None = None) -> LL
     if p in _OPENAI_COMPATIBLE:
         base, key_env = _OPENAI_COMPATIBLE[p]
         return OpenAICompatibleLLM(model, base_url=base, api_key_env=key_env, meter=meter, provider=p)
-    raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | openai | openrouter | "
-                   "gemini | groq | cerebras | xai | github | nvidia | ollama)")
+    raise LLMError(f"unknown LLM provider {provider!r} (expected: claude | claude_cli | openai | "
+                   "openrouter | gemini | groq | cerebras | xai | github | nvidia | ollama)")

@@ -1,0 +1,465 @@
+{
+  "spec_version": 1,
+  "name": "Kafka (Message Broker)",
+  "workload": {
+    "system_rps": 200000,
+    "description": "200k client-visible msg/s durable log; partitioned brokers with RF=3 (leader append + 2 follower fetches charged to the broker), a KRaft controller quorum and tiered storage"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Network load balancer (bootstrap + advertised listeners)",
+      "per_instance_rps": 120000,
+      "instances": 3,
+      "base_latency_ms": 0.3,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "prod",
+      "kind": "app_server",
+      "name": "Producer tier (idempotent, batched, acks=all)",
+      "per_instance_rps": 20000,
+      "instances": 4,
+      "base_latency_ms": 1.5,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "broker",
+      "kind": "queue",
+      "name": "Kafka broker cluster (partitioned topics, RF=3 - leader append + 2 follower fetches)",
+      "per_instance_rps": 20000,
+      "instances": 18,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 15330,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15330.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15330.0,
+          "confidence_high": 15330.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.21/broker-hour x 730 = 15330c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.m5.large"
+      }
+    },
+    {
+      "id": "ctrl",
+      "kind": "queue",
+      "name": "KRaft controller quorum (metadata log, 3 nodes)",
+      "per_instance_rps": 5000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "cons",
+      "kind": "app_server",
+      "name": "Consumer group tier (stream processors)",
+      "per_instance_rps": 8000,
+      "instances": 25,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "schema",
+      "kind": "app_server",
+      "name": "Schema Registry (Avro/Protobuf id resolution)",
+      "per_instance_rps": 4000,
+      "instances": 2,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 4906,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4906.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4906.0,
+          "confidence_high": 4906.0,
+          "provenance": "GROUNDED",
+          "measured_context": "t4g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2), BURSTABLE. Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0672/h x 730 = 4906c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117). BURSTABLE: launches in Unlimited mode by default; sustained above-baseline CPU adds $0.04/vCPU-hour (Price List SKU VQE3NKNEDMWWG8DZ). At sustained 100% CPU the real bill can reach ~2.9x this figure. Disclosed, deliberately NOT folded into the band."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "t4g.large"
+      }
+    },
+    {
+      "id": "tier",
+      "kind": "object_store",
+      "name": "Tiered storage (S3) - cold segment offload and backfill reads",
+      "per_instance_rps": 5500,
+      "instances": 4,
+      "base_latency_ms": 45.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "store",
+      "kind": "sql_db",
+      "name": "Downstream sink (Postgres) - materialised consumer state",
+      "per_instance_rps": 8000,
+      "instances": 2,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "produce",
+      "share": 0.25,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "prod",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "schema",
+          "visit_prob": 0.001
+        },
+        {
+          "component_id": "broker",
+          "visit_prob": 3.0
+        },
+        {
+          "component_id": "ctrl",
+          "visit_prob": 0.001
+        }
+      ]
+    },
+    {
+      "name": "consume_hot",
+      "share": 0.7,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "broker",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cons",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "schema",
+          "visit_prob": 0.001
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "consume_backfill",
+      "share": 0.04,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "broker",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "tier",
+          "visit_prob": 0.001
+        },
+        {
+          "component_id": "cons",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "admin_metadata",
+      "share": 0.01,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "broker",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ctrl",
+          "visit_prob": 0.1
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "200,000 client-visible messages/s of ~1 KB. Mix: 25% produce, 70% hot consume from page cache, 4% backfill replayed from tiered storage, 1% metadata/admin - so consume (hot + backfill) outweighs produce ~3.0:1. This CORRECTS an earlier 55% produce / 40% consume mix, which was backwards: a Kafka log is a fan-out device, and the earlier mix understated the consumer tier by about 3x. LinkedIn's own write-up reports 'over 800 billion messages per day which amounts to over 175 terabytes of data' produced against 'Over 650 terabytes of messages are then consumed daily' (engineering.linkedin.com, 'Running Kafka At Scale', 2015-03-20) - 3.7:1 out:in by bytes. Those figures are eleven years old, and LinkedIn's 2019 update (7 trillion messages/day, 'over 100 Kafka clusters', 'more than 4,000 brokers', '7 million partitions') does not restate the byte ratio, so the ratio is treated as DIRECTIONAL. This model lands slightly below the published 3.7:1 because backfill and admin also take share.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "broker",
+      "statement": "REPLICATION IS CHARGED TO THE BROKER - this is the fix that matters most here. AWS's right-sizing equation is verbatim 'tEC2network = tcluster/#brokers * (#consumer groups + r-1)' (AWS Big Data Blog, 'Best practices for right-sizing your Apache Kafka clusters to optimize performance and cost', 2022-03-17, reviewed Nov 2025). At RF=3 one produced message costs the cluster THREE broker-side operations: the leader's append plus two follower fetches. The produce flow therefore visits the broker with visit_prob 3.0, and each consumer group's fetch is charged separately by the consume flows. The previous version of this blueprint charged one broker visit per client-visible message and reported a comfortable 71% on 14 brokers; the same cluster carrying its own replication is over 100%. Sizing a Kafka cluster from client-visible msg/s is the most common way to under-provision it, and it is why the broker - not the clients - is the binding constraint here.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "broker",
+      "statement": "~20,000 message OPERATIONS/s per kafka.m5.large broker, where one operation is one message crossing the broker's network/CPU path: a leader append, a follower fetch, or a consumer fetch. Note the accounting: the old figure spent 20,000 on produce and consume with no replication, which is a different (and smaller) quantity than what the broker really carries. Published anchors bracket this number rather than pin it. AWS's guidance holds a three-node m7g.large cluster at RF=3 with two consumer groups to '63 MB/sec' of CLUSTER ingress (~21 MB/s ~= 21,000 1 KB msg/s of ingress per broker), which under AWS's own equation implies roughly 84,000 total ops/s of per-broker network budget; Confluent's OpenMessaging run on 3 x i3en.2xlarge (1 KB messages, 100 partitions, RF=3, acks=all, min.insync.replicas=2, 2020-08-21) reached 605 MB/s peak with 'p99 Latency (ms) 5 ms (200 MB/s load)' on far larger nodes. As a fleet cross-check, LinkedIn's 7 trillion messages/day over 'more than 4,000 brokers' averages ~20,000 msg/s per broker, though that post does not say whether the count is produce-side or total handled. 20,000 ops/s is therefore a stated MODELLING CHOICE - deliberately well under the NIC ceiling - not a published per-broker rate; see the partition assumption for why a reference this size should not be sized to its network limit.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "broker",
+      "statement": "DISK, RETENTION AND STORAGE COST ARE STILL NOT MODELLED. Charging (RF-1) follower fetches covers the NETWORK and CPU path that AWS's equation sizes; it does not cover bytes at rest. Every produced message is also written to disk three times, and the v1 analytical engine has no disk-capacity, no retention and no storage-cost dimension - size disks from retention x throughput x RF separately, and note that MSK bills broker storage and data transfer apart from the broker-hour priced here.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "broker",
+      "statement": "PARTITION COUNT IS THE OTHER HALF OF KAFKA SIZING AND THE ENGINE CANNOT EXPRESS IT. MSK's sizing table gives 1,000 recommended partitions (1,500 maximum for update operations) per kafka.m5.large / kafka.m7g.large broker. The 18 brokers here therefore hold on the order of 18,000 partition-REPLICAS, i.e. ~6,000 partitions at RF=3 - the practical ceiling on topic and consumer-group parallelism in this design, and in a real cluster of this shape the limit that forces broker count before the NIC does. That is the reason this reference sizes brokers at 20,000 ops/s rather than at their network budget. Partition count is a stated input for the reader; it appears nowhere in the model's arithmetic.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "ctrl",
+      "statement": "The KRaft controller quorum is sized for quorum safety (3 nodes), not throughput - it carries only metadata traffic, so its utilisation is low by design. THE ADMIN FLOW DIRECTION IS CORRECTED: clients do not address the controller. Confluent's CFK docs describe the client 'finds the address of the broker it is interested in and connects directly to the broker to produce or consume data', and the KRaft docs state 'The active controller handles all RPCs made from the brokers' and that 'Client configurations are not impacted by Confluent Platform moving to KRaft'. The admin flow therefore runs lb -> broker -> ctrl (it previously ran lb -> ctrl -> broker, which is backwards), and only a fraction of those RPCs reach the controller at all: a broker answers metadata from its own replica of the metadata log and forwards only cluster-mutating operations (topic/partition/ACL changes). No public figure exists for the admin-op share of metadata traffic; the 10% forward rate used here is an ASSUMPTION.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "schema",
+      "statement": "The Schema Registry is visited on ~0.1% of messages, not 5%. Confluent's client caches schema ids in process: CachedSchemaRegistryClient holds 'private final Cache<String, Cache<Integer, Schema>> idToSchemaCache' and short-circuits with 'Schema cachedSchema = idSchemaMap.getIfPresent(id); if (cachedSchema != null) { return cachedSchema; }' before any REST call, so steady-state registry traffic is near zero - what remains is cold start, schema evolution and cache eviction. The registry is consequently sized for AVAILABILITY (2 nodes), like the controller quorum, not for throughput; the previous 4 instances at ~59% utilisation were provisioning for load that does not exist. The 0.1% miss rate is an ASSUMPTION - no published registry miss-rate figure exists.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "tier",
+      "statement": "Tiered storage is read by the BROKER in whole segments, not by consumers one message at a time. AWS MSK states 'Data between brokers and the tiered storage moves within the VPC' and that after the first bytes 'you can expect latencies that are similar to the primary storage tier' - a consumer never addresses S3. The backfill flow therefore issues roughly one GET per ~1,000 replayed messages (one multi-MB segment part at ~1 KB per message), which is a handful of GETs per second against the documented 5,500 GET/s per-prefix ceiling. That is the point of the change: at this scale the number of S3 prefixes is NOT a design variable, and the earlier model - one GET per replayed message, spread over 4 prefixes at ~36% utilisation - made it look like one. The 1,000-messages-per-fetch figure is an ASSUMPTION derived from segment/part sizing, not a published number. Object storage has no per-instance price in Keystone's catalogue, so tiered storage reports $0 compute - the real cost is per-GB-month plus per-request and is a stated GAP here.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "tier",
+      "statement": "COLD-READ LATENCY IS A TAIL, NOT A MEAN. Because one segment fetch is amortised across ~1,000 replayed messages, the engine's arithmetic spreads the object store's first-byte latency across all of them, so the backfill flow's mean latency barely moves. The first consumer to touch a cold segment really does wait the whole fetch. The engine reports means and cannot express that step - read backfill latency as an average, not as what a replay feels like.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "lb",
+      "statement": "The load balancer is charged one visit per message, which OVERSTATES it. Confluent's operator load-balancer docs describe the bootstrap pattern: the client uses the load balancer to discover the cluster, then connects directly to the broker it needs. Steady-state produce and consume traffic does not traverse the LB at all - only bootstrap and advertised-listener discovery do. The visit is left at 1.0 because the v1 engine has no 'connection setup only' concept and the LB is nowhere near binding either way, but do not read its utilisation as a real load.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "store",
+      "statement": "Consumers commit materialised state in batches of ~20 messages, so the Postgres sink is visited on 5% of consumed messages rather than every one. Correcting the traffic mix multiplies consumed volume about 3x, which pushed a single sink instance past the engine's 85% ceiling, so the sink is now 2 shards. The engine models those as two independent capacity units; it cannot express cross-shard consistency, and a sharded materialised view is a real design commitment, not a free scaling knob.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Kafka's defining property is an ORDERED, durable, replayable log with consumer-group offsets. The v1 analytical engine models it as a queueing station with capacity and service time; it cannot express partition ordering, consumer lag, rebalance storms or retention. Those are the failure modes to reason about outside this model.",
+      "confidence": "high",
+      "source": "engineering",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "infrastructure",
+    "difficulty": "advanced",
+    "summary": "Partitioned, replicated commit log that decouples producers from consumers at high sustained throughput.",
+    "keywords": [
+      "kafka",
+      "message broker",
+      "message queue",
+      "pub sub",
+      "event streaming",
+      "event bus",
+      "pulsar",
+      "commit log",
+      "msk",
+      "streaming platform"
+    ]
+  }
+}

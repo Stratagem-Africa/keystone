@@ -10,7 +10,7 @@
 
 - **Bottleneck:** App tier (t4g.medium x12) (utilisation 69%)
 - **Max sustainable load:** ~12,240 req/s at the 85% safe ceiling · ~14,400 req/s theoretical
-- **Latency (dominant path):** p50 ~20 ms [3–27] · p95 ~86 ms [14–119] · p99 ~133 ms [22–182] (mean 29 ms)
+- **Latency (dominant path):** p50 ~9 ms [2–15] · p95 ~28 ms [7–40] · p99 ~40 ms [14–55] (mean 11 ms)
 - **Single points of failure:** Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large)
 - **Estimated monthly cost:** ~$1,045.00/month
 - _`[low–high]` = confidence range from cited input evidence (details + 'measured on' below) — input-uncertainty only, **not** a validated-accuracy guarantee._
@@ -22,28 +22,28 @@
 | bottleneck_utilization | 69% | — | max rho = arrival / capacity | medium |
 | breakpoint_rps_safe | 12,240 req/s | — | system_rps * (85% ceiling / rho_max) | medium |
 | breakpoint_rps_theoretical | 14,400 req/s | — | system_rps * (1.0 / rho_max) | medium |
-| mean_latency_ms | 29 ms | 5 ms – 40 ms | sum of M/M/1 sojourn W=S/(1-rho) along the dominant flow | medium |
-| p50_ms | 20 ms | 3 ms – 27 ms | exponential-tail: mean * ln(2) | medium |
-| p95_ms | 86 ms | 14 ms – 119 ms | exponential-tail: mean * ln(20) | medium |
-| p99_ms | 133 ms | 22 ms – 182 ms | exponential-tail: mean * ln(100) | medium |
+| mean_latency_ms | 11 ms | 3 ms – 17 ms | sum of M/M/c sojourn W=S+Wq (Erlang-C) along the dominant flow | medium |
+| p50_ms | 9 ms | 2 ms – 15 ms | M/M/c sojourn mixture over the path (p50) | medium |
+| p95_ms | 28 ms | 7 ms – 40 ms | M/M/c sojourn mixture over the path (p95) | medium |
+| p99_ms | 40 ms | 14 ms – 55 ms | M/M/c sojourn mixture over the path (p99) | medium |
 | monthly_cost | $1,045.00/mo | — | compute (× pricing model) + usage (egress/storage/requests) + AI tokens at GROUNDED (cited) rates | medium |
 
 _Range = the output span when each GROUNDED input is swept across its **cited** confidence band (assumed / reconciled inputs held fixed). It expresses input-evidence uncertainty only — **not** a validated-accuracy guarantee, and the true value can fall outside it. A **—** means no grounded input moves that number (no cited spread to show) — it is not zero uncertainty. Accuracy stays **L0 (Directional)** until field-calibrated._
 
 ## Per-flow latency
 
-_Each flow's own latency (M/M/1 sojourn along its path; exponential-tail percentiles). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
+_Each flow's own latency (M/M/c sojourn along its path, Erlang-C over each tier's instance count; percentiles from the sojourn distribution, optional hops as a mixture). The headline latency above is the **dominant** flow; a minority flow on a different path can differ sharply — confirm the path that matters to your users._
 
 | Flow | Share | Mean | p50 | p95 | p99 |
 |---|--:|--:|--:|--:|--:|
-| redirect | 99% | 29 ms | 20 ms | 86 ms | 133 ms |
-| create | 1% | 33 ms | 23 ms | 100 ms | 154 ms |
+| redirect | 99% | 11 ms | 9 ms | 28 ms | 40 ms |
+| create | 1% | 16 ms | 14 ms | 35 ms | 48 ms |
 
 ## Component load
 
 | Component | Arrival (rps) | Capacity (rps) | Utilisation | Mean svc (ms) | Status |
 |---|--:|--:|--:|--:|:--|
-| App tier (t4g.medium x12) | 10,000 | 14,400 | 69% | 26.2 | ok |
+| App tier (t4g.medium x12) | 10,000 | 14,400 | 69% | 8.4 | ok |
 | Application Load Balancer | 10,000 | 30,000 | 33% | 1.5 | ok |
 | PostgreSQL primary (r7g.large) | 1,090 | 8,000 | 14% | 5.8 | ok |
 | Redis cache (r7g.large) | 9,900 | 100,000 | 10% | 0.6 | ok |
@@ -146,39 +146,39 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 > _Council running in DETERMINISTIC STUB mode — illustrative ADRs, not live reasoning. Activate the real council with any provider — a free-tier Gemini/Groq key, a Claude key, or a local Ollama (no key, $0)._
 
 ### Datastore — confidence: high
-**Decision:** Single relational primary (PostgreSQL) for the mapping table.
+**Decision:** URL Shortener keeps its system of record in PostgreSQL primary (r7g.large).
 
-**Rationale:** Workload is simple key->value with strong-read tolerance once cached; a relational primary is the boring, reliable default.
-
-**Recorded dissent:**
-- Data engineer: a KV store (DynamoDB) scales writes more cheaply at very high create volume; revisit if write share rises.
-
-**Kill criteria (revisit this decision if):**
-- Create (write) traffic exceeds ~30% of total
-- Mapping table exceeds single-primary write capacity
-
-### Caching — confidence: high
-**Decision:** Cache-aside on the redirect (read) path with a high hit-rate cache.
-
-**Rationale:** Redirects dominate traffic and are highly cacheable; the cache shields the primary from the read storm.
+**Rationale:** A relational primary is the boring, reliable default; it is the component whose write path cannot be scaled out by adding instances, so the design hangs on it.
 
 **Recorded dissent:**
-- SRE: the cache is now load-bearing -- a cold cache or stampede melts the DB. Add request-coalescing / stampede protection.
+- Data engineer: if writes dominate, a partitioned or KV store scales that path more cheaply than a single primary; revisit if the write share rises.
 
 **Kill criteria (revisit this decision if):**
-- Cache hit-rate falls below ~70% in production
-- No stampede protection before launch
+- Write traffic outgrows what one primary can serve
+- A second service needs write access to the same tables
+
+### Caching — confidence: med
+**Decision:** Reads are shielded by Redis cache (r7g.large).
+
+**Rationale:** The read path dominates, and a cache keeps that volume off the primary.
+
+**Recorded dissent:**
+- YAGNI-skeptic: a cache is a second source of truth and a new failure mode; do not add one before the read path is demonstrably the constraint.
+
+**Kill criteria (revisit this decision if):**
+- Cache hit-rate falls far enough that the primary sees the read storm
+- Stale reads become user-visible in a way the product cannot accept
 
 ### Resilience — confidence: med
-**Decision:** Add a read replica and cache failover before production.
+**Decision:** Single points of failure in this design: Application Load Balancer, Redis cache (r7g.large), PostgreSQL primary (r7g.large).
 
-**Rationale:** A single primary and single cache are single points of failure.
+**Rationale:** Each of these is one instance; losing it takes the system with it.
 
 **Recorded dissent:**
 - YAGNI-skeptic: acceptable to defer for a prototype (Tier-0), but NOT for external traffic (Tier-1).
 
 **Kill criteria (revisit this decision if):**
-- Going to external/production traffic with 1 DB + 1 cache
+- Going to external/production traffic with a single-instance tier
 
 ## What-if interrogation
 
@@ -194,16 +194,17 @@ The per-unit cost rates are matched to **cited** vendor/benchmark pricing (resea
 - Utilisation rho = arrival / capacity, where capacity = per_instance_rps * instances.
 - Bottleneck = highest rho -> App tier (t4g.medium x12) at rho=0.69 (10,000 / 14,400 rps).
 - Max sustainable load = system_rps * (ceiling / rho_max): safe@85% ~ 12,240 req/s, theoretical@100% ~ 14,400 req/s.
-- Latency = sum of M/M/1 sojourn (service / (1 - rho)) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 29 ms.
-- Percentiles via an exponential-tail approximation: p50/p95/p99 = mean x 0.69/3.00/4.61 (over-states the tail; treat as a directional upper bound).
+- Latency = sum of M/M/c sojourn (Erlang-C, over each tier's instances) * visit_prob along the dominant flow ('redirect', 99% share) -> mean 11 ms.
+- Percentiles come from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean: each hop contributes its mean and variance, hops with visit_prob < 1 are enumerated as a mixture (they make the path bimodal), and each branch is a two-moment gamma fit. Validated against a 200k-run Monte Carlo of the exact sojourn. An approximation, not the exact convolution.
 - Monthly cost = compute $1,045.00 = $1,045.00 (integer cents; usage rates GROUNDED (cited)).
 
 ## Where this is wrong (read before trusting a number)
 
-- Analytical queueing approximation (M/M/1 per component), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
+- Analytical queueing approximation (M/M/c per component, via Erlang-C over each tier's instance count), not a discrete-event simulation. Async/streaming/multi-region topologies are out of v1 scope.
 - Component capacities & prices have MIXED provenance — each is GROUNDED (matches a cited benchmark band), RECONCILE (your value kept despite falling outside the cited band), or ASSUMPTION (uncited), as marked in the Grounding & reconciliation section. None are calibrated to your stack. Accuracy is L0 (Directional) until field-calibrated (Doc 03).
-- Percentiles use an exponential-tail approximation and tend to OVER-state the tail; treat p95/p99 as upper-bound directional figures.
+- Percentiles are computed from the M/M/c sojourn DISTRIBUTION, not from a multiplier on the mean. Each hop contributes its own mean and variance; a hop with visit_prob < 1 (a cache miss, a CDN miss) makes the path BIMODAL, so the optional hops are enumerated and the percentile is read off the weighted mixture. It is still an approximation — each branch is a two-moment gamma fit, not the exact convolution — but it is validated: against a 200k-run Monte Carlo of the exact sojourn on code_editor's edit path it gives p50 3.41 (MC 3.38), p95 11.61 (MC 11.67), p99 110.1 (MC 105.0). THIS REPLACED FIXED MULTIPLIERS (mean x ln2 / ln20 / ln100) THAT SHIPPED WITH THE CAVEAT 'over-states the tail'. On that same path they were 69% TOO LOW at p99 (32.9 vs 105.0) — wrong, and wrong in the opposite direction to their own warning, on exactly the shape where the tail is the whole question. p99/p50 is no longer a constant: it now ranges from 1.7 to 67 across the library instead of 6.64 everywhere.
 - Cost = per-instance compute × the chosen pricing-model discount + declared usage (egress/storage/requests) + AI/LLM tokens (input/output) at GROUNDED (cited) rates (ADR-009 Tiers 1–2). Compute defaults to on_demand list price; reserved/spot apply published-range discount ratios. AI token rates span a wide model-class band (real prices vary ~100× by model). These per-unit rates are GROUNDED to cited benchmarks (see *Cost rate evidence*). Volumes are 0 unless a component declares them. Third-party SaaS (payments/auth/etc.) and on-prem are still out of scope. NOTE: that 'rates' provenance is for the per-unit usage/AI/discount rates only — the per-component COMPUTE prices that drive most of this figure carry their own provenance (GROUNDED / RECONCILE / ASSUMPTION), shown per component in the Grounding & reconciliation section; some may be RECONCILE (your value kept despite the cited band).
+- The bottleneck leads the next component by 36.1 percentage points, which is wide enough that the ordering survives ordinary input error.
 - Bottleneck identification and the relative ordering of components are far more reliable than absolute latency/cost numbers.
 - Headline latency (mean/p50/p95/p99) is for the DOMINANT flow — 'redirect' (99% of traffic). Each flow's own latency is in the Per-flow latency table; a minority flow on a different (often worse) path can differ sharply.
 - Some inputs above are GROUNDED to cited benchmarks matched by component **kind** (not your exact instance type / region / workload), so treat them as directional evidence, not stack-calibrated truth. RECONCILE rows fall outside the cited band and kept **your** value — a human should check them. These component-input citations are AI-matched and pass the curation gate; independent citation review remains the standing bar before treating them as calibrated (the per-unit cost **rates** were separately ratified — see *Cost rate evidence*).

@@ -1,0 +1,514 @@
+{
+  "spec_version": 1,
+  "name": "Dropbox (File Sync)",
+  "workload": {
+    "system_rps": 40000,
+    "description": "40k rps peak: long-poll sync notifications dominate, then block download/upload and metadata listing"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Application load balancer",
+      "per_instance_rps": 30000,
+      "instances": 2,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "notify",
+      "kind": "app_server",
+      "name": "Long-poll notification service (namespace cursors)",
+      "per_instance_rps": 2000,
+      "instances": 16,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
+      "id": "sync_api",
+      "kind": "app_server",
+      "name": "Sync/metadata API",
+      "per_instance_rps": 1500,
+      "instances": 16,
+      "base_latency_ms": 12.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "block_api",
+      "kind": "app_server",
+      "name": "Block data server (client talks to it directly)",
+      "per_instance_rps": 1500,
+      "instances": 16,
+      "base_latency_ms": 12.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis: namespace cursors + hot metadata",
+      "per_instance_rps": 50000,
+      "instances": 2,
+      "base_latency_ms": 0.6,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL primary (file tree + namespace metadata)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 7.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "replica",
+      "kind": "replica",
+      "name": "PostgreSQL read replicas",
+      "per_instance_rps": 3000,
+      "instances": 2,
+      "base_latency_ms": 7.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka: namespace change-event bus",
+      "per_instance_rps": 5000,
+      "instances": 3,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Content-addressed block store (4 MB blocks)",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 25.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "poll_changes",
+      "share": 0.55,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "notify",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "download_block",
+      "share": 0.25,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "block_api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 0.85
+        }
+      ]
+    },
+    {
+      "name": "upload_block",
+      "share": 0.1,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "sync_api",
+          "visit_prob": 2.0
+        },
+        {
+          "component_id": "block_api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "list_metadata",
+      "share": 0.09,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "sync_api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.3
+        }
+      ]
+    },
+    {
+      "name": "commit_batch",
+      "share": 0.01,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "sync_api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "40,000 req/s peak. Desktop clients long-poll for changes, so 55% of all traffic is a notification poll that returns 'nothing changed'. Block download 25%, block upload 10%, metadata listing 9%, batch commit 1%.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Namespace cursors live in Redis, so a poll is answered without touching PostgreSQL 95% of the time (replica visit_prob 0.05). This is the single decision that keeps a 22,000 rps poll load off the database.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "store",
+      "statement": "Content-addressed blocks of 'up to 4 megabytes', each named by 'a SHA-256 hash of the block' (Inside the Magic Pocket, dropbox.tech, 2016-05-06); 15% of downloads are served from the hot-block cache, the other 85% hit the object store. De-duplication means an upload does not always write a block - modelled optimistically as one write per upload. GAP: the same source says each block is 'stored independently in at least two separate zones', so a real upload is at least two block writes and this model UNDERSTATES the write load on this tier by roughly 2x. It is left at one write deliberately rather than doubled: doubling it would make the object store the binding constraint, and this tier's 20,000 rps capacity is an uncited guess (see the 'numbers' assumption), so there is no published figure that would justify pointing the reader there.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "notify",
+      "statement": "Long-poll is modelled as a REQUEST, not a held connection: the engine is an open queueing network and cannot represent 10 million idle sockets. Sizing is therefore driven by poll RETURN rate, and the real constraint on this tier is file-descriptor/memory per connection, which this model does NOT capture. Dropbox re-architected exactly this tier: notification services 'can now be implemented via streaming gRPC instead of an expensive long-poll method' (How we migrated Dropbox from Nginx to Envoy, dropbox.tech, 2020-07-30), at 'tens of millions of open connections'. That is why this design leaves the notification tier as the highest-utilised component - in a file-sync backend it is the tier to look at first. Note that the front-door load balancer lands within a few points of this tier, so the engine reports the two as joint contenders rather than a winner: that is the honest reading, because they are the same connection-layer concern - every long-poll rides the LB before it reaches the notification service - and Dropbox's own edge post describes the pair together as 'tens of millions of open connections, millions of requests per second'.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "Compute only. Block-storage GB and egress are not priced here \u2014 at Dropbox's storage profile they dominate the real bill and list object-store rates would not be the rates paid.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "block_api",
+      "statement": "Block data and metadata are SEPARATE tiers, so block transfer is not charged to the sync/metadata API. Dropbox documents 'two types of servers relevant to this discussion: Block data server ... Metadata server' and that 'the uploading client must talk directly with the blockserver in order to add these blocks' (Streaming File Synchronization, dropbox.tech, 2014-07-10). Drago et al. independently measured the same split in the wild as three client-facing subdomains - notification, meta-data control, and client storage - under the heading 'Clear separation between storage and meta-data/client control' (IMC 2012, authors' slide deck). An earlier version of this blueprint routed all 10,000 rps of block downloads through the metadata tier, which manufactured a metadata bottleneck the real architecture does not have and sent the reader to optimise the wrong component.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "upload_block",
+      "statement": "An upload is TWO metadata round trips, not one: the client commits, the server replies 'need blocks', the client uploads the missing blocks to the blockserver, and the client commits again (Streaming File Synchronization, dropbox.tech, 2014-07-10). upload_block therefore visits the sync/metadata API with visit_prob 2.0 and the block tier with 1.0.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "numbers",
+      "statement": "NO Dropbox source publishes a per-tier request rate or an absolute latency, so every per_instance_rps and base_latency_ms in this file is an uncited assumption and must not be read as a measurement. What Dropbox publishes is aggregate or relative only: 'at least 300,000 requests per second' across '700M registered users' (Atlas, 2021-03-04); Edgestore 'serving more than ten million requests per second' (2018-11-09); Cape at '30K/s' events and '150K/s' jobs (Cape technical deep dive, 2018-12-21); and for Magic Pocket only deltas, e.g. 'a 2% increase in Magic Pocket's overall end-to-end write latency' with no absolute figure anywhere in that post (2022-12-08). The new block tier is therefore sized by COPYING the metadata tier's per-instance capacity (1,500 rps) and service time (12 ms) rather than inventing a distinct figure for it; its 16 instances were chosen to carry its 14,000 rps well inside the 85% ceiling, not fitted to a published number.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "db",
+      "statement": "The real metadata store is SHARDED MySQL, not one PostgreSQL primary: Edgestore is 'a service and abstraction over thousands of MySQL nodes', with a caching layer absorbing 'upwards of 95% of client reads' (Cross-shard transactions at 10 million requests per second, dropbox.tech, 2018-11-09). At this blueprint's 40,000 rps the single primary stays well inside its capacity, so the simplification does not move the bottleneck - but a reader must not carry the single-primary shape up to Dropbox's real scale, and it is also this model's only single point of failure.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "flow_mix",
+      "statement": "The 10:1 block-to-commit ratio here (upload_block 0.10 vs commit_batch 0.01) implies an average committed file of about 40 MB in 4 MB blocks. Drago et al. measured roughly 80% of storage flows carrying 10 chunks or fewer (IMC 2012 slide deck), so real files are smaller and commit_batch is under-weighted relative to block traffic. Left unchanged because commit_batch's 400 rps is nowhere near binding on any tier; a reader modelling a small-file workload should raise it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "evidence_vintage",
+      "statement": "Dating the evidence: Drago et al. measured Dropbox desktop client v1.2.52 in 2012, and Dropbox shipped a full sync-engine rewrite (Nucleus) to all users on 2020-03-09 (Rewriting the heart of our sync engine, dropbox.tech). The 2012 measurements are cited here as evidence of the TIER SEPARATION - block vs metadata vs notification - and not as evidence about today's internals.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "data_pipeline",
+    "difficulty": "advanced",
+    "summary": "File-sync backend: long-poll change notification, a block data tier the client talks to directly (separate from metadata), a content-addressed block store, and a cursor cache that keeps polling off the metadata database.",
+    "keywords": [
+      "dropbox",
+      "file sync",
+      "google drive",
+      "onedrive",
+      "sync files",
+      "icloud",
+      "file synchronization",
+      "sync engine",
+      "delta sync"
+    ]
+  }
+}

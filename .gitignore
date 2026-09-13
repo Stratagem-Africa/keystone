@@ -38,3 +38,6 @@ learning-notes/
 
 # Browser-automation (Playwright MCP) debug output — local only, regenerated per session
 .playwright-mcp/
+
+# Built by scripts/make-mac-app.sh — a launcher pointing at this checkout, not an artifact to commit.
+Keystone.app/

@@ -1,0 +1,471 @@
+{
+  "spec_version": 1,
+  "name": "Stock Exchange",
+  "workload": {
+    "system_rps": 50000,
+    "description": "50,000 inbound client messages/s: 80% order entry (place/cancel ~1:1), 18% book, account and position queries, 2% audit-archive reads. Market data is PUBLISHED from the journal, not requested through the gateway, so it is a derived leg on the order flows, not inbound share."
+  },
+  "components": [
+    {
+      "id": "gw",
+      "kind": "api_gateway",
+      "name": "Order gateway (FIX / binary session layer)",
+      "per_instance_rps": 60000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "risk",
+      "kind": "app_server",
+      "name": "Pre-trade risk and credit checks",
+      "per_instance_rps": 50000,
+      "instances": 3,
+      "base_latency_ms": 0.005,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "matcher",
+      "kind": "app_server",
+      "name": "Matching engine (single-writer shard per symbol range)",
+      "per_instance_rps": 15000,
+      "instances": 4,
+      "base_latency_ms": 0.05,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka (asynchronous post-trade / event journal, RF=3)",
+      "per_instance_rps": 25000,
+      "instances": 3,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 15330,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15330.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15330.0,
+          "confidence_high": 15330.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.21/broker-hour x 730 = 15330c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.m5.large"
+      }
+    },
+    {
+      "id": "md",
+      "kind": "app_server",
+      "name": "Market-data publishers (ITCH multicast, fed from the journal)",
+      "per_instance_rps": 12000,
+      "instances": 6,
+      "base_latency_ms": 0.8,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis cluster (top-of-book snapshot, symbol routing)",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.3,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL (orders, fills, positions of record)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Immutable audit archive (end-of-day, regulatory)",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 40.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "place-order",
+      "share": 0.4,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "risk",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "matcher",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "md",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "cancel-order",
+      "share": 0.4,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "risk",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "matcher",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "md",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "book-account-query",
+      "share": 0.18,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.15
+        }
+      ]
+    },
+    {
+      "name": "audit-archive-read",
+      "share": 0.02,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "50,000 INBOUND client messages/s at peak - order entry, cancels and member queries arriving at the gateway. Market data is NOT in this budget: it is published outbound (see the market_data note), so it appears as a derived leg inside the order flows rather than as a share of inbound traffic. The mix is 80% order entry, 18% book/account queries, 2% audit-archive reads. 50,000/s is a mid-tier or crypto venue, not a national equities market: the UTP Plan's Q1 2026 website statistics report a peak of 636,500 quote messages/second on UTP Tape C in March 2026, so a national tape runs 10-100x this. https://www.utpplan.com/DOC/UTP_Website_Statistics_2026-Q1-March.pdf",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "mix",
+      "statement": "Place and cancel are modelled at roughly 1:1 (0.40 / 0.40 of inbound), not the 2.33:1 this file previously assumed. The SEC's analysis of Q2 2013 order data found that 'at most, only a few percent of all orders and quotes for shares posted by market participants result in trade executions', that 'More than one third of all orders stay in force for at least 5 seconds', and that 'nearly 100% of all orders are either canceled or result in a trade within 10 minutes' - i.e. nearly every order ends in a cancel, so cancels roughly match new orders in volume. This changes no verdict (both flows traverse the same components), but a design that under-counts cancels under-counts the matcher's and the publishers' real work. https://www.sec.gov/about/speed-equity-markets",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "risk",
+      "statement": "Pre-trade risk is sized at 50,000 checks/s per instance with 0.005 ms (5 microseconds) of service time, replacing 5,000/s and 0.6 ms. A 15c3-5 check is a handful of limit comparisons against in-memory per-customer state: 17 CFR 240.15c3-5 requires controls reasonably designed to 'Prevent the entry of orders that exceed appropriate pre-set credit or capital thresholds in the aggregate for each customer' and to 'Prevent the entry of erroneous orders, by rejecting orders that exceed appropriate price or size parameters, on an order-by-order basis', under 'the direct and exclusive control of the broker or dealer'. It has to fit INSIDE the order round trip, and SIX's X-stream INET measurement documents 10.6 microseconds average for that entire path (network boundary in, validate, process, acknowledge or fill, back out). The old 0.6 ms charged one in-line check 600 microseconds - 56x the whole SIX round trip - and that single implausible input, not any property of the design, is what named this tier the bottleneck. No public per-instance benchmark for a venue's risk tier exists, so 5 us is a reasoned bound for an in-memory comparison, not a measured figure. The three instances are REDUNDANCY, not capacity: the controls are mandatory and in-line, and one instance already covers the full 40,000 order messages/s modelled peak. Risk is the most horizontally scalable tier in this design (stateless, per-customer aggregates), so adding risk servers is the one move here that buys nothing. https://www.law.cornell.edu/cfr/text/17/240.15c3-5 https://www.six-group.com/dam/download/the-swiss-stock-exchange/trading/trading-platform/x-stream-inet-performance-measurement-details.pdf",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "matcher",
+      "statement": "The matching engine is sharded by symbol range, one single-writer thread per shard; four shards carry the 40,000 order messages/s modelled peak. 15,000 orders/s per shard is deliberately CONSERVATIVE - published single-writer designs reach far higher (Fowler, 12 July 2011, documents the LMAX Business Logic Processor handling 6 million orders/s on a single thread, entirely in-memory; the Disruptor paper - Thompson, Farley, Barker, Gee, Stewart, May 2011 - measures 25,998,336 ops/s unicast on a 2.8 GHz Nehalem). Those are in-process figures with no network hop, no cloud VM and no broker, so they bound the SHAPE rather than giving a number to copy for a deployed shard. https://martinfowler.com/articles/lmax.html https://lmax-exchange.github.io/disruptor/disruptor.html",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "matcher",
+      "statement": "UNMODELLED, AND THE BIGGEST RISK IN THIS FILE: Keystone models the four matcher shards as one pooled tier, so their capacities ADD. That holds only if order volume is spread evenly across the symbol ranges, and it never is - volume concentrates in a handful of names. Concretely, at the modelled 40,000 order messages/s an even spread puts 10,000/s on each shard, but a shard whose range happens to carry 40% of the flow receives 16,000/s against a 15,000/s single-writer capacity and is over - while this model still reports the pooled figure. You cannot add instances inside a symbol range: a single-writer book is one thread by construction. The answer to a hot shard is RE-PARTITIONING the symbol ranges (or giving the hot symbol a shard of its own), never scaling out. Measure your own per-symbol volume distribution before trusting the headroom this model shows.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "market_data",
+      "statement": "Market data is PUBLISHED, not requested - this is the wiring the previous version of this file had backwards. It modelled market data as 45% of inbound requests arriving through the ORDER GATEWAY, which froze the publish load at a fixed number and charged the gateway a large stream of traffic that in reality never touches it. SIX documents that 'Where no matching occurs, one ITCH output is generated for each input OUCH message to notify the resulting change to the order book' and that 'ITCH messages are sent to many parties, typically via broadcast protocols', its diagram legend distinguishing 'One-to-one message flow' (order entry) from 'One-to-many message flow' (market data). So the publishers are fed from the sequenced journal at a stated multiplier of ONE outbound book event per inbound order message (SIX's wording supports ~1:1 while trade-to-order ratios are low), modelled as a visit on the place and cancel paths. That restores the coupling which defines this system: move the order rate and the market-data load moves with it. The publish tier is stateless and CAN be scaled out - unlike the matcher - which is why it is provisioned with headroom. https://www.six-group.com/dam/download/the-swiss-stock-exchange/trading/trading-platform/x-stream-inet-performance-measurement-details.pdf",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "market_data",
+      "statement": "The subscriber fan-out factor in this model is 1.0: one MULTICAST publish per book event, however many subscribers are attached. That choice has teeth. Under UNICAST the factor is N - one send per subscriber - so at 10 subscribers the publish tier would see ten times the book-event rate (400,000 sends/s against the 72,000/s provisioned here), and at 50 subscribers it is not survivable at any instance count this design would buy. That is exactly why real venues multicast. But multicast moves the binding resource to BYTES ON THE WIRE, which Keystone's v1 engine does not model at all - it counts messages, never bandwidth. Nasdaq publishes a per-feed bandwidth recommendation for precisely this sizing (NASDAQ TotalView-ITCH 4.1: 61 Mb current, 67 Mb new), and that is the number to size a real feed on. Read the publish tier's headroom here as message-rate headroom only. https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/bandwidthreport.pdf",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "journal",
+      "statement": "Kafka here is the ASYNCHRONOUS post-trade / event journal - the sequenced record that feeds the market-data publishers, the database of record and downstream surveillance. It is NOT the in-path journal of a single-writer design: LMAX does journal inside the order path, but on an in-process ring buffer, measured in the Disruptor paper at 52 ns mean latency on a three-stage pipeline, so a 1.0 ms broker hop is not an exchange's order-path figure and must never be read as one. Three brokers because replication factor 3 is the durability floor for a journal of record, not a capacity choice. GAP: Keystone's v1 engine treats every step of a flow path as SYNCHRONOUS, so this journal leg and the publish leg after it are added to the modelled client-visible order latency even though a real venue acknowledges the order before either completes. The order latency this model reports therefore OVERSTATES the client-visible path by those two legs. https://lmax-exchange.github.io/disruptor/disruptor.html",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "db",
+      "statement": "Order lifecycle events are journaled first and persisted to PostgreSQL in BATCHES (~20:1), which is why the database sees only ~5% of the order rate; without that batching a single primary could not absorb the full order rate. Cancels now carry the same 5% visit as placements: a cancel is an order-lifecycle event of record and the regulatory audit trail has to hold it, so leaving cancels off the database (as this file previously did) under-counted the write path. The single primary is a deliberate, disclosed single point of failure - an RDBMS of record is somewhere venues do accept one - not an oversight.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "The Redis pair is sized for MEMORY and redundancy - the top-of-book snapshot and the symbol-to-shard routing map - not for request rate. Now that market data is no longer modelled as an inbound pull, its modelled request load is small; it stays a pair because losing the routing map mid-session is worse than the node cost, and shrinking it to one node would only trade cost for a second single point of failure.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Keystone's v1 engine is an open queueing network: it models MEAN throughput and latency, NOT microsecond tail determinism, in-order sequencing or fairness - the properties an exchange is actually judged on. That caveat extends to the MEAN too, which is the disclosure this file was missing: the order-path latency this model computes is two orders of magnitude above published venue figures. SIX measures 10.6 microseconds average end-to-end; NYSE's Pillar migration note (19 September 2019) reports roughly 26 microseconds for Binary and 32 microseconds for FIX at the 99th percentile after a 92% improvement (from ~96 and ~592 microseconds); even on the crypto framing, Coinbase advertises sub-millisecond matching. Two things cause the gap: the tier modelled here is commodity cloud VMs on a shared network rather than co-located kernel-bypass hardware, and the engine adds asynchronous legs synchronously (see the journal note). Use this model for CAPACITY and for finding the binding constraint; never plan a latency budget from its latency column. https://www.nyse.com/data-insights/nyse-pillar-migration-adding-efficiency-to-the-marketplace https://www.marketsmedia.com/coinbase-upgrades-derivatives-platform-with-new-matching-engine/",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "gateway",
+      "statement": "The order gateway is SELF-HOSTED (FIX/binary session servers), not a managed per-request API gateway; at 50,000 rps a per-request managed service would dominate the bill. It now carries INBOUND client traffic only, because market data is published from the journal rather than pulled through it.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "compliance",
+      "statement": "Market data, order handling, best execution and audit retention are regulated. Nothing here is a compliance design; expert review is mandatory.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [
+    "high_stakes:payments"
+  ],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "real_time",
+    "difficulty": "advanced",
+    "summary": "Order-entry gateway, in-line 15c3-5 risk checks and a single-writer sharded matching engine that publishes market data from its journal.",
+    "keywords": [
+      "stock exchange",
+      "trading engine",
+      "matching engine",
+      "order matching",
+      "order book",
+      "trading platform",
+      "limit order",
+      "stock trading",
+      "nasdaq",
+      "robinhood",
+      "crypto exchange"
+    ]
+  }
+}

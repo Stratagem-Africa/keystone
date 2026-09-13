@@ -4,15 +4,62 @@
 
 Takes a builder from **intent → validated design**. The simulation engine is deterministic math (free, no AI); the council reasons about design and never emits a number. See `CLAUDE.md` for the working contract and `docs/` for the full spec.
 
-## Quick start
+## Set it up (once)
+
+```bash
+git clone https://github.com/Stratagem-Africa/keystone.git && cd keystone
+./setup.sh
+```
+
+That checks your tools, installs frontend dependencies, builds the macOS app, puts a **Keystone**
+shortcut on your Desktop, and installs a git hook so future `git pull`s keep it in step. Then just
+double-click **Keystone**.
+
+The Claude CLI is optional — `setup.sh` tells you how to add it, and Keystone runs fully without it
+(the engine and all 56 reference designs need no AI at all).
+
+## Run it
+
+**macOS — the Desktop shortcut**, or rebuild it with:
+
+```bash
+./scripts/make-mac-app.sh     # builds Keystone.app
+```
+
+**Any platform — a command:**
+
+```bash
+./scripts/keystone-local.sh            # your own Claude subscription drives the council
+./scripts/keystone-local.sh --offline  # no AI at all — engine + 56 reference designs, $0
+```
+
+Either way it opens **http://127.0.0.1:3000/studio** in your browser, and it is the **same app** —
+the same Next.js frontend the web build serves, pixel for pixel. `Keystone.app` is a thin launcher
+pointing at this checkout, not a copy and not a second UI: `git pull` updates it, and there is no
+second interface to keep in sync because there isn't a second interface.
+No account, no API key, no Supabase project needed — the app runs without any of them.
+
+**Why a local run and not a website.** The council can run on Claude Code's CLI (`claude -p`),
+which means it runs on *your* subscription: nothing to bill, no key to manage. That only works
+because the CLI is a program on your laptop. A hosted site cannot reach it — a server calling
+`claude -p` would be running one account and answering everyone's requests, which is account
+sharing whoever the users are. `llm_cli._refuse_if_served()` fails closed on exactly that, and
+`scripts/keystone-local.sh` is the only place the documented local override is set, after proving
+the bind address is loopback.
+
+Missing the CLI? `--offline` still gives you the whole engine and all 56 reference architectures
+with every number computed and cited. The AI is what explains a design; it never produces a figure.
+
+## Engine only
 
 ```bash
 cd prototype
 python3 run_url_shortener.py                 # the loop -> outputs/url_shortener_report.md
-python3 -m unittest discover -s tests -v     # 7 engine tests
+python3 -m unittest discover -s tests -v     # the engine suite
+../scripts/check.sh                          # the merge gate (Python + frontend)
 ```
 
-No dependencies, no API key needed to run the engine. Status: **Phase 0 complete** (engine + loop running; council stubbed). Next: real Claude council + the LLM ingestion layer.
+No dependencies and no API key needed to run the engine.
 
 ## Docs
 
