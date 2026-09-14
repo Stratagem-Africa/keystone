@@ -62,6 +62,11 @@ MIGRATIONS = [
     REPO_ROOT / "db" / "migrations" / "0001_canonical_model_store.sql",
     REPO_ROOT / "db" / "migrations" / "0002_tenant_id_auth_hook.sql",
     REPO_ROOT / "db" / "migrations" / "0003_jobs_table.sql",
+    # 0004 is Jem's (PR #198) and is not on this branch; 0005 does not depend on it — it only
+    # ALTERs functions and a constraint from 0001-0003 — so it applies correctly either side of
+    # that merge. Registered here for the same reason 0003's omission was a gap: a migration the
+    # isolation harness does not apply is a migration nothing tests.
+    REPO_ROOT / "db" / "migrations" / "0005_pin_search_path_and_allow_fanout.sql",
 ]
 
 
