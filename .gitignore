@@ -41,3 +41,13 @@ learning-notes/
 
 # Built by scripts/make-mac-app.sh — a launcher pointing at this checkout, not an artifact to commit.
 Keystone.app/
+
+# Filesystem duplicate artefacts — the local AV/sync tooling produces "name 2.ext" copies.
+# One got COMMITTED (a stray copy of 0004 swept in by `git add -A`), which would have applied a
+# duplicate migration on merge. Ignored so the next one cannot repeat it.
+*[0-9] [0-9].sql
+* 2.sql
+* 2.py
+* 2.ts
+* 2.tsx
+* 2.json
