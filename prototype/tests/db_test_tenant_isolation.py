@@ -6,14 +6,20 @@ pattern is test*.py) — run explicitly via scripts/test_tenant_isolation.sh, wh
 `-p "db_test_*.py"`. See tenant_isolation_test_helpers.py's module docstring for the full
 repeatability strategy and the things that still need verifying against a real Postgres.
 
-0001's grants are NOT uniform across tables, so "every table" is tested against what's
+0001/0004's grants are NOT uniform across tables, so "every table" is tested against what's
 actually grantable per table, not mechanically identical everywhere:
   - tenant, membership: SELECT only for `authenticated` — no write ops to test.
   - project, source_document: full CRUD — the full select/insert/update/delete matrix.
-  - system_model, component, flow, flow_step, assumption: SELECT+INSERT only — UPDATE/DELETE
-    aren't a cross-tenant test here, since there's no grant AT ALL, so even touching a row
-    you own raises `permission denied` before RLS is ever evaluated (reinforcing ADR-005 §3's
-    immutable-snapshot guarantee, a different property from §1b's tenant isolation).
+  - system_model, component, flow, flow_step, assumption: SELECT ONLY for `authenticated`
+    as of 0004 (Bifola's ruling on issue #21, 2026-09-10: closing the gap where a direct
+    `authenticated` insert could store an unvalidated model, bypassing
+    `keystone_save_system_model()`'s validation entirely — see 0004's own comments). Before
+    0004 these had SELECT+INSERT; now insert/update/delete are ALL denied at the grant
+    level, so even touching a row you own — insert included — raises `permission denied`
+    before RLS/any trigger is ever evaluated (reinforcing ADR-005 §3's immutable-snapshot
+    guarantee, a different property from §1b's tenant isolation). The ONLY way to write
+    these tables now is `keystone_save_system_model()` (SECURITY DEFINER, tested in
+    db_test_model_store_roundtrip.py, not here).
   - simulation_run: SELECT only for `authenticated` (service_role's BYPASSRLS write path is
     explicitly out of scope for a DB-only harness — see the class docstring below).
 
@@ -25,18 +31,20 @@ distinction matters (proving a rejection is STRUCTURAL, not just a permission ch
 file uses `psycopg.errors.ForeignKeyViolation` (a genuinely different SQLSTATE, 23503)
 instead — see the flow_step test at the bottom.
 
-CONFIRMED ON A REAL RUN (Postgres 17): inserting a row tagged tenant B, while signed in as
-tenant A, on any table whose tenant_id is DERIVED by a SECURITY INVOKER trigger (component,
-flow, flow_step, assumption via keystone_derive_tenant_from_system_model /
-keystone_derive_flow_step_scope; source_document via keystone_derive_tenant_from_project)
-raises `psycopg.errors.NoDataFound` (SQLSTATE P0002), NOT InsufficientPrivilege. Reason: those
-triggers are SECURITY INVOKER on purpose (Bifola's review: "makes a hidden cross-tenant parent
-fail closed") — their own `select ... into strict` lookup runs under the CALLING role's RLS,
-so looking up tenant B's parent row while signed in as A finds ZERO rows (A's RLS hides it),
-and STRICT raises NO_DATA_FOUND before the with-check clause is ever reached. The write is
-still correctly blocked either way; this is a different, EARLIER failure mode than the with-
-check rejection tested directly on `project`/`source_document`/`system_model` (whose tenant_id
-is app-supplied, not trigger-derived, so with-check is what actually fires there).
+CONFIRMED ON A REAL RUN (Postgres 17), STILL TRUE FOR `source_document` ONLY as of 0004:
+inserting a row tagged tenant B, while signed in as tenant A, on a table whose tenant_id is
+DERIVED by a SECURITY INVOKER trigger raises `psycopg.errors.NoDataFound` (SQLSTATE P0002),
+NOT InsufficientPrivilege — the trigger's own `select ... into strict` lookup runs under the
+CALLING role's RLS, so looking up tenant B's parent row while signed in as A finds ZERO rows
+(A's RLS hides it), and STRICT raises NO_DATA_FOUND before any `with check` is ever reached.
+This ONLY still applies to `source_document` (via keystone_derive_tenant_from_project) —
+component/flow/flow_step/assumption's own tenant-derivation triggers still exist and still
+behave this way in principle, but 0004 revoked `authenticated`'s INSERT on those four tables
+entirely, so an insert attempt now fails with `InsufficientPrivilege` at the GRANT level
+before the trigger is ever invoked at all — a different, EARLIER failure mode again. Each of
+those four tables' tests below reflects this (INSERT expects InsufficientPrivilege, not
+NoDataFound, and doesn't need a tenant-B-tagged payload to prove it — no insert succeeds at
+all, tenant-correct or not).
 """
 from __future__ import annotations
 
@@ -126,17 +134,21 @@ class TestTenantIsolation(DatabaseTestCase):
             self.cur.execute("delete from source_document where id = %s", (self.tenant_b.source_document_id,))
             self.assertEqual(self.cur.rowcount, 0)
 
-    # -- system_model, component, flow, flow_step, assumption: SELECT+INSERT only --------
+    # -- system_model, component, flow, flow_step, assumption: SELECT ONLY as of 0004 ------
 
-    def _assert_own_row_write_denied_by_grant(self, update_sql: str, own_id) -> None:
-        """UPDATE/DELETE on a SELECT+INSERT-only table: no grant exists at all, so even a
-        row you legitimately own raises `permission denied` before RLS is ever consulted —
-        ADR-005 §3's immutable-snapshot guarantee, not a §1b cross-tenant test."""
+    def _assert_write_denied_by_grant(self, sql: str, *params) -> None:
+        """ANY write verb (insert/update/delete) on these five tables now raises
+        `permission denied` before RLS/any trigger is ever consulted — 0004 revoked
+        insert/update/delete from `authenticated` entirely (Bifola's ruling, issue #21,
+        2026-09-10), leaving `keystone_save_system_model()` (SECURITY DEFINER) as the only
+        write path. This is ADR-005 §3's immutable-snapshot guarantee AND the "an invalid
+        model can never be stored as a runnable version" guarantee (§6) enforced together —
+        not a §1b cross-tenant test, so the payload doesn't need to be tenant-B-tagged."""
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
             with self.conn.transaction():
-                self.cur.execute(update_sql, (own_id,))
+                self.cur.execute(sql, params)
 
-    def test_system_model_select_insert_isolation(self):
+    def test_system_model_select_isolation(self):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute(
                 "select project_id from system_model where project_id = %s", (self.tenant_b.project_id,)
@@ -150,26 +162,18 @@ class TestTenantIsolation(DatabaseTestCase):
             )
             self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own system_model row")
 
-            # system_model has NO tenant-derivation trigger (its tenant_id is app-supplied,
-            # not derived) — this is a direct with-check test, unlike the trigger-derived
-            # tables below. tenant_id is set EXPLICITLY to B here (not omitted) so this test
-            # actually exercises "tagged as tenant B", not an incidental NULL failure.
-            with self.assertRaises(psycopg.errors.InsufficientPrivilege):
-                with self.conn.transaction():
-                    self.cur.execute(
-                        "insert into system_model (project_id, tenant_id, name, system_rps, "
-                        "egress_micro_usd_per_gb, storage_micro_usd_per_gb_month, "
-                        "request_micro_usd_per_thousand, llm_input_micro_usd_per_1k_tokens, "
-                        "llm_output_micro_usd_per_1k_tokens) "
-                        "values (%s, %s, 'evil', 1.0, 0, 0, 0, 0, 0)",
-                        (self.tenant_b.project_id, self.tenant_b.tenant_id),
-                    )
-
-            self._assert_own_row_write_denied_by_grant(
+            self._assert_write_denied_by_grant(
+                "insert into system_model (project_id, name, system_rps, "
+                "egress_micro_usd_per_gb, storage_micro_usd_per_gb_month, "
+                "request_micro_usd_per_thousand, llm_input_micro_usd_per_1k_tokens, "
+                "llm_output_micro_usd_per_1k_tokens) values (%s, 'evil', 1.0, 0, 0, 0, 0, 0)",
+                self.tenant_a.project_id,
+            )
+            self._assert_write_denied_by_grant(
                 "update system_model set name = 'x' where project_id = %s", self.tenant_a.project_id
             )
 
-    def test_component_select_insert_isolation(self):
+    def test_component_select_isolation(self):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute(
                 "select id from component where project_id = %s", (self.tenant_b.project_id,)
@@ -181,21 +185,17 @@ class TestTenantIsolation(DatabaseTestCase):
             )
             self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own component row")
 
-            # NoDataFound, not InsufficientPrivilege — see module docstring.
-            with self.assertRaises(psycopg.errors.NoDataFound):
-                with self.conn.transaction():
-                    self.cur.execute(
-                        "insert into component (id, project_id, model_version, kind, name, "
-                        "per_instance_rps, monthly_cost_per_instance, provenance) "
-                        "values ('evil', %s, %s, 'app_server', 'evil', 1.0, 0, 'ASSUMPTION')",
-                        (self.tenant_b.project_id, self.tenant_b.model_version),
-                    )
-
-            self._assert_own_row_write_denied_by_grant(
+            self._assert_write_denied_by_grant(
+                "insert into component (id, project_id, model_version, kind, name, "
+                "per_instance_rps, monthly_cost_per_instance, provenance) "
+                "values ('evil', %s, %s, 'app_server', 'evil', 1.0, 0, 'ASSUMPTION')",
+                self.tenant_a.project_id, self.tenant_a.model_version,
+            )
+            self._assert_write_denied_by_grant(
                 "update component set name = 'x' where project_id = %s", self.tenant_a.project_id
             )
 
-    def test_flow_select_insert_isolation(self):
+    def test_flow_select_isolation(self):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute("select id from flow where project_id = %s", (self.tenant_b.project_id,))
             self.assertEqual(self.cur.fetchall(), [], "A must see zero of B's flow rows")
@@ -203,20 +203,15 @@ class TestTenantIsolation(DatabaseTestCase):
             self.cur.execute("select id from flow where project_id = %s", (self.tenant_a.project_id,))
             self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own flow row")
 
-            # NoDataFound, not InsufficientPrivilege — see module docstring.
-            with self.assertRaises(psycopg.errors.NoDataFound):
-                with self.conn.transaction():
-                    self.cur.execute(
-                        "insert into flow (project_id, model_version, name, share) "
-                        "values (%s, %s, 'evil', 1.0)",
-                        (self.tenant_b.project_id, self.tenant_b.model_version),
-                    )
-
-            self._assert_own_row_write_denied_by_grant(
+            self._assert_write_denied_by_grant(
+                "insert into flow (project_id, model_version, name, share) values (%s, %s, 'evil', 1.0)",
+                self.tenant_a.project_id, self.tenant_a.model_version,
+            )
+            self._assert_write_denied_by_grant(
                 "update flow set name = 'x' where project_id = %s", self.tenant_a.project_id
             )
 
-    def test_flow_step_select_insert_isolation(self):
+    def test_flow_step_select_isolation(self):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute(
                 "select id from flow_step where flow_id = %s", (self.tenant_b.flow_id,)
@@ -228,22 +223,15 @@ class TestTenantIsolation(DatabaseTestCase):
             )
             self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own flow_step row")
 
-            # NoDataFound, not InsufficientPrivilege: keystone_derive_flow_step_scope's
-            # lookup on `flow` (SECURITY INVOKER) can't see B's flow row under A's RLS —
-            # same shape as component/flow/assumption/source_document, see module docstring.
-            with self.assertRaises(psycopg.errors.NoDataFound):
-                with self.conn.transaction():
-                    self.cur.execute(
-                        "insert into flow_step (flow_id, component_id, step_order) "
-                        "values (%s, 'evil', 99)",
-                        (self.tenant_b.flow_id,),
-                    )
-
-            self._assert_own_row_write_denied_by_grant(
+            self._assert_write_denied_by_grant(
+                "insert into flow_step (flow_id, component_id, step_order) values (%s, 'evil', 99)",
+                self.tenant_a.flow_id,
+            )
+            self._assert_write_denied_by_grant(
                 "update flow_step set step_order = 1 where flow_id = %s", self.tenant_a.flow_id
             )
 
-    def test_assumption_select_insert_isolation(self):
+    def test_assumption_select_isolation(self):
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute(
                 "select id from assumption where project_id = %s", (self.tenant_b.project_id,)
@@ -255,17 +243,12 @@ class TestTenantIsolation(DatabaseTestCase):
             )
             self.assertEqual(len(self.cur.fetchall()), 1, "A must still see A's own assumption row")
 
-            # NoDataFound, not InsufficientPrivilege — see module docstring.
-            with self.assertRaises(psycopg.errors.NoDataFound):
-                with self.conn.transaction():
-                    self.cur.execute(
-                        "insert into assumption (project_id, model_version, subject, statement, "
-                        "confidence, source, provenance) "
-                        "values (%s, %s, 'x', 'x', 'med', 'user', 'ASSUMPTION')",
-                        (self.tenant_b.project_id, self.tenant_b.model_version),
-                    )
-
-            self._assert_own_row_write_denied_by_grant(
+            self._assert_write_denied_by_grant(
+                "insert into assumption (project_id, model_version, subject, statement, "
+                "confidence, source, provenance) values (%s, %s, 'x', 'x', 'med', 'user', 'ASSUMPTION')",
+                self.tenant_a.project_id, self.tenant_a.model_version,
+            )
+            self._assert_write_denied_by_grant(
                 "update assumption set statement = 'x' where project_id = %s", self.tenant_a.project_id
             )
 
@@ -332,17 +315,14 @@ class TestTenantIsolation(DatabaseTestCase):
             # it doesn't error. The actual "every insert attempt fails" property (this
             # test's own claim) has to be proven with an INSERT instead.
             #
-            # Expected exception is NoDataFound, NOT InsufficientPrivilege — and this is a
-            # DIFFERENT reason than the other NoDataFound cases in this file: with NO claim
-            # at all, keystone_current_tenant() is NULL, so `using (tenant_id = NULL)` fails
-            # for EVERY row on `flow` for THIS session — including A's own flow_id used
-            # below. keystone_derive_flow_step_scope's lookup on `flow` therefore finds zero
-            # VISIBLE rows regardless of whose flow_id is passed, and STRICT raises
-            # NO_DATA_FOUND before `with check` on flow_step is ever reached. (A genuinely
-            # different failure path than "cross-tenant parent exists but isn't visible" —
-            # here NOTHING is visible, not even your own data, which is the whole point of
-            # the no-membership fail-closed state.)
-            with self.assertRaises(psycopg.errors.NoDataFound):
+            # Expected exception is InsufficientPrivilege as of 0004 (was NoDataFound before
+            # it revoked authenticated's insert on flow_step entirely): the grant-level
+            # denial fires before keystone_derive_flow_step_scope's trigger — or the
+            # no-membership/NULL-claim question that used to matter here — is ever reached
+            # at all. An even stronger guarantee than before: this insert is denied
+            # unconditionally for `authenticated`, membership or no membership, own data or
+            # not.
+            with self.assertRaises(psycopg.errors.InsufficientPrivilege):
                 with self.conn.transaction():
                     self.cur.execute(
                         "insert into flow_step (flow_id, component_id, step_order) "
