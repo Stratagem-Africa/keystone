@@ -53,10 +53,17 @@ def _validate_for_persistence(model: SystemModel) -> None:
         if not (0 < f.share <= 1):
             raise IngestError(f"flow {f.name!r} has share {f.share!r}, must be in (0, 1]")
         for s in f.path:
-            if not (0 <= s.visit_prob <= 1):
+            # Upper bound is 1000, not 1: migration 0005 (refactor/one-studio-surface,
+            # 3bb8e80) raised the DB's visit_prob ceiling to allow fan-out designs (one
+            # request triggering many downstream calls to the same component). Kept
+            # TWO-SIDED like the DB's own check — a one-sided `<= 1000` alone wouldn't
+            # reject NaN (`NaN > 0` is TRUE in Postgres/this still matters in Python too,
+            # since `math.nan <= 1000` is also False, so the two-sided form rejects it here
+            # the same way) (Bifola's PR #198 comment, 2026-09-14).
+            if not (0 <= s.visit_prob <= 1000):
                 raise IngestError(
                     f"flow {f.name!r} step {s.component_id!r} has visit_prob {s.visit_prob!r}, "
-                    "must be in [0, 1]"
+                    "must be in [0, 1000]"
                 )
     for a in model.assumptions:
         if a.confidence not in _VALID_ASSUMPTION_CONFIDENCE:

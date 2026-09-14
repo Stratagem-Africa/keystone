@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import unittest
 
+import copy
+
 from keystone.ingestion import IngestError
-from keystone.model import Component, ComponentKind, Flow, FlowStep, PricingRates, SystemModel, Workload
-from keystone.model_store import Project, StubModelStore, make_model_store
+from keystone.model import Assumption, Component, ComponentKind, Flow, FlowStep, PricingRates, SystemModel, Workload
+from keystone.model_store import Project, StubModelStore, _validate_for_persistence, make_model_store
 from keystone.provenance import Citation, Grounding
 
 
@@ -158,6 +160,71 @@ class TestStubModelStoreListVersionsAndDiff(unittest.TestCase):
         self.assertEqual(diff.flows_changed, [])
         self.assertFalse(diff.workload_changed)
         self.assertFalse(diff.pricing_changed)
+
+
+def _persistable_model() -> SystemModel:
+    """A model that must PASS `_validate_for_persistence` — each test below breaks exactly
+    one field off a deepcopy of this, to prove the check firing isn't a coincidence from
+    some OTHER field already being invalid."""
+    model = _sample_model()
+    model.assumptions.append(
+        Assumption(subject="s", statement="st", confidence="med", source="user", provenance="ASSUMPTION")
+    )
+    return model
+
+
+class TestValidateForPersistence(unittest.TestCase):
+    """`_validate_for_persistence` had ZERO test coverage before this (Bifola's PR #198
+    review, 2026-09-14, proved it empirically: replacing the function's body with a bare
+    `return` changed nothing across 541 tests). It's the function that keeps StubModelStore
+    and SupabaseModelStore agreeing on what "saveable" means, so each case here breaks
+    exactly one field from an otherwise-valid model and expects the same IngestError
+    save_model() itself raises."""
+
+    def test_valid_model_passes(self):
+        _validate_for_persistence(_persistable_model())   # must not raise
+
+    def test_rejects_invalid_component_provenance(self):
+        model = copy.deepcopy(_persistable_model())
+        model.components["app"].provenance = "assumption"   # the stale lowercase default, model.py:59
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_flow_share_out_of_range(self):
+        model = copy.deepcopy(_persistable_model())
+        model.flows[0].share = 1.5
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_flow_step_visit_prob_out_of_range(self):
+        model = copy.deepcopy(_persistable_model())
+        model.flows[0].path[0].visit_prob = -0.1
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_assumption_invalid_confidence(self):
+        model = copy.deepcopy(_persistable_model())
+        model.assumptions[0].confidence = "extremely-sure"
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_assumption_invalid_source(self):
+        model = copy.deepcopy(_persistable_model())
+        model.assumptions[0].source = "vibes"
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_assumption_invalid_provenance(self):
+        model = copy.deepcopy(_persistable_model())
+        model.assumptions[0].provenance = "assumption"   # the stale lowercase default again
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
+
+    def test_rejects_non_positive_system_rps(self):
+        model = copy.deepcopy(_persistable_model())
+        model.workload.system_rps = 0
+        with self.assertRaises(IngestError):
+            _validate_for_persistence(model)
 
 
 class TestMakeModelStore(unittest.TestCase):

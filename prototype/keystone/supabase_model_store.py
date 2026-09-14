@@ -241,6 +241,9 @@ class SupabaseModelStore:
             .select("*")
             .eq("project_id", project.id)
             .eq("model_version", version)
+            .order("component_order")   # matches flow_order/assumption_order below — without
+            # it a reload can reorder components, and the engine reports the bottleneck by
+            # iterating this order (Bifola's PR #198 review, 2026-09-14).
             .execute()
         ).data
 

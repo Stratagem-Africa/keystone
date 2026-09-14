@@ -38,32 +38,78 @@
 
 begin;
 
--- Preserve SystemModel.flows / .assumptions list ORDER. Dataclass equality on both is
--- order-sensitive (they're plain Python lists), but 0001 had no column for either — only
--- flow_step.step_order existed, preserving order WITHIN one flow's path, not the flows list
--- itself. Without this, a round-trip through Postgres could silently reorder either list and
--- still "look" correct by content while failing strict equality — exactly the kind of gap
--- ADR-005 §6a's round-trip requirement exists to catch.
-alter table flow       add column flow_order       int not null default 0;
-alter table assumption add column assumption_order int not null default 0;
+-- Preserve SystemModel.components / .flows / .assumptions list ORDER. Dataclass equality on
+-- all three is order-sensitive (they're plain Python lists/dicts), but 0001 had no column for
+-- any of them — only flow_step.step_order existed, preserving order WITHIN one flow's path,
+-- not the flows list itself. Without this, a round-trip through Postgres could silently
+-- reorder any of them and still "look" correct by content while failing strict equality —
+-- exactly the kind of gap ADR-005 §6a's round-trip requirement exists to catch. Components
+-- matter beyond equality too: the engine reports the bottleneck by iterating this order, so an
+-- unstable component order can surface a DIFFERENT named bottleneck for identical inputs.
+--
+-- Each column-add + backfill pair below is wrapped in "only if the column is new" so this
+-- migration is safe to re-apply. `add column ... if not exists` alone is idempotent, but the
+-- BACKFILL is not — re-running it would recompute every row's order from `id` again, silently
+-- scrambling rows a real save has since given a TRUE order via keystone_save_system_model's
+-- loop counter below, i.e. exactly the bug this migration exists to fix. Gating both together
+-- on the column's prior existence closes that: a second apply sees the column already there
+-- and skips both statements entirely (Bifola's PR #198 review, 2026-09-14 — "guard the
+-- backfill first, then add if not exists; the other order arms the data loss").
+--
+-- There is no way to recover the TRUE original insertion order retroactively for rows saved
+-- under 0001-0003, before any of these columns existed (nothing tracked it before now), but
+-- row_number() over a stable, always-unique key at least makes the backfilled order
+-- deterministic and reload-stable, which is strictly better than an unbroken tie at DEFAULT 0.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'flow' and column_name = 'flow_order'
+  ) then
+    alter table flow add column if not exists flow_order int not null default 0;
 
--- Backfill for pre-existing rows (saved under 0001-0003, before this column existed): a
--- flat DEFAULT 0 alone would leave every flow/assumption in a given (project_id,
--- model_version) snapshot TIED at 0, so a subsequent `ORDER BY flow_order` has no stable
--- tiebreak and could silently reorder them differently on every reload — reintroducing,
--- for old data, the exact bug this migration exists to fix. There is no way to recover the
--- TRUE original insertion order retroactively (nothing tracked it before now), but
--- row_number() over a stable, always-unique key (id) at least makes the backfilled order
--- deterministic and reload-stable, which is strictly better than an unbroken tie. New rows
--- going forward get their real order stamped by keystone_save_system_model's loop counter
--- below, not this default.
-update flow set flow_order = sub.rn - 1
-from (select id, row_number() over (partition by project_id, model_version order by id) as rn from flow) sub
-where flow.id = sub.id;
+    update flow set flow_order = sub.rn - 1
+    from (select id, row_number() over (partition by project_id, model_version order by id) as rn from flow) sub
+    where flow.id = sub.id;
+  end if;
+end $$;
 
-update assumption set assumption_order = sub.rn - 1
-from (select id, row_number() over (partition by project_id, model_version order by id) as rn from assumption) sub
-where assumption.id = sub.id;
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'assumption' and column_name = 'assumption_order'
+  ) then
+    alter table assumption add column if not exists assumption_order int not null default 0;
+
+    update assumption set assumption_order = sub.rn - 1
+    from (select id, row_number() over (partition by project_id, model_version order by id) as rn from assumption) sub
+    where assumption.id = sub.id;
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'component' and column_name = 'component_order'
+  ) then
+    alter table component add column if not exists component_order int not null default 0;
+
+    -- Unlike flow/assumption's own uuid `id` (globally unique, so `where x.id = sub.id`
+    -- alone is an unambiguous join), component.id is a Python str SLUG ("app", "db") —
+    -- unique only WITHIN one (project_id, model_version) snapshot, per 0001's composite PK.
+    -- The join below must include all three key columns, or this could stamp orders onto a
+    -- same-named component in a DIFFERENT project/version entirely.
+    update component c set component_order = sub.rn - 1
+    from (
+      select id, project_id, model_version,
+             row_number() over (partition by project_id, model_version order by id) as rn
+      from component
+    ) sub
+    where c.id = sub.id and c.project_id = sub.project_id and c.model_version = sub.model_version;
+  end if;
+end $$;
 
 create or replace function keystone_save_system_model(
   p_project_id uuid,
@@ -101,6 +147,7 @@ declare
   v_component_ids    text[];
   v_referenced_ids   text[];
   v_component        jsonb;
+  v_component_idx    int := 0;
   v_flow             jsonb;
   v_flow_id          uuid;
   v_flow_idx         int := 0;
@@ -141,10 +188,15 @@ begin
   -- error on the common path — this is defense in depth, not a replacement: a caller that
   -- reaches this function directly (raw SQL, a future client, a bug in the Python wrapper)
   -- still cannot get a structurally invalid model past it.
-  if jsonb_array_length(p_components) = 0 then
+  -- `is null` guards against p_components/p_flows arriving as a JSON `null` rather than
+  -- `[]` — jsonb_array_length is STRICT, so jsonb_array_length(NULL) is itself NULL, which
+  -- an IF treats as false, silently skipping this check entirely instead of rejecting the
+  -- call. The same trap as v_flow -> 'path' below (line ~226), fixed there originally but
+  -- missed here at first pass (Bifola's PR #198 review, 2026-09-14).
+  if p_components is null or jsonb_array_length(p_components) = 0 then
     raise exception 'model has no components';
   end if;
-  if jsonb_array_length(p_flows) = 0 then
+  if p_flows is null or jsonb_array_length(p_flows) = 0 then
     raise exception 'model has no flows -- the engine has no path to simulate';
   end if;
 
@@ -153,6 +205,16 @@ begin
     from jsonb_array_elements(p_flows) f;
   if v_share_total < 0.9 or v_share_total > 1.1 then
     raise exception 'flow shares sum to %, expected ~1.0', v_share_total;
+  end if;
+
+  -- `x > 0` alone does NOT reject NaN here: Postgres orders float8 NaN as GREATER than every
+  -- other value including infinity (a deliberate Postgres choice, not IEEE-754), so
+  -- `'NaN'::float8 > 0` is TRUE. `x < 'infinity'` closes it — NaN fails that side, so the
+  -- combined AND rejects it, the same "two-sided range rejects NaN" property flow.share/
+  -- flow_step.visit_prob already have for free from their `<= 1` upper bound (Bifola's PR
+  -- #198 review, 2026-09-14).
+  if p_system_rps is null or not (p_system_rps > 0 and p_system_rps < 'infinity') then
+    raise exception 'workload.system_rps must be a positive, finite number, got %', p_system_rps;
   end if;
 
   for v_flow in select * from jsonb_array_elements(p_flows) loop
@@ -168,7 +230,34 @@ begin
     end if;
   end loop;
 
-  select array_agg(c ->> 'id') into v_component_ids from jsonb_array_elements(p_components) c;
+  -- Same NaN trap as p_system_rps above, on the two component numeric fields that share its
+  -- "no natural upper bound" shape (per_instance_rps > 0, base_latency_ms >= 0) — a bare
+  -- one-sided check would let a NaN component field through as "valid".
+  for v_component in select * from jsonb_array_elements(p_components) loop
+    if (v_component ->> 'per_instance_rps')::double precision is null
+       or not ((v_component ->> 'per_instance_rps')::double precision > 0
+               and (v_component ->> 'per_instance_rps')::double precision < 'infinity') then
+      raise exception 'component % has invalid per_instance_rps %',
+        v_component ->> 'id', v_component ->> 'per_instance_rps';
+    end if;
+    if (v_component ->> 'base_latency_ms')::double precision is null
+       or not ((v_component ->> 'base_latency_ms')::double precision >= 0
+               and (v_component ->> 'base_latency_ms')::double precision < 'infinity') then
+      raise exception 'component % has invalid base_latency_ms %',
+        v_component ->> 'id', v_component ->> 'base_latency_ms';
+    end if;
+  end loop;
+
+  -- `where ... is not null` excludes any component missing an id from the aggregate up
+  -- front — the exact twin of the `is not null` filter on v_referenced_ids just below: in
+  -- SQL, comparing anything against an array CONTAINING a NULL element (`cid <> all
+  -- ('{app,NULL}')`) evaluates to NULL, not true/false — silently disabling the orphan
+  -- check for EVERY component, not just one related to the malformed row (Bifola's PR #198
+  -- review, 2026-09-14 — this fix already existed for v_referenced_ids but was missed here).
+  select array_agg(c ->> 'id')
+    into v_component_ids
+    from jsonb_array_elements(p_components) c
+    where c ->> 'id' is not null;
   -- `where ... is not null` excludes any flow_step missing component_id from the
   -- aggregate up front: in SQL, comparing anything against an array CONTAINING a NULL
   -- element (`cid <> all ('{app,NULL}')`) evaluates to NULL, not true/false — silently
@@ -213,13 +302,17 @@ begin
   returning version into v_version;   -- trigger-assigned (0001), race-free per project
 
   -- Components first: flow_step's composite FK needs them to already exist before any
-  -- flow referencing them is inserted.
+  -- flow referencing them is inserted. component_order (like flow_order/assumption_order
+  -- below) stamps the REAL insertion order from this loop counter — the migration's own
+  -- backfill only approximates order for pre-existing rows saved before the column existed
+  -- (Bifola's PR #198 review, 2026-09-14 — "you've solved this exact problem twice in this
+  -- same file, do it a third time").
   for v_component in select * from jsonb_array_elements(p_components) loop
     insert into component (
       id, project_id, model_version, kind, name, per_instance_rps, instances,
       base_latency_ms, monthly_cost_per_instance, egress_gb_per_month, storage_gb,
       requests_per_month, llm_input_tokens_per_month, llm_output_tokens_per_month,
-      provenance, groundings, match_context
+      provenance, groundings, match_context, component_order
     ) values (
       v_component ->> 'id', p_project_id, v_version, (v_component ->> 'kind')::component_kind,
       v_component ->> 'name', (v_component ->> 'per_instance_rps')::double precision,
@@ -231,8 +324,10 @@ begin
       (v_component ->> 'llm_output_tokens_per_month')::bigint,
       v_component ->> 'provenance',
       coalesce(v_component -> 'groundings', '{}'::jsonb),
-      coalesce(v_component -> 'match_context', '{}'::jsonb)
+      coalesce(v_component -> 'match_context', '{}'::jsonb),
+      v_component_idx
     );
+    v_component_idx := v_component_idx + 1;
   end loop;
 
   for v_flow in select * from jsonb_array_elements(p_flows) loop

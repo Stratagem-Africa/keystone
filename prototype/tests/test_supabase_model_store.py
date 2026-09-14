@@ -11,6 +11,8 @@ DB, no KEYSTONE_TEST_DATABASE_URL, no real Supabase project.
 from __future__ import annotations
 
 import os
+import sys
+import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -66,8 +68,21 @@ class _FakeClient:
 
 
 def _make_store(fake_client: _FakeClient) -> SupabaseModelStore:
+    # SupabaseModelStore.__init__ does `from supabase import create_client` LAZILY, precisely
+    # so importing keystone (or this test module) never pulls the optional `db` extra
+    # (pyproject.toml) into the base install. `patch("supabase.create_client", ...)` would
+    # undo that: to patch an attribute, mock has to import the real module first, which
+    # crashes this file with ModuleNotFoundError on any machine without the extra — that
+    # was the merge-gate blocker (Bifola's PR #198 review, 2026-09-14). The fix is to hand
+    # the lazy import a FAKE module to find instead of skipping these tests wherever the
+    # extra is missing: `sys.modules["supabase"]` becomes a stand-in with just the one
+    # attribute (`create_client`) the lazy import touches, so all 8 tests below keep
+    # actually running, on every machine, with nothing installed (verified by Bifola on a
+    # scratch copy: 541 tests OK, no skips).
+    fake_module = types.ModuleType("supabase")
+    fake_module.create_client = lambda *a, **k: fake_client
     with patch.dict(os.environ, {"SUPABASE_URL": "http://example.test", "SUPABASE_ANON_KEY": "anon-key"}):
-        with patch("supabase.create_client", return_value=fake_client):
+        with patch.dict(sys.modules, {"supabase": fake_module}):
             return SupabaseModelStore(access_token="fake-jwt")
 
 
