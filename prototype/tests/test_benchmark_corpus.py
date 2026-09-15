@@ -258,10 +258,10 @@ class TestFactoryAndComponentEvidence(unittest.TestCase):
         c = Component("cache", ComponentKind.CACHE, "Redis", per_instance_rps=80_000,
                       groundings={"per_instance_rps": g})
         self.assertEqual(c.provenance_of("per_instance_rps"), "GROUNDED")
-        self.assertEqual(c.provenance_of("base_latency_ms"), "assumption")   # ungrounded → default
+        self.assertEqual(c.provenance_of("base_latency_ms"), "ASSUMPTION")   # ungrounded → default
         # an ungrounded component is unchanged (the honest L0 default)
         self.assertEqual(Component("a", ComponentKind.APP_SERVER, "app", per_instance_rps=1).provenance_of("per_instance_rps"),
-                         "assumption")
+                         "ASSUMPTION")
 
 
 if __name__ == "__main__":

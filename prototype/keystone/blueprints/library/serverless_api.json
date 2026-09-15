@@ -1,0 +1,388 @@
+{
+  "spec_version": 1,
+  "name": "Serverless REST API",
+  "workload": {
+    "system_rps": 1500,
+    "description": "Managed API gateway in front of a function tier; 80% reads, 20% writes"
+  },
+  "components": [
+    {
+      "id": "apigw",
+      "kind": "api_gateway",
+      "name": "Managed API gateway \u2014 REST API (auth, throttling); account-level throttle quota",
+      "per_instance_rps": 10000,
+      "instances": 1,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 777600000,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "per_instance_rps": {
+          "value": 10000.0,
+          "unit": "rps",
+          "confidence_low": 2500.0,
+          "confidence_high": 10000.0,
+          "provenance": "GROUNDED",
+          "measured_context": "AWS API Gateway ACCOUNT-LEVEL throttle quota: per account, per Region, shared across HTTP APIs, REST APIs, WebSocket APIs and WebSocket callback APIs. It is not a per-API budget, it is not per-stage, and AWS does not scale it for you - raising it is a Service Quotas request, not a deploy. Band: REGION spread, both endpoints published. High = 10,000 RPS, the default in most Regions (burst 5,000). Low = 2,500 RPS (burst 1,250), the documented default for Africa (Cape Town), Europe (Milan), Asia Pacific (Jakarta), Middle East (UAE), Asia Pacific (Hyderabad), Asia Pacific (Melbourne), Europe (Spain), Europe (Zurich), Israel (Tel Aviv), Canada West (Calgary), Asia Pacific (Malaysia), Asia Pacific (Thailand) and Mexico (Central). Any other API in the same account and Region spends the same quota, so the headroom a real deployment sees is lower than a single-API reading of this row.",
+          "citations": [
+            {
+              "source": "AWS API Gateway developer guide \u2014 quotas and important notes",
+              "reference": "https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html",
+              "note": "Verbatim: '10,000 requests per second (RPS) ... per account, per Region across HTTP APIs, REST APIs, WebSocket APIs, and WebSocket callback APIs'. Regional footnote, verbatim: 'For the following Regions, the default throttle quota is 2500 RPS and the default burst quota is 1250 RPS: Africa (Cape Town), Europe (Milan), Asia Pacific (Jakarta), Middle East (UAE), Asia Pacific (Hyderabad), Asia Pacific (Melbourne), Europe (Spain), Europe (Zurich), Israel (Tel Aviv), Canada West (Calgary), Asia Pacific (Malaysia), Asia Pacific (Thailand), and Mexico (Central).'"
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "region_default": "10000_rps_most_regions_2500_rps_thirteen_regions"
+      }
+    },
+    {
+      "id": "fn",
+      "kind": "app_server",
+      "name": "Function tier \u2014 serverless; ceiling is the 1,000-concurrency account quota",
+      "per_instance_rps": 40,
+      "instances": 1000,
+      "base_latency_ms": 25.0,
+      "monthly_cost_per_instance": 32,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 32.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 28.0,
+          "confidence_high": 32.0,
+          "provenance": "GROUNDED",
+          "measured_context": "AWS Lambda ON-DEMAND published rates, us-east-1, 512 MB memory, 25 ms average billed duration, applied to this file's declared 777.6M invocations per month and then SPREAD EVENLY over the 1,000 modelled execution-environment slots - Lambda bills per invocation and per GB-second, while the engine carries only a per-instance monthly cost, so the spread is a unit conversion, not a rate. Band: PROCESSOR-ARCHITECTURE spread, both endpoints published: high (the modelled value) = x86 at $0.0000166667 per GB-second; low = arm64/Graviton at $0.0000133334 per GB-second; the $0.20 per 1M request charge is the same on both. Out of scope and deliberately NOT folded into the band: the monthly free tier, Provisioned Concurrency, the 1 ms billing floor, and any change in invocation volume or duration - all of which require re-deriving this per-slot figure rather than reading it as a price.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing \u2014 AWS Lambda",
+              "reference": "https://aws.amazon.com/lambda/pricing/",
+              "note": "Published on-demand rates: $0.20 per 1M requests; $0.0000166667 per GB-second (x86) and $0.0000133334 per GB-second (arm64). Derivation of the INPUT on this row (the engine, not this note, produces the bill): 777.6M invocations x $0.20/1M = $155.52 of request charge; 777.6M x 0.025 s x 0.5 GB = 9,720,000 GB-seconds x $0.0000166667 = $162.00 of duration charge; $317.52 total, / 1,000 slots = 31.752 cents, rounded UP to 32 whole cents because money here is integer minor units (harm floor). Band low: the same arithmetic on arm64 gives $285.12, / 1,000 = 28.512 cents, rounded DOWN to 28 so the band widens rather than narrows."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "platform": "aws_lambda_x86_512mb"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Response / hot-item cache",
+      "per_instance_rps": 40000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 4745.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.medium \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.065/h x 730 = 4745c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.medium"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Key-value item store (DynamoDB-shaped)",
+      "per_instance_rps": 5000,
+      "instances": 1,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store \u2014 uploads and exports",
+      "per_instance_rps": 5500,
+      "instances": 1,
+      "base_latency_ms": 15.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 1200,
+      "storage_gb": 4000,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "per_instance_rps": {
+          "value": 5500.0,
+          "unit": "rps",
+          "confidence_low": 3500.0,
+          "confidence_high": 5500.0,
+          "provenance": "GROUNDED",
+          "measured_context": "Amazon S3 published request rate, PER PARTITIONED PREFIX in a bucket - not a per-bucket ceiling. Band: OPERATION-MIX spread, both endpoints published: high (the modelled value) = 5,500 GET/HEAD requests per second; low = 3,500 PUT/COPY/POST/DELETE requests per second, which is the endpoint that governs this design's upload path. The limit multiplies with the number of prefixes you spread keys across, so a design that needs more reads in parallel buys it with key layout rather than with an instance; nothing here models that layout.",
+          "citations": [
+            {
+              "source": "AWS S3 user guide \u2014 optimizing performance (request-rate and performance guidelines)",
+              "reference": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html",
+              "note": "Published: at least 3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per partitioned prefix per bucket; there are no limits to the number of prefixes, so request rate scales by parallelising across prefixes."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "service": "amazon_s3_per_prefix"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "read_item",
+      "share": 0.6,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.2
+        }
+      ]
+    },
+    {
+      "name": "list_query",
+      "share": 0.2,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.5
+        }
+      ]
+    },
+    {
+      "name": "write_item",
+      "share": 0.15,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "upload_asset",
+      "share": 0.05,
+      "path": [
+        {
+          "component_id": "apigw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "1,500 req/s peak, 80:20 read:write. Monthly request volume assumes an average of 300 req/s (20% of peak) = 777.6M gateway requests/month",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fn",
+      "statement": "THE ENGINE HAS NO SERVERLESS COMPONENT KIND, so the function tier is modelled as an app_server. Per-unit capacity is now derived from this component's own service time the way AWS derives it: one execution environment serves one request at a time, so at the modelled 25 ms warm duration one unit is 1 / 0.025 s = 40 req/s. AWS states the formula outright - 'Concurrency = (average requests per second) * (average request duration in seconds)' - which puts the concurrency this design consumes at 1,500 x 0.025 = about 38 simultaneous execution environments. The instance count on the component is therefore NOT a fleet you buy: it is the CEILING AWS gives you, the default 1,000 concurrent executions per account per Region, and the utilisation the engine reports for this tier is the share of that quota the design consumes. THIS REPLACES A SELF-CONTRADICTORY ROW: the file previously declared 4 units at ~500 req/s each, which is 12.5x its own 25 ms latency figure per unit (500 req/s implies a 2 ms function), understates the concurrency the workload needs by roughly 9x, and inverts AWS's quota arithmetic in the other direction, since a function pinned to 4 units of reserved concurrency is capped at 10 x 4 = 40 req/s, not 2,000.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "fn",
+      "statement": "THE MODELLED FUNCTION CAPACITY IS AN OVERSTATEMENT ABOVE 10,000 req/s. AWS: 'At both the account level and the function level, Lambda also enforces a requests per second limit of equal to 10 times the corresponding concurrency quota', so a default 1,000-concurrency account is additionally capped at 10,000 req/s however short the function is. The engine carries ONE capacity per component; this row carries the concurrency ceiling, because at a 25 ms duration that is the limit a real deployment reaches first. At the gateway quota modelled here the two account ceilings coincide (both 10,000 req/s), so the overstatement does not move the breakpoint the engine reports. Fix: if you raise the API Gateway account quota, re-run with this tier capped at 10 x whatever concurrency quota you were actually granted, or the function tier will look free when it is not.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "fn",
+      "statement": "BURST RAMP IS NOT MODELLED. This engine is steady-state. AWS scales a single function by up to 1,000 additional execution environments every 10 seconds (the 12x faster scaling announced 2023-12-06); requests that arrive faster than the ramp are throttled even while the steady-state utilisation printed below is low. Fix: for flash-arrival workloads, test the first 60 seconds separately - steady-state headroom says nothing about it.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "fn",
+      "statement": "COLD STARTS ARE NOT MODELLED, and the 25 ms on this component is a WARM-path duration. AWS: 'Cold starts typically occur in under 1% of invocations. The duration of a cold start varies from under 100 ms to over 1 second.' That is a tail-latency story, not a capacity one - it does not change the concurrency arithmetic above - but every latency percentile the engine prints for this design is a warm-path percentile. Fix: if your p99 budget is tight, measure your own cold-start rate and duration (init code, package size, VPC attachment, SnapStart or Provisioned Concurrency) and carry it as a separate tail rather than assuming this model covers it.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "fn",
+      "statement": "Compute is priced from AWS's published Lambda ON-DEMAND rates, not from the provisioned-instance catalogue: $0.20 per 1M requests plus $0.0000166667 per GB-second (x86, us-east-1). Applied to this file's 777.6M invocations at 25 ms and 512 MB that is $155.52 of request charge plus $162.00 of duration charge, $317.52 for the month, entered as 32 cents per modelled execution-environment slot (31.752 rounded up, because money here is whole minor units; the 0.8% of rounding is disclosed rather than hidden). This REPLACES the previous 't4g.medium x4, treat the compute line as an upper bound' hand-wave, and states the direction it was hand-waving about: at this duty cycle per-invocation billing is CHEAPER than holding the same concurrency warm on the provisioned catalogue, since the ~38 t4g.medium instances the concurrency arithmetic calls for bill at the cited $0.0336 per instance-hour every hour of the month whether or not a request arrives. The per-slot figure is a spread of a usage bill, not a per-unit price: raising the modelled quota does not raise a Lambda bill, and changing the volume or the duration means re-deriving it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "apigw",
+      "statement": "THE GATEWAY QUOTA IS THE CEILING AWS DOES NOT SCALE FOR YOU, AND IT IS REGION-DEPENDENT. The 10,000 req/s on this component is AWS's default account-level throttle - 'per account, per Region across HTTP APIs, REST APIs, WebSocket APIs, and WebSocket callback APIs' - so it is shared with every other API in the same account and Region, and raising it is a Service Quotas request with lead time, not a deploy. Thirteen Regions default to a quarter of it: 'For the following Regions, the default throttle quota is 2500 RPS and the default burst quota is 1250 RPS: Africa (Cape Town), Europe (Milan), Asia Pacific (Jakarta), Middle East (UAE), Asia Pacific (Hyderabad), Asia Pacific (Melbourne), Europe (Spain), Europe (Zurich), Israel (Tel Aviv), Canada West (Calgary), Asia Pacific (Malaysia), Asia Pacific (Thailand), and Mexico (Central).' That 2,500 RPS default is the LOW end of the cited band on this component, so the engine propagates the region choice into the headline numbers instead of leaving it in a footnote. Deploying this design at its stated peak into one of those thirteen Regions is a PRE-LAUNCH gate: request the quota increase first, and subtract what your other APIs in that account already spend.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "db",
+      "statement": "The engine has no key-value/document kind, so the item store is modelled as `sql_db` \u2014 the persistent record store on the path. 5,000 req/s stands for provisioned read/write capacity, not a Postgres primary",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "DYNAMODB DOES NOT THROTTLE ON TABLE-WIDE RPS; IT THROTTLES ON KEY DISTRIBUTION, AND THE FLAT 5,000 req/s ON THIS COMPONENT HIDES THAT. AWS documents that 'throttling will occur if a single partition receives more than 3000 read operation or more than 1000 write operations' per second; adaptive capacity lifts a hot key only 'to the partition maximum of 3,000 RCUs and 1,000 WCUs', and burst capacity retains merely 'up to five minutes (300 seconds) of unused read and write capacity'. So this design's write path is safe only if its keys spread: the same write rate concentrated on one partition key meets a ceiling the engine cannot see, and no amount of provisioned table capacity removes it. Fix: before trusting the item-store line, check your partition-key cardinality and the share of traffic the hottest key takes.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cache",
+      "statement": "80% hit-rate on single-item reads, 50% on list queries (list results go stale faster)",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "REQUEST PRICING NOW NAMES THE API TYPE, because the two API Gateway products differ by about 3.5x on exactly this line and the previous $3.00 per million matched NEITHER published price. Modelled: REST APIs at AWS's published $3.50 per million requests. The alternative, and the likelier choice for a new API in 2026, is HTTP APIs at a published $1.00 per million for the first 300M requests per month and $0.90 per million above that. The qualitative conclusion survives either choice: the gateway request rate is more than ten times Lambda's own $0.20 per million request charge, which is why the request line, not the compute line, is the characteristic cost of this shape - and the engine, not this note, computes both lines below.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "THE ENGINE CARRIES ONE FLAT REQUEST RATE AND CANNOT EXPRESS A VOLUME TIER. The modelled rate is the REST API first-tier published price; AWS tiers both products by monthly volume (HTTP APIs drop from $1.00 to $0.90 per million above 300M requests, and REST API pricing also steps down at higher volumes), so at this file's 777.6M requests per month the modelled request line is an UPPER bound for the API type chosen. Fix: re-price from your own monthly volume against the published tiers before treating it as a budget. Switching product is a re-pricing, not a re-architecting: the account throttle quota, the shape and the capacities above are the same for REST and HTTP APIs.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cost",
+      "statement": "The gateway per-million request rate is applied to the API GATEWAY only, which is the kind it was measured for. Object-store request charges are left out: S3's per-request price is an order of magnitude lower and the engine carries only one request rate",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3500,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "intermediate",
+    "summary": "Managed API gateway fronting a function tier, a hot-item cache and a key-value store.",
+    "keywords": [
+      "serverless",
+      "serverless api",
+      "aws lambda",
+      "lambda function",
+      "faas",
+      "cloud functions",
+      "rest api"
+    ]
+  }
+}

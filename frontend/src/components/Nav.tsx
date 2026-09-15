@@ -30,7 +30,7 @@ export function Nav() {
       </Link>
 
       <div className="flex items-center gap-4">
-        {/* Studio — the interactive generation surface (public, no sign-in needed). */}
+        {/* The one architecture surface: describe → editable canvas → verdict (public, no sign-in). */}
         <Link
           href="/studio"
           className={`font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
@@ -38,30 +38,22 @@ export function Nav() {
           Studio
         </Link>
 
-        {/* Canvas — the interactive editable canvas (issue #186, public, no sign-in needed). */}
-        <Link
-          href="/canvas"
-          className={`font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
-        >
-          Canvas
-        </Link>
-
         {/* Accuracy-ladder badge — climbable, honest status, not a trust-me seal (docs/09 §3.6).
             A native <details> disclosure: keyboard-accessible, no framework state. Neutral hues
             ONLY — green here would read as "certified" and break §11.4. */}
         <details className="relative">
           <summary className={`cursor-pointer list-none [&::-webkit-details-marker]:hidden font-mono text-provenance text-ink-muted border border-steel rounded px-2 py-px transition-colors ease-settle duration-ui hover:text-paper ${navFocus}`}>
-            L0 · Directional
+            L0 · rough estimate
           </summary>
           <div className="absolute right-0 mt-2 w-72 z-30 flex flex-col gap-2 rounded-lg border border-steel bg-graphite p-4 shadow-lg">
             <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted">
               accuracy ladder — where we honestly are
             </p>
             {[
-              ["L0", "Directional", "current — modelled from your design, not yet field-calibrated", true],
-              ["L1", "Calibrated", "not yet earned — needs observed field data", false],
-              ["L2", "Validated", "not yet earned", false],
-              ["L3", "Certified", "never claimed — Keystone does not certify", false],
+              ["L0", "Directional", "where we are now — worked out from the design you describe, never checked against a system that's actually running", true],
+              ["L1", "Calibrated", "not yet earned — needs our component models checked against published benchmark numbers, with the error range written down for each", false],
+              ["L2", "Validated", "not yet earned — needs real numbers from systems people are actually running, fed back to correct our estimates", false],
+              ["L3", "Certified", "never — Keystone will not sign off on any design as safe for production", false],
             ].map(([lvl, name, note, here]) => (
               <div key={lvl as string} className="flex flex-col">
                 <span className={`font-mono text-provenance ${here ? "text-paper" : "text-ink-muted"}`}>
@@ -79,7 +71,7 @@ export function Nav() {
         {!loading && (
           user ? (
             <button
-              onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
+              onClick={async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (error) console.error(error.message); }}
               className={`font-sans text-label text-ink-muted hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
             >
               Sign out

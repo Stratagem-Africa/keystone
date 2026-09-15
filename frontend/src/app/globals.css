@@ -88,10 +88,20 @@
 }
 .sim-glow-red { background: radial-gradient(circle at center, rgba(229,72,77,0.28), transparent 72%); }
 
-/* ─── Canvas dark-glass palette (issue #186) — scoped to .canvas-glass only, not @theme,
-   so the site-wide (light) theme is untouched. Mirrors prototype/keystone/arch_map.py's
-   render_html() _CSS vars so the React canvas visually matches the Python-rendered map. ── */
-.canvas-glass {
+/* ─── Canvas dark-glass palette (issue #186) — mirrors prototype/keystone/arch_map.py's
+   render_html() _CSS vars so the React canvas matches the engine-rendered map.
+
+   The TOKENS live on :root, not on .canvas-glass. This is the same lesson the @theme
+   animation tokens above record, hit a second time: a bare custom class in this file can be
+   dropped by Turbopack in `next dev` while surviving `next build` — verified here, where the
+   dev chunk carried zero `.canvas-glass` rules and the production chunk carried them intact.
+   The failure is silent and only shows up as unstyled canvas, so anything load-bearing must
+   not depend on a bare class surviving. Declaring the custom properties on :root is inert for
+   the light theme (a variable paints nothing until something reads it, and only the canvas
+   components read these), and it means the palette resolves even if the class rule vanishes.
+   The components additionally set their own background inline, so the canvas can never render
+   as a transparent hole over the page. ── */
+:root {
   --cv-paper: #070a16;
   --cv-panel: rgba(16, 22, 46, 0.72);
   --cv-ink: #e8ecff;
@@ -102,11 +112,14 @@
   --cv-green: #4ade80;
   --cv-amber: #fbbf24;
   --cv-red: #f87171;
+}
+.canvas-glass {
   background-color: var(--cv-paper);
   background-image: radial-gradient(ellipse at top, rgba(125, 211, 252, 0.08), transparent 60%);
   color: var(--cv-ink);
 }
-.canvas-glass .cv-panel {
+/* Not scoped under .canvas-glass — a descendant selector inherits that class's fragility. */
+.cv-panel {
   background: var(--cv-panel);
   backdrop-filter: blur(14px);
   border: 1px solid var(--cv-line);

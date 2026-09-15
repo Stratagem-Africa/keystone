@@ -1,6 +1,13 @@
 # The name of your app on Fly.io. This becomes part of the default URL:
-# https://keystone-api.fly.dev
-# Must be globally unique across all Fly apps — change it if the name is taken.
+# https://stratagem-keystone.fly.dev
+# Must be globally unique across all Fly apps.
+#
+# WAS "keystone-api", AND THAT NAME IS TAKEN BY SOMEBODY ELSE. Checked 2026-09-07:
+# https://keystone-api.fly.dev/health returns HTTP 200 with {"database":"connected",
+# "scheduler":"running","status":"ok"} — a payload this codebase's handler never emits — and
+# /generate returns a plain-text Go 404. So a `fly deploy` against the old name would have failed
+# on a name collision at the worst possible moment. "keystone-engine" is taken too (401).
+# "stratagem-keystone" resolved to nothing on the same check, so it should be claimable.
 # OPERATIONAL RULE — do NOT run `fly secrets set` for any of the following until
 # auth + tenant isolation land (issue #21: canonical model store + row-level security):
 #   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
@@ -8,7 +15,7 @@
 # The /intent endpoint is unauthenticated — real keys on an open endpoint means
 # anyone on the internet runs jobs on your paid accounts (money harm + tenant violation).
 
-app = "keystone-api"
+app = "stratagem-keystone"
 
 # The Fly region closest to your users where the app runs first.
 # "iad" = Ashburn / Washington DC — Fly's default and most available free-tier region.

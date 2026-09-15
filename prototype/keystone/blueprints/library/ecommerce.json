@@ -1,0 +1,484 @@
+{
+  "spec_version": 1,
+  "name": "E-Commerce Platform",
+  "workload": {
+    "system_rps": 8000,
+    "description": "Browse-heavy storefront behind an edge full-page cache: ~98% catalogue reads, ~2% cart and checkout writes. 8,000 req/s arrive at the EDGE; only the cache misses reach the origin."
+  },
+  "components": [
+    {
+      "id": "edge",
+      "kind": "cdn",
+      "name": "Edge full-page cache / CDN",
+      "per_instance_rps": 200000,
+      "instances": 1,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Application load balancer",
+      "per_instance_rps": 30000,
+      "instances": 1,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "app",
+      "kind": "app_server",
+      "name": "Storefront origin \u2014 catalogue + search render (m6i.large x4)",
+      "per_instance_rps": 1000,
+      "instances": 4,
+      "base_latency_ms": 45.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "checkout",
+      "kind": "app_server",
+      "name": "Checkout + cart API (m6i.large x2)",
+      "per_instance_rps": 200,
+      "instances": 2,
+      "base_latency_ms": 120.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis: catalogue, price and session cache",
+      "per_instance_rps": 100000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL primary \u2014 carts, orders, inventory",
+      "per_instance_rps": 500,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "replica",
+      "kind": "replica",
+      "name": "Read replica \u2014 catalogue and search reads",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Order event stream (MSK m5.large x3)",
+      "per_instance_rps": 20000,
+      "instances": 3,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 15330,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15330.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15330.0,
+          "confidence_high": 15330.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.m5.large \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.21/broker-hour x 730 = 15330c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.m5.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "browse_catalogue",
+      "share": 0.8,
+      "path": [
+        {
+          "component_id": "edge",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 0.21
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 0.21
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 0.21
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.0315
+        }
+      ]
+    },
+    {
+      "name": "product_search",
+      "share": 0.18,
+      "path": [
+        {
+          "component_id": "edge",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 0.6
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 0.6
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 0.6
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.24
+        }
+      ]
+    },
+    {
+      "name": "add_to_cart",
+      "share": 0.0193,
+      "path": [
+        {
+          "component_id": "edge",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "checkout",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 2.0
+        }
+      ]
+    },
+    {
+      "name": "checkout_order",
+      "share": 0.0007,
+      "path": [
+        {
+          "component_id": "edge",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "checkout",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 8.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "8,000 req/s arriving AT THE EDGE in a peak retail hour. The funnel mix is now anchored to published production ratios instead of a round guess. Shopify's BFCM readiness post (shopify.engineering/bfcm-readiness-2025, pub. 2025-11-20) reports a scale test that 'hit 146 million requests per minute and 80,000+ checkouts per minute' - checkouts are 0.055% of requests, so checkout_order is modelled at 0.07% here, not the 5% this file used to carry. Amazon's Dynamo paper (SOSP 2007) reports the Shopping Cart Service serving 'tens of millions requests that resulted in well over 3 million checkouts in a single day', i.e. roughly 10-30 cart operations per checkout; add_to_cart is set at 1.93%, about 28 cart requests per checkout, inside that range. The 80/18 browse-to-search split is NOT measured - it is this model's assumption.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edge",
+      "statement": "THE EDGE IS THE LEVER THIS DESIGN USED TO HIDE. Shopify's BFCM 2024 production peak, same post: 'We peaked at 284 million requests per minute on edge and 80 million on app servers' - 72% of storefront traffic never reaches an application server. This model reproduces that ratio: browse misses the edge full-page cache 21% of the time and search 60% (a search result page is per-query and caches far worse than a product page), which blends to 28.2% of edge arrivals reaching the origin, i.e. the published 80-of-284. The per-flow 21/60 split is REASONED, not measured; only the blended ratio is published. Read that before buying origin instances: at this mix one point of edge hit-rate removes ~80 req/s from the origin.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edge",
+      "statement": "The edge row's 200,000 req/s is the LIBRARY'S CLASS DEFAULT for a CDN component, not a measurement: no CDN vendor publishes a per-PoP request ceiling, and the real limit is bytes and PoP capacity rather than request count. Its monthly_cost_per_instance is 0 ON PURPOSE - CloudFront-class pricing is per-GB plus per-request and the flat plans are billed per DISTRIBUTION, not per instance, while the engine multiplies cost by instance count. The bytes this tier serves are the largest real line in an e-commerce bill and they are NOT in the total below; also note that 8,000 req/s is a PEAK-hour rate, so it cannot be multiplied out to a month to get egress. Cost here is a compute floor, not a budget.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "Storefront origin: ~1,000 req/s per m6i.large is an ASSUMPTION with a wide band (roughly 300-1,500), not a benchmark - no public figure exists for a storefront instance's request rate and the corpus holds no measurement of one. base_latency_ms is raised from 15 to 45 against the only measured public figure there is: after a rewrite that made responses '4x to 6x faster', Shopify reported that its storefront renderer 'generates a response in less than ~45ms for 75% of storefront requests' (shopify.engineering, 2020-12-10). The scopes are not strictly comparable - that is a renderer p75, this is a whole-request service time - so treat 45 ms as a floor rather than a match. Four instances, down from ten, is the direct consequence of putting the edge in front: the origin now only sees the misses.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "THE ORIGIN'S REAL WORST CASE IS NOT IN THIS MODEL. A full edge purge - a price change, a new drop, a bad cache key, a deploy that rotates the cache version - collapses the hit-rate toward zero and sends all 8,000 req/s at the origin, roughly 3.5x what these four instances carry at the modelled hit-rate. The v1 analytical engine has no cold-cache regime, so do NOT read the origin's headroom here as purge safety. The controls are staggered or soft purge, stale-while-revalidate, and request coalescing at the edge, none of which this model represents.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "checkout",
+      "statement": "Checkout and cart are SPLIT OUT of the storefront tier, and that split is what lets this design express the real flash-sale control. Shopify throttles a drop at the edge, not in the app tier: 'we throttle users using a leaky bucket algorithm built into our edge tier', serving a queue page 'cached in Nginx' (shopify.engineering/surviving-flashes-of-high-write-traffic-using-scriptable-load-balancers-part-i, 2017-02-03). A fused 'storefront + checkout API' tier cannot express that lever, and it also lets a browse flood starve checkout of the same worker pool. The tier's 200 req/s per instance and 120 ms service time are ASSUMPTIONS with NO public figure behind them - a checkout does tax, fraud scoring, inventory reservation and a payment-gateway handoff, so it is far heavier than a cached product page. Two instances is an availability choice plus burst headroom behind the throttle, not a rate sizing.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "85% catalogue cache hit-rate AT THE ORIGIN, applied to the traffic that already missed the edge: 15% of origin browse requests and 40% of origin searches fall through to the read replica (search is the colder path). Those two rates are this model's assumptions - no hit-rate for a mid-size retailer's catalogue cache is published anywhere. Note the composition: the flow visit_probs multiply the edge miss-rate by the cache miss-rate, so a browse request reaches the replica on 3.15% of arrivals.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "The Redis node is sized for WORKING-SET MEMORY, not request rate, so its utilisation reads low. That is the correct shape for a catalogue and session cache, not spare headroom you can bank on - losing the node moves every origin read onto the single replica, and if the edge is cold at the same time that is the compound failure this design would not survive.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "THE WRITE STORE IS THE CONSTRAINT, AND THAT IS THE POINT OF THIS REFERENCE. Two independent primary sources put an e-commerce system's real ceiling on the cart and order write path rather than the app tier: Amazon built Dynamo because the relational store behind the Shopping Cart Service could not carry it (SOSP 2007), and Shopify's answer to a write flash is to shed load at the edge before it reaches the write path (2017). Two input changes make that visible. (a) per_instance_rps drops from 8,000 to 500. 8,000 is the LIBRARY'S SHARED CLASS DEFAULT for a sql_db row - it appears on 33 of this library's 56 blueprints - and it describes cheap point reads; this row is a durable, synchronously-committed WRITE path on a 2-vCPU db.m6i.large, which is a different workload. 500/s is an ASSUMPTION with a wide band (roughly 250-1,500) and NO public benchmark for this instance class on this workload exists, so nothing about it is grounded. (b) one request is not one database operation: a cart write is modelled as 2 statements and a checkout as 8 (cart read, order header, order lines, payment record, inventory decrement, cart clear, plus index and constraint work) using visit_prob fan-out. Replication lag is still NOT modelled - a stale-price or oversold-inventory read is a real risk this design does not quantify.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "WHAT THIS MODEL STILL CANNOT SEE ON THE WRITE PATH: a flash sale does not merely raise the write rate, it CONCENTRATES it on one inventory row. The engine's utilisation is arrival/capacity and has no notion of row-level lock contention, so the serialised inventory decrement that actually decides whether a drop holds is invisible here. Treat the primary's headroom as an upper bound only, and design the reservation or queue pattern for the hot SKU separately from this number.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Order events go to a 3-broker Kafka cluster (~20,000 msg/s per broker), which is nowhere near loaded at this order rate. THREE m5.large BROKERS IS A DURABILITY AND QUORUM CHOICE, NOT A CAPACITY ONE: the order log is money, so it does not run on burstable instances and it does not run as a single broker. It is the largest single line in the compute bill for the smallest share of the traffic, and that is deliberate. Payment authorisation itself is out of scope here (see the payments reference design).",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The load balancer is priced at 0: an ALB's hourly + LCU charge is per load balancer, not per instance, and the engine multiplies cost by instance count. Add ~$16/month plus LCU to any total you quote.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "provenance",
+      "statement": "PROVENANCE, PLAINLY: every per_instance_rps in this file is an ASSUMPTION, including the ones printed next to a specific instance name. This library's sql_db rows share 8,000 (33 of 56 files), its cache rows share 100,000 (26 of 56) and its replica rows share 8,000 (16 of 19) - those are class defaults, not measurements of an r7g.large or a db.m6i.large, and printing them beside a named instance type asserts a measurement the corpus does not hold. Only monthly_cost_per_instance is GROUNDED here, and only to a published vendor price list. Do not quote a capacity out of this file as though someone measured it.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [
+    "high_stakes:payments"
+  ],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "advanced",
+    "summary": "Browse-heavy online store where an edge full-page cache absorbs most arrivals and the cart and order write store is the binding constraint.",
+    "keywords": [
+      "ecommerce",
+      "e-commerce",
+      "online store",
+      "online shop",
+      "shopping cart",
+      "storefront",
+      "shopify",
+      "product catalogue",
+      "retail site",
+      "amazon",
+      "ebay",
+      "marketplace"
+    ]
+  }
+}

@@ -25,10 +25,10 @@ Across the 34 reference models, each component INPUT (capacity / service-time / 
 
 | Dimension | Result |
 |---|--:|
-| Input numbers with cited evidence (grounded **or** reconcile) | 122/609 (20%) |
-| …modeler value AGREES with the cited band (GROUNDED, in-band) | 50/609 (8%) |
-| …modeler value DIVERGES from it (RECONCILE — flagged, kept) | 72/609 (12%) |
-| Still ASSUMPTION (no cited datapoint matches yet) | 487/609 (80%) |
+| Input numbers with cited evidence (grounded **or** reconcile) | 431/609 (71%) |
+| …modeler value AGREES with the cited band (GROUNDED, in-band) | 186/609 (31%) |
+| …modeler value DIVERGES from it (RECONCILE — flagged, kept) | 245/609 (40%) |
+| Still ASSUMPTION (no cited datapoint matches yet) | 178/609 (29%) |
 
 > Honest read: most inputs are still ASSUMPTION — this is **early L1**, not calibrated truth. Coverage grows as the corpus does; a RECONCILE is a *signal to check an input*, not an engine error.
 

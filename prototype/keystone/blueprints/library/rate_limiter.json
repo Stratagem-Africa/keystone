@@ -1,0 +1,374 @@
+{
+  "spec_version": 1,
+  "name": "Rate Limiter",
+  "workload": {
+    "system_rps": 150000,
+    "description": "150k rps peak through an Envoy fleet that runs a local first-stage token bucket before consulting the shared authoritative Redis counters; 7% of requests are rejected, and a sustained abuser is short-circuited locally instead of paying the global round trip"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Network load balancer",
+      "per_instance_rps": 50000,
+      "instances": 5,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "gw",
+      "kind": "api_gateway",
+      "name": "Envoy API gateway (self-hosted)",
+      "per_instance_rps": 50000,
+      "instances": 5,
+      "base_latency_ms": 1.5,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "local_rl",
+      "kind": "api_gateway",
+      "name": "Envoy local rate-limit filter (first stage, in-process)",
+      "per_instance_rps": 50000,
+      "instances": 5,
+      "base_latency_ms": 0.1,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "limiter",
+      "kind": "app_server",
+      "name": "Rate-limit decision service (token bucket)",
+      "per_instance_rps": 5000,
+      "instances": 45,
+      "base_latency_ms": 1.5,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis counter shards (authoritative buckets)",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15987,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15987.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15987.0,
+          "confidence_high": 15987.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r7g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.219/h x 730 = 15987c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r7g.large"
+      }
+    },
+    {
+      "id": "app",
+      "kind": "app_server",
+      "name": "Protected upstream API (OUT OF SCOPE - your application)",
+      "per_instance_rps": 2000,
+      "instances": 115,
+      "base_latency_ms": 10.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL policy store (limit rules)",
+      "per_instance_rps": 8000,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "allowed_request",
+      "share": 0.929,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "local_rl",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "limiter",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "throttled_request",
+      "share": 0.07,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "local_rl",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "limiter",
+          "visit_prob": 0.05
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 0.05
+        }
+      ]
+    },
+    {
+      "name": "policy_refresh",
+      "share": 0.001,
+      "path": [
+        {
+          "component_id": "limiter",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "150,000 req/s peak at the edge. 92.9% pass both limiter stages and reach the upstream, 7% are rejected with a 429, 0.1% are policy refreshes pulling rule changes. The 7% rejection share is a TEACHING DEFAULT, not a measurement, and it deliberately sits between the two published extremes: Stripe (stripe.com/blog/rate-limiters, 2017-03-30) reports rejections that are tiny against volume - 'millions of requests this month alone' for its request-rate limiter, '12,000 requests this month' for concurrent requests, 'Only 100 requests were rejected this month' for its worker-utilisation shedder - while Cloudflare reports attack traffic of 'as many as 400,000 requests per second to a single domain' (blog.cloudflare.com, 2017-06-07). Note also that Stripe runs FOUR distinct limiters where this model has one.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "sizing",
+      "statement": "SIZING INTENT - read this before you read the bottleneck. Every horizontally-scalable tier here (load balancer, Envoy, the local filter, the stateless decision service, the upstream) is deliberately provisioned with spare capacity, so that none of them is the binding constraint and each survives losing a node. The shared Redis counter tier is deliberately the TIGHTEST, because it is the one tier you cannot widen by adding stateless replicas: a globally-correct limit needs a single authority per key, and widening it means resharding the key space and re-reasoning about correctness. An earlier version of this blueprint sat with five request tiers within a couple of points of one another, which made the named bottleneck close to a coin flip between the load balancer, the gateway, the limiter, Redis and the upstream; the spread here is intentional, so the engine's answer is stable under small input changes and points at the tier a real distributed rate limiter actually runs out of first.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "OUT OF SCOPE: the protected upstream is the READER'S OWN APPLICATION, not a component of the rate limiter. It is kept in the model only so you can see that rejected traffic never reaches it, and it is deliberately over-provisioned (115 instances, up from the 90 an earlier version shipped) so that it cannot be named as this design's bottleneck - naming the thing being protected as the bottleneck of the thing protecting it sends the reader to optimise the wrong system. Two consequences you must not misread: its instance count here is NOT a sizing recommendation for your service, and because it is the largest fleet it dominates the monthly total below. The rate limiter's own tiers are the small part of that bill.",
+      "confidence": "med",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Redis holds the AUTHORITATIVE counters and is the design's binding shared state. Every ALLOWED request must reach it - an approximate in-process bucket cannot enforce a global limit - so it carries essentially the whole allowed load plus the minority of rejections that miss the local over-limit cache. Two nodes is the entire safety margin: lose one and the survivor is instantly past its rated capacity, and that fragility is the lesson of this design. On the 100,000 ops/s per node: redis.io's published benchmarks put plain SET at 180,180 rps, falling to 72,144 rps for SET over a 100,000-key random keyspace, so 100,000 for atomic counter work is in-band and defensible - but redis.io publishes NO EVALSHA or token-bucket benchmark, so this figure is reasoned, not cited, and stays an ASSUMPTION. The same page warns that 'In many real world scenarios, Redis throughput is limited by the network well before being limited by the CPU' and that 'an instance with 30000 connections can only process half the throughput achievable with 100 connections'; if your limiter fleet is far wider than the 45 instances modelled here, re-derive this number before trusting it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "throttling",
+      "statement": "Rejection is not free, but it is not a full round trip either, and that difference is the point of this design. Envoy's own documentation prescribes the two-stage pattern modelled here: 'Local rate limiting can be used in conjunction with global rate limiting to reduce load on the global rate limit service. For example, a local token bucket rate limit can absorb very large bursts in load that might otherwise overwhelm a global rate limit service... The initial coarse grained limiting is performed by the token bucket limit before a fine grained global limit finishes the job.' So the FIRST request that trips a bucket pays the whole path - gateway, decision service, Redis - while the SUSTAINED abuser, which is the thing you build a rate limiter for, is short-circuited in-process and never touches the shared tier again. That is not an optimisation someone invented here: envoyproxy/ratelimit 'optionally uses freecache as its local caching layer, which stores the over-the-limit cache keys, and thus avoids reading the redis cache again for the already over-the-limit keys', and Cloudflare does the same at the edge - 'once a server starts to mitigate a client, it will not even run another query for the subsequent requests it might see from that source'. Modelled as visit_prob 0.05 on both the decision service and Redis for the throttled flow. The 0.05 is a REASONED PLACEHOLDER - neither project publishes a local-cache hit rate - and it means roughly one rejection in twenty still pays the global round trip: a key seen for the first time, or one whose local entry has expired. Build the naive one-stage limiter instead, where every rejection costs a full Redis round trip, and you get exactly the fragility flagged in the cache assumption above; a local first stage is the standard mitigation.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "local_rl",
+      "statement": "The local first stage is an IN-PROCESS Envoy filter (envoy.filters.http.local_ratelimit), not a fleet you deploy. The blueprint format has no notion of an in-process filter, so it appears here as its own tier sharing the gateway's instance count and per-instance rate, and it carries no per-instance price because it runs inside the Envoy processes already counted above (api_gateway is one of the kinds Keystone leaves unpriced per-instance on purpose). GAP: the model therefore counts the gateway's CPU as two tiers and charges the request an extra hop of latency that a real deployment does not pay separately. Read its utilisation as 'how much headroom the local bucket has inside Envoy', never as a separate fleet to scale. Its 0.1 ms service time is a reasoned placeholder for a memory-only token-bucket check with no network hop, set well below the 0.4 ms modelled for the Redis round trip; Envoy publishes no per-request figure for this filter.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "consistency",
+      "statement": "A distributed token bucket needs atomic increments and clock agreement. The engine models the Redis round trip's THROUGHPUT and LATENCY only - it has no notion of atomicity, of a slightly-over-limit race across shards, or of local-cache-then-sync approximations. Treat the counts as a capacity result, never as a correctness proof. The local first stage makes this deliberately worse: a cached over-limit decision can outlive the window that produced it, and each Envoy instance holds its own bucket, so the limit actually enforced is approximate by construction. Envoy's docs call the local stage 'coarse grained' for precisely that reason - you are trading exactness for the shared tier's survival, and you should decide consciously whether your limit is a billing boundary (needs exactness) or an abuse control (does not).",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "bottleneck",
+      "statement": "HOW TO READ THE BOTTLENECK. The engine names one component AND reports the margin to the runner-up plus every tier within a few points of the leader as a contender - use that second number, not just the name. When several tiers are contenders the single name is not a robust answer, because a small change to any input reorders them. That is exactly what went wrong in an earlier version of this blueprint: five request tiers sat within a couple of points of one another, so the named bottleneck was close to a coin flip, and the tier it happened to land on was the protected upstream - the reader's OWN application, not the rate limiter being designed. A reference that does that sends people to optimise the wrong system. This version is sized so the leader is clear of the field; if you change the inputs, re-check the contender list before you act on the name.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "resilience",
+      "statement": "GAP - node loss is NOT simulated. Every figure here is steady state with the full fleet healthy. The engine does not model losing a Redis node, an Envoy instance or a limiter pod, so the claim in the cache assumption - that two counter nodes is the whole safety margin and one survivor cannot carry this load - is a design judgement, not a number this report computes. Work out the degraded case for your own fleet sizes before you decide two nodes is enough. The policy store is also flagged as a single point of failure by the engine; it is idle by design, but a rate limiter that cannot read its rules is a rate limiter that has to choose fail-open or fail-closed, and that choice is not modelled here either.",
+      "confidence": "high",
+      "source": "user",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "db",
+      "statement": "The policy store is nearly idle by design - limit rules are read once and cached. It is in the model because it still costs money and still fails; it is not there to carry load.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "infrastructure",
+    "difficulty": "intermediate",
+    "summary": "Gateway-fronted distributed rate limiter built on Envoy's two-stage pattern - a local in-process token bucket in front of authoritative shared Redis counters, which are the tier that binds.",
+    "keywords": [
+      "rate limiter",
+      "rate limiting",
+      "throttling",
+      "api quota",
+      "token bucket",
+      "leaky bucket",
+      "request throttle",
+      "distributed rate limit"
+    ]
+  }
+}

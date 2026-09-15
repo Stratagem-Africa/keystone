@@ -8,13 +8,20 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!url || !anonKey) {
-  // Fail loud in dev rather than letting every auth call fail with a cryptic
-  // network error against an empty URL — see frontend/.env.local.
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY — set them in frontend/.env.local"
-  );
-}
+// Missing config used to `throw` HERE, at module load. That looked like a helpful dev-time guard
+// and was actually the single biggest barrier to anyone seeing Keystone at all: `app/layout.tsx`
+// (the ROOT layout) imports AuthProvider, which imports this file — so the throw took down every
+// route in the app, including the PUBLIC /studio page that needs no account whatsoever. A stranger
+// who cloned the repo had to go and provision a third-party Supabase project before they could see
+// a single architecture render.
+//
+// Absent config is now a STATE the app reports, not a crash. `supabase` is null and
+// `isAuthConfigured` is false; the sign-in UI says so plainly instead of erroring.
+//
+// THIS IS FAIL-CLOSED, and that property is the whole reason it is safe: with no client there is no
+// session, so `user` is null, so everything gated on a user stays gated. Absent auth infrastructure
+// can only ever REMOVE access here, never grant it. Anything that must be protected must check the
+// user — never merely assume the provider exists.
+export const isAuthConfigured = Boolean(url && anonKey);
 
-// Real per-user access control will come from JWT + RLS (#10, not yet wired).
-export const supabase = createClient(url, anonKey);
+export const supabase = isAuthConfigured ? createClient(url!, anonKey!) : null;

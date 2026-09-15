@@ -1,0 +1,483 @@
+{
+  "spec_version": 1,
+  "name": "Payment System",
+  "workload": {
+    "system_rps": 3000,
+    "description": "55% synchronous authorise/refund/status API; 45% asynchronous settlement and merchant webhooks"
+  },
+  "components": [
+    {
+      "id": "gw",
+      "kind": "api_gateway",
+      "name": "Public payments API (auth, idempotency keys, rate limits)",
+      "per_instance_rps": 5000,
+      "instances": 2,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis (idempotency keys, velocity counters)",
+      "per_instance_rps": 20000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 1168,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 1168.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 1168.0,
+          "confidence_high": 1168.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.micro \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.016/h x 730 = 1168c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.micro"
+      }
+    },
+    {
+      "id": "fraud",
+      "kind": "app_server",
+      "name": "Risk / fraud scoring service",
+      "per_instance_rps": 300,
+      "instances": 6,
+      "base_latency_ms": 25.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "pay",
+      "kind": "app_server",
+      "name": "Authorisation service (blocks on the acquirer round-trip)",
+      "per_instance_rps": 250,
+      "instances": 7,
+      "base_latency_ms": 250.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "ledger",
+      "kind": "sql_db",
+      "name": "Double-entry ledger (single ACID primary)",
+      "per_instance_rps": 5000,
+      "instances": 1,
+      "base_latency_ms": 4.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka (payment events: settlement, webhooks, notifications)",
+      "per_instance_rps": 4000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "settle",
+      "kind": "app_server",
+      "name": "Settlement and reconciliation workers",
+      "per_instance_rps": 400,
+      "instances": 4,
+      "base_latency_ms": 15.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "webhook",
+      "kind": "app_server",
+      "name": "Merchant webhook dispatcher (outbound HTTP)",
+      "per_instance_rps": 200,
+      "instances": 6,
+      "base_latency_ms": 200.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "authorise",
+      "share": 0.3,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "fraud",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "pay",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ledger",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "refund",
+      "share": 0.05,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "pay",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ledger",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "payment-status",
+      "share": 0.2,
+      "path": [
+        {
+          "component_id": "gw",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ledger",
+          "visit_prob": 0.25
+        }
+      ]
+    },
+    {
+      "name": "settlement",
+      "share": 0.25,
+      "path": [
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "settle",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ledger",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "merchant-webhook",
+      "share": 0.2,
+      "path": [
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "webhook",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "3,000 operations/s at peak, counted across ALL flows \u2014 synchronous API calls AND the asynchronous events each payment produces. Roughly 900 authorisations/s drive ~1,350 settlement and webhook events/s behind them.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "acquirer",
+      "statement": "The card network / acquirer is NOT drawn as its own component: Keystone has no honest per-instance price for a third-party API, so instead the external round-trip is modelled INSIDE the authorisation service \u2014 250 ms of blocking wait and only ~250 auths/s per instance (about 60 concurrent connections). The real dependency also enforces a HARD rate limit that returns errors rather than slowing down, which a queueing model cannot show.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ledger",
+      "statement": "ONE PostgreSQL writer is a deliberate SIMPLIFICATION, not a law of double-entry bookkeeping. What correctness actually requires is that each posting be atomic \u2014 not that the whole ledger live on one machine. Production ledgers at this scale shard: Uber's LedgerStore, \"an immutable, ledger-style database storing business transactions\" behind its payment platform, runs on sharded Docstore after migrating ~250 billion records / ~300 TB off DynamoDB (Uber engineering blog, 2021-11-10), and supports over 2 trillion indexes across tens of billions of financial transactions per quarter (Uber engineering blog, 2024-04-04); Stripe's transaction store DocDB runs \"more than 2,000 database shards\" serving \"more than 5 million database queries per second\" (Jimmy Morzaria, Stripe, QCon SF \u2014 read via the InfoQ transcript, a SECONDARY source; the talk is the primary). So: one writer buys you cross-shard atomicity for free and costs you a hard ceiling plus a single point of failure. Read this row as THE TIER YOU CANNOT SCALE BY ADDING INSTANCES \u2014 not as the tier that is busiest, which is a different question. Every other tier in this design, the acquirer-bound authorisation service included, is priced per instance and grows by adding instances; this one is `instances: 1` by construction and grows only by re-architecting into shards, which is the change Uber and Stripe above actually made.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ledger",
+      "statement": "POSTINGS PER MONEY EVENT = 1.0, stated here because it is the single choice that decides this row's headroom, and the file used to leave it implicit. Every money flow (authorise, refund, settlement) visits the ledger exactly once: one money event = one ACID transaction. The double-entry PAIR of rows, and the uniqueness check on the idempotency key, are priced INTO the capacity figure rather than counted as extra visits. That is why this row is now sized at 5,000 tx/s and no longer 9,000: the identical component in the sibling blueprint digital_wallet.json (\"Ledger primary (PostgreSQL, single writer, ACID)\") is sized at 5,000 and states the reason \u2014 \"every posting is a multi-row double-entry transaction with a uniqueness constraint on the idempotency key\" \u2014 and one corpus must not price one component two ways. The 9,000 was a plain-OLTP number applied to a workload that is not plain OLTP.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ledger",
+      "statement": "NOT MODELLED \u2014 ledger fan-out beyond the money event. A real processor writes more than one posting per payment: scheme and interchange fees, reserves, payouts to the merchant, chargeback and adjustment entries. This model carries only two ledger transactions per payment (one on the authorise flow, one on the settlement flow) and NO fee, reserve, payout or chargeback postings at all. I looked for a published postings-per-payment figure for a card processor and found none, so NO multiplier is applied here \u2014 inventing one would be worse than admitting the gap. Act on it this way: if your ledger writes N postings per payment, divide this row's headroom by N before you copy the design, because a single writer is the one row you cannot buy your way out of.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cache",
+      "statement": "Redis holds idempotency keys and velocity counters. It is sized for MEMORY and durability, not throughput, which is why its utilisation looks low \u2014 do not scale it down on that basis.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "webhook",
+      "statement": "Merchant webhooks block on the merchant's own endpoint (~200 ms, ~40 concurrent per instance). A slow merchant is a real back-pressure source; retries and dead-lettering are required and not modelled here. Stripe's webhook documentation puts a floor under how much that understates the tier: live-mode deliveries are retried \"for up to three days with an exponential back off\", Stripe \"doesn't guarantee the delivery of events in the order that they're generated\", and receivers are told to \"process incoming events with an asynchronous queue\". So ONE event is more than one outbound HTTP call whenever a merchant endpoint is slow or down, and this blueprint counts exactly one. There is no public retry or endpoint-failure rate to size the multiplier with, so none is applied: treat the load on this row as a FLOOR, not a measurement. It does not change which tier binds \u2014 it changes how far this one really is from its own ceiling.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "headroom",
+      "statement": "Every tier on the money path is held near 50-60% utilisation, not at the 85% ceiling. With a 250 ms acquirer round-trip, running the authorisation tier hot multiplies the customer's wait: at 85% the same call would add roughly 1.4 s of queueing on top of it. Paying for that headroom is the explicit design decision here, and it is why this design costs more than its throughput suggests.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "compliance",
+      "statement": "Money movement: PCI-DSS scope, chargebacks, fraud rules, reconciliation and exactly-once idempotency are REQUIRED and out of scope for this model. Expert review is mandatory before any production use. Two shape divergences are named rather than modelled, so the reader is not surprised by them. (a) SCA/3DS: strong customer authentication has been mandatory in the EEA since 2019-09-14 (Stripe's SCA documentation), and a challenge turns the single synchronous authorise call modelled here into an out-of-band \"requires_action\" step the cardholder completes elsewhere \u2014 a different latency shape entirely, not a slower version of this one. (b) AUTHORISE IS NOT CAPTURE: Stripe documents holds of about 7 days for online card customer-initiated transactions (Visa: 5 days, quoted as exactly 4 days 18 hours; most card-present brands: 2 days), with funds moving at CAPTURE. The \"authorise\" flow here conflates the authorisation with the money movement and writes the ledger in one step; a design that splits them has a second, much later money path this file does not draw. Neither changes the binding constraint, which is why they are disclosed instead of drawn.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "refund",
+      "statement": "Refunds are 5% of ALL operations, i.e. ~150 refunds/s against ~900 authorisations/s \u2014 about one refund per six payments, which is high for card payments. I found NO public card-refund-rate figure and am not implying one exists; the share is left as authored and flagged instead. It matters because refunds take the same authorisation tier and the same single-writer ledger as payments, so this ratio inflates the arrival rate at both. A processor with a lower refund rate loads both tiers less than this file shows.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [
+    "high_stakes:payments"
+  ],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "microservices",
+    "difficulty": "advanced",
+    "summary": "Card authorisation, an ACID ledger, and asynchronous settlement plus merchant webhooks.",
+    "keywords": [
+      "payment system",
+      "payment gateway",
+      "payment processing",
+      "payments",
+      "card payments",
+      "checkout",
+      "stripe",
+      "paystack",
+      "flutterwave",
+      "billing system",
+      "psp",
+      "money transfer"
+    ]
+  }
+}

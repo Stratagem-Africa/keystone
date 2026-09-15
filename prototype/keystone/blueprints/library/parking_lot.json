@@ -1,0 +1,499 @@
+{
+  "spec_version": 1,
+  "name": "Parking Lot System",
+  "workload": {
+    "system_rps": 500,
+    "description": "Multi-site parking operator: gate scans, live availability, exit payment"
+  },
+  "components": [
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Load balancer",
+      "per_instance_rps": 30000,
+      "instances": 1,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "app",
+      "kind": "app_server",
+      "name": "Ticketing + spot-allocation service (t4g.medium x2)",
+      "per_instance_rps": 350,
+      "instances": 2,
+      "base_latency_ms": 12.0,
+      "monthly_cost_per_instance": 2453,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 2453.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 2453.0,
+          "confidence_high": 2453.0,
+          "provenance": "GROUNDED",
+          "measured_context": "t4g.medium \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2), BURSTABLE. Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0336/h x 730 = 2453c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117). BURSTABLE: launches in Unlimited mode by default; sustained above-baseline CPU adds $0.04/vCPU-hour (Price List SKU VQE3NKNEDMWWG8DZ). At sustained 100% CPU the real bill can reach ~2.9x this figure. Disclosed, deliberately NOT folded into the band."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "t4g.medium"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Live free-spot counters per lot and level",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 0.5,
+      "monthly_cost_per_instance": 1168,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 1168.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 1168.0,
+          "confidence_high": 1168.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.t4g.micro \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.016/h x 730 = 1168c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.t4g.micro"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "PostgreSQL - tickets, spots, rate cards, sessions",
+      "per_instance_rps": 2500,
+      "instances": 1,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 4745,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4745.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4745.0,
+          "confidence_high": 9490.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.t4g.medium \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.065/h Single-AZ x 730 = 4745c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.t4g.medium"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Gate + payment event stream (display boards, billing, analytics)",
+      "per_instance_rps": 5000,
+      "instances": 3,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "pay",
+      "kind": "app_server",
+      "name": "Exit payment service (async, webhook-driven; capped by the acquirer's published rate limit)",
+      "per_instance_rps": 50.0,
+      "instances": 2,
+      "base_latency_ms": 3000.0,
+      "monthly_cost_per_instance": 4964,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 4964.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 4964.0,
+          "confidence_high": 4964.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c6g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.068/h x 730 = 4964c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c6g.large"
+      }
+    },
+    {
+      "id": "lane",
+      "kind": "app_server",
+      "name": "Exit-pay lane controllers (one card reader per lane; one payment at a time)",
+      "per_instance_rps": 0.051282,
+      "instances": 1440,
+      "base_latency_ms": 19500.0,
+      "monthly_cost_per_instance": 2453,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 2453.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 2453.0,
+          "confidence_high": 2453.0,
+          "provenance": "GROUNDED",
+          "measured_context": "t4g.medium \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton2), BURSTABLE. Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0336/h x 730 = 2453c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117). BURSTABLE: launches in Unlimited mode by default; sustained above-baseline CPU adds $0.04/vCPU-hour (Price List SKU VQE3NKNEDMWWG8DZ). At sustained 100% CPU the real bill can reach ~2.9x this figure. Disclosed, deliberately NOT folded into the band."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "t4g.medium"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "check_availability",
+      "share": 0.55,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "entry_scan",
+      "share": 0.15,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "exit_scan",
+      "share": 0.13,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "pay_exit",
+      "share": 0.12,
+      "path": [
+        {
+          "component_id": "lane",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "pay",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "reserve_spot",
+      "share": 0.05,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "app",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "UNSOURCED CONSTRUCTION, said plainly. No commercial parking operator publishes a backend request rate, so 500 req/s for a ~500-lot estate, the 55% availability-polling share and the app tier's 350 req/s per instance have NO public counterpart - they are a reasoned shape, not an observed one. SFpark does not substitute for the missing data: the SFMTA SFpark Garage Data Guide's 'Every 60 seconds, the garage car counting program automatically sends the following data to the SFpark data warehouse' governs SENSOR-TO-CENTRE INGEST (about 8 pushes/s across 500 lots), a different quantity from the consumer READS off display boards and a mobile app that the 55% share represents. Vehicle rates implied by the mix: entries 75/s, exits 65/s, and 60/s of those exits pay at the lane. NOTE ON THE FLOW ARITHMETIC: exit_scan and pay_exit are modelled as separate request flows, but the ~60/s that pay are physically the SAME vehicles as most of the 65/s that scan out, so the lane component is placed on pay_exit ONLY. The few exits per second that leave on a pre-paid token also occupy a lane and are not counted against it, so modelled lane demand is a slight understatement.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Free-spot counts live in the cache and are the read path for every display board and app screen; the database is the system of record. The counter is decremented on entry and incremented on exit, so DRIFT between cache and database is a real failure mode - and it is not something this engine can model. The one published production system mitigates the drift PHYSICALLY rather than in software: the SFMTA SFpark Garage Data Guide states that 'the SFMTA requires garages to count manually the number of cars in the garage at least once per day, and update the car count to match the manual count.'",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "pay",
+      "statement": "CORRECTION, AND THE REASON THIS BLUEPRINT CHANGED. This note previously claimed the backend payment service was the bottleneck 'because a queue at the exit barrier is a physical traffic jam'. That inverted the mechanism and is withdrawn: a backend service and a barrier queue are not the same resource, and across 500 lots no individual barrier ever sees more than ~0.12 authorisations per second, so no backend utilisation figure can produce a queue at one. What actually serialises an exit is PHYSICAL, and Stripe Terminal's own documentation says so: 'A reader can process only one payment at a time', and 'An authorization normally takes a few seconds to complete'. The exit queue is therefore governed by LANE COUNT and human transaction time - now modelled explicitly as the `lane` component - not by how many instances of this service run. What is modelled HERE is only the payment call you make. Two inputs changed. base_latency_ms goes from 120 ms to 3,000 ms, a midpoint of Stripe's 'a few seconds'; the old 120 ms was 10-25x too fast for a card-terminal authorisation and was the single figure that produced the wrong verdict. Capacity is now the acquirer's PUBLISHED ceiling rather than a thread model, because Stripe's terminal flow is asynchronous and webhook-driven: Stripe's rate-limit documentation publishes a live-mode global limit of 100 requests per second, so 2 x 50 req/s is that published figure, replacing the previous unsourced 80 auth/s. The acquirer itself is still not a priced component - a third-party API is billed per transaction, not per instance.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "app",
+      "statement": "~350 req/s per instance is an UNSOURCED CONSTRUCTION - nothing in this repo and nothing public measures a parking ticketing service at any request rate, so treat it as a placeholder to replace with your own load test, not as a benchmark. Two instances is deliberately small: the CENTRAL system here is genuinely small and a reference design should not pretend otherwise. The size of this estate is in its lanes, not in its servers.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "q",
+      "statement": "Gate and payment events fan out to display boards, billing and analytics through a 3-broker Kafka cluster. Three brokers is a QUORUM choice, not a capacity one (the cluster is ~1% busy). The consumers are not modelled - the v1 engine models request paths, not background workers",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "scope",
+      "statement": "ANPR cameras, barrier hardware, plate-image storage and the offline behaviour of a gate that loses its network are OUT OF SCOPE. Those are the hard parts of a real parking system and none of them is expressible in a request-path capacity model",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "The load balancer is priced at 0: an ALB's hourly + LCU charge is per load balancer, not per instance, and the engine multiplies cost by instance count. Add ~$16/month plus LCU to any total you quote",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "lane",
+      "statement": "NEW COMPONENT - the physical serialiser this blueprint previously left out entirely. Robert W. Crommelin's 'Entrance-Exit Design and Control for Major Parking Facilities' (Los Angeles Parking Association, Seminar '72; the City of Irvine hosts a copy headed 'Retyped Verbatim From the Original') measures exit control directly. Table 4, 'PARKING CONTROL SERVICE RATE', gives an exit lane staffed as 'Cashier, variable fee w/gate' an average headway of 19.5 seconds per vehicle, a DESIGN rate of 150 vehicles/hour and a MAXIMUM of 185 vehicles/hour. So: per_instance_rps = 1 vehicle / 19.5 s = 0.051282 req/s is that measured maximum headway, and base_latency_ms = 19,500 ms is the same headway read as the time one vehicle occupies one lane. instances = 1,440 is derived, not guessed: 60 paid exits per second divided by Crommelin's design rate (150 veh/h = 0.0416667 veh/s) = 1,440 lanes, about 2.9 exit-pay lanes per lot across 500 lots. Sizing to the DESIGN rate while the capacity ceiling is the MAXIMUM headway is deliberate - that is what a design rate means. CAVEAT ON THE SOURCE: this is 1972 data. Human transaction headway is the slowest-moving quantity in the whole design, but contactless payment has plausibly shortened a variable-fee exit since, and no newer measured figure was found. If you have one, use it.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "lane",
+      "statement": "SHORTFALL - the engine pools all 1,440 lanes into ONE queue, so a vehicle in the model may use any lane in the estate. Physically it cannot: each lot's ~3 lanes queue independently, and a 3-server queue degrades far faster than a 1,440-server one at the same utilisation. The wait this model reports at the lane is therefore an UNDERSTATEMENT of what a driver at one lot experiences. Crommelin gives the single-facility formula directly - the reservoir q = i^2/(1-i) vehicles, with traffic intensity i = arrival rate / service rate - and that, not this portfolio aggregate, is what sizes one garage's approach lanes. FIX: run your own lot's arrival rate against its own lane count.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "pay_on_foot",
+      "statement": "THE WHAT-IF THAT MATTERS, AND IT IS A MEASURED ONE: the lever is WHERE the payment happens, not how many backend instances run it. Crommelin, verbatim: the cashier-variable-fee lane 'has a capacity of approximately 150 vehicles per hour. Another approach might be to have the parker pay his fee to the cashier before entering his car and then utilize a token operated gate as a means of exit control. This control strategy would have over twice the capacity of a cashier lane itself.' His Table 4 backs the claim with numbers: a coded-card/token-operated gate exit measures 9.0 s/veh (320 design / 400 maximum veh/h) against the cashier lane's 19.5 s (150/185). To run that variant, change the `lane` component to per_instance_rps = 1/9.0 = 0.111111 and base_latency_ms = 9,000, and re-derive the lane count from the 320 veh/h design rate. Paying for more backend payment instances buys none of this: it moves a resource that was never the constraint.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "peaks",
+      "statement": "The mix runs entry (75/s), exit (65/s) and payment (60/s) peaks SIMULTANEOUSLY, which no single facility ever sees. Crommelin's design guidance, verbatim, is that 'it is adequate to assume for design purposes that the morning inbound peak flows are approximately equal to the evening outbound peak flows' - equal in MAGNITUDE, at OPPOSITE ends of the day. The mix here is therefore a PORTFOLIO AVERAGE across ~500 lots peaking at different hours, not a snapshot of any one lot. Read every figure below as an estate-level number.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "levels",
+      "statement": "TWO LEVELS, kept separate on purpose. This file models the 500-lot PORTFOLIO: the design questions are central capacity and how many exit lanes the estate must run. It does NOT model one facility's traffic dynamics. A barrier queue is a single-facility phenomenon, and a portfolio-aggregate req/s can never justify a claim about any one barrier - the earlier version of this blueprint made exactly that mistake, and it is the reason the lane pool is now an explicit component rather than a sentence.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "entry",
+      "statement": "SHORTFALL - entry lanes are NOT modelled as a component, and they are closer to their limit than this file shows. 75 entries/s across 500 lots is 540 veh/h per lot, against Crommelin's Table 4 design rate of 520 veh/h for a 'Ticket Dispenser w/gate' on an easy direct approach (5.5 s/veh, 650 maximum); a sharp-turn approach measures 9.5 s/veh (305 design / 380 maximum), which would need roughly two entry lanes per lot instead of one. FIX: model entry lanes the way `lane` models exit lanes if your approach geometry is not the easy case.",
+      "confidence": "med",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "acquirer",
+      "statement": "SHORTFALL - Stripe's rate-limit documentation publishes TWO limits, and only the looser one is modelled. Alongside the live-mode global 100 requests per second used as this service's ceiling, an INDIVIDUAL API endpoint is limited to 25 requests per second. A portfolio paying about 60 exits per second creates payment intents well above a single endpoint's published allowance, and a rate limit is a HARD rejection (HTTP 429), not the graceful slowdown the engine's queueing model draws. FIX: confirm your own vendor's negotiated limits, shard across merchant accounts, or use a terminal-side flow that does not create one API request per exit. Not modelled.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "cost",
+      "statement": "SHORTFALL - the exit-pay lanes now dominate the monthly figure, and their price is a STAND-IN, not a quote. Library rules require every priceable component to carry a cited price copied from a same-kind component in the same file, so each lane controller carries this file's t4g.medium compute row. That prices the EDGE COMPUTE on a lane and nothing else: the barrier, the card reader, the loop detectors, terminal rental, installation and the acquirer's per-transaction fee are all absent from the total. FIX: substitute your own quoted cost per lane before treating this as a budget. The useful thing it does show is the shape - for an operator of this size the estate is the expense and the central cloud stack is a rounding error, which is the opposite of what the previous version of this file implied.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    },
+    {
+      "subject": "latency",
+      "statement": "SHORTFALL - the pay_exit path DOUBLE-COUNTS the card authorisation, and it does so by construction. The engine sums a flow's hops, so that path adds the lane's 19.5 s occupancy and the payment service's authorisation time together; physically the authorisation happens DURING the 19.5 s the vehicle is sitting at the barrier, not after it. Crommelin's headway is the whole lane transaction. The lane figure is the one to read for how long a driver waits; the summed pay_exit latency overstates it by roughly the authorisation time. FIX: there is no way to express overlapping hops in the v1 engine, so this is disclosed rather than modelled.",
+      "confidence": "high",
+      "source": "benchmark",
+      "provenance": "GAP"
+    }
+  ],
+  "domain_flags": [
+    "high_stakes:payments"
+  ],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "web_app",
+    "difficulty": "beginner",
+    "summary": "Gate-scan ticketing with live spot counters and an event stream, where the real constraint is physical: a pool of exit-pay lanes, one card reader each, one payment at a time.",
+    "keywords": [
+      "parking lot",
+      "parking garage",
+      "parking system",
+      "car park",
+      "parking management",
+      "smart parking",
+      "valet parking",
+      "parking meter",
+      "parking app"
+    ]
+  }
+}

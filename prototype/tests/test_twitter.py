@@ -5,6 +5,7 @@ This blueprint defines the TARGET depth that "build a platform like Twitter" sho
 """
 from __future__ import annotations
 
+import math
 import unittest
 
 from keystone.blueprints import twitter
@@ -31,11 +32,31 @@ class TestTwitter(unittest.TestCase):
         m = twitter.build()
         self.assertAlmostEqual(sum(f.share for f in m.flows), 1.0, places=6)
 
-    def test_engine_finds_the_write_datastore_as_the_constraint(self):
-        # Read-heavy social feed: the write-path primary DB binds, not the cached read path.
+    def test_the_reference_design_holds_at_its_own_stated_load(self):
+        """This asserted `bottleneck_id == "tweetsdb"` with rho > 0.5, and that was PINNING A BUG.
+
+        The blueprint shipped 15% of traffic as tweet-writes, which put 9,000 writes/s onto a
+        9,000 rps primary — rho EXACTLY 1.000, a reference architecture that cannot absorb one more
+        request. It read as survivable only because the engine clamped latency at rho=0.999 and
+        printed a comfortable 51ms. A social timeline is one of the most read-skewed workloads
+        there is (historically ~6k tweets/s against ~300k timeline reads/s), so 15% was also simply
+        wrong about the domain. With the mix corrected the design holds, and the binding constraint
+        is the third-party push provider — which `remediation.py` correctly refuses to scale out
+        because you do not own it. That is a better lesson than a primary pinned at 100%.
+        """
+        from keystone.simulation import SAFE_UTILIZATION
         r = simulate(twitter.build())
-        self.assertEqual(r.bottleneck_id, "tweetsdb")
-        self.assertGreater(r.bottleneck_utilization, 0.5)
+        self.assertLessEqual(r.bottleneck_utilization, SAFE_UTILIZATION,
+                             f"a reference design must hold at its own load; '{r.bottleneck_name}' "
+                             f"is at {r.bottleneck_utilization:.1%}")
+        self.assertTrue(math.isfinite(r.mean_latency_ms))
+        self.assertEqual(r.bottleneck_id, "pushapi")
+
+    def test_the_write_path_is_no_longer_the_constraint_but_is_still_a_spof(self):
+        """Fixing the load mix must not quietly hide that a single primary is still a risk."""
+        r = simulate(twitter.build())
+        self.assertLess(r.components["tweetsdb"].utilization, 0.85)
+        self.assertIn("Tweets DB (primary)", r.spofs)
 
     def test_single_primary_datastores_are_spofs(self):
         r = simulate(twitter.build())

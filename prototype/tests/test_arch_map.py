@@ -12,7 +12,7 @@ import re
 import unittest
 
 from keystone import __version__ as ENGINE_VERSION
-from keystone.arch_map import _json_safe, _round_floats, _status, build_arch_map, render_html
+from keystone.arch_map import _json_safe, _round_floats, _status, build_arch_map, build_load_sweep, render_html
 from keystone.blueprints import payments, url_shortener
 from keystone.model import (Assumption, Component, ComponentKind, Flow, FlowStep,
                             SystemModel, Workload)
@@ -42,6 +42,15 @@ class TestArchMapNumbers(unittest.TestCase):
 
     def test_every_node_number_equals_the_engine(self):
         for n in self.arch["nodes"]:
+            if n.get("synthetic"):
+                # The "Your users" node is DISPLAY ONLY — it is not a component, the engine never
+                # sees it, and it must never carry an engine number. Asserted below rather than
+                # merely skipped, so a synthetic node can never smuggle a fabricated figure in.
+                self.assertIsNone(n["utilization"])
+                self.assertIsNone(n["capacity_rps"])
+                self.assertIsNone(n["mean_latency_ms"])
+                self.assertEqual(n["monthly_cost_cents"], 0)
+                continue
             cr = self.sim.components[n["id"]]
             self.assertEqual(n["utilization"], cr.utilization)
             self.assertEqual(n["arrival_rps"], cr.arrival_rps)
@@ -75,6 +84,33 @@ class TestArchMapNumbers(unittest.TestCase):
         import keystone.arch_map as am
         with open(am.__file__, encoding="utf-8") as f:
             self.assertNotIn("Metric(", f.read())
+
+
+class TestLoadSweep(unittest.TestCase):
+    def test_sweep_is_opt_in_and_engine_computed(self):
+        m, s = _us()
+        self.assertNotIn("sweep", build_arch_map(m, s))              # lean by default
+        arch = build_arch_map(m, s, sweep=True)
+        self.assertIn("sweep", arch)
+        frames = arch["sweep"]
+        self.assertGreaterEqual(len(frames), 5)
+        # utilisation rises monotonically with load — proving each frame is a real run at that load,
+        # and the map only DISPLAYS these (prime directive: the engine authors every number, per load).
+        base = next(f for f in frames if abs(f["multiple"] - 1.0) < 1e-9)
+        hi = max(frames, key=lambda f: f["multiple"])
+        self.assertGreater(hi["bottleneck_utilization"], base["bottleneck_utilization"])
+        # the breakpoint is a property of the DESIGN, not the offered load → constant across the sweep.
+        self.assertEqual(len({round(f["breakpoint_rps_safe"] or 0) for f in frames}), 1)
+
+    def test_sweep_matches_a_direct_simulate_at_that_load(self):
+        import dataclasses
+        m, s = _us()
+        frames = build_load_sweep(m)
+        hi = max(frames, key=lambda f: f["multiple"])
+        scaled = dataclasses.replace(m, workload=dataclasses.replace(m.workload, system_rps=hi["load_rps"]))
+        direct = simulate(scaled)
+        self.assertEqual(hi["bottleneck_id"], direct.bottleneck_id)          # same engine result, no client math
+        self.assertAlmostEqual(hi["bottleneck_utilization"], direct.bottleneck_utilization, places=6)
 
 
 class TestDeterminismAndValidity(unittest.TestCase):
@@ -165,13 +201,34 @@ class TestProvenanceAndEvidence(unittest.TestCase):
                            workload=Workload(system_rps=100.0))
 
     def test_grounded_in_band_is_GROUNDED_with_citation(self):
-        g = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/ref"),))
-        m = self._model_with(g)
+        """A node is GROUNDED only when EVERY engine-driving metric it uses is cited.
+
+        This used to ground `per_instance_rps` alone and assert GROUNDED, because the rule was
+        "GROUNDED if anything is grounded". Under that rule 298 of the library's 406 components
+        badged GROUNDED on the strength of an AWS price lookup while their capacity and latency
+        were guesses. `base_latency_ms` defaults to 1.0 — non-zero, so it drives the latency figure
+        and needs its own citation before the node can claim to be evidenced.
+        """
+        cap = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/ref"),))
+        lat = Grounding(1.0, "ms", 0.8, 1.3, citations=(Citation("Redis bench", "http://ex/ref"),))
+        m = self._model_with(cap)
+        m.components["app"].groundings = {**m.components["app"].groundings, "base_latency_ms": lat}
         arch = build_arch_map(m, simulate(m))
         app = next(n for n in arch["nodes"] if n["id"] == "app")
         self.assertEqual(app["provenance"], "GROUNDED")
         self.assertEqual(app["evidence"][0]["status"], "GROUNDED")
         self.assertEqual(app["evidence"][0]["sources"][0]["source"], "Redis bench")
+
+    def test_capacity_cited_but_latency_guessed_is_NOT_grounded(self):
+        """The partial case, asserted on its own so it cannot quietly drift back to GROUNDED."""
+        cap = Grounding(1000.0, "rps", 900.0, 1100.0, citations=(Citation("Redis bench", "http://ex/r"),))
+        m = self._model_with(cap)                       # base_latency_ms defaults to 1.0, uncited
+        arch = build_arch_map(m, simulate(m))
+        app = next(n for n in arch["nodes"] if n["id"] == "app")
+        self.assertEqual(app["provenance"], "ASSUMPTION")
+        # and the evidence it DOES have is still shown — downgrading the badge must not hide it
+        self.assertEqual(app["evidence"][0]["metric"], "per_instance_rps")
+        self.assertEqual(app["evidence"][0]["status"], "GROUNDED")
 
     def test_value_outside_band_is_RECONCILE_not_overwritten(self):
         # per_instance_rps=1000 sits OUTSIDE the cited band 400–600 → RECONCILE, and the modeler value is kept.

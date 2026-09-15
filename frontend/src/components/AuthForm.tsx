@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { isAuthConfigured, supabase } from "@/lib/supabase";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -24,6 +24,18 @@ export function AuthForm() {
     setLoading(true);
     setError(null);
     setMessage(null);
+
+    // No client means no auth backend is configured for this deployment. Say so in the words the
+    // person needs, and stop — never call into a null client, and never imply the attempt failed
+    // because of something they typed.
+    if (!supabase) {
+      setError(
+        "Sign-in isn't set up on this copy of Keystone. You can still describe a system and see " +
+        "its full design and verdict without an account — saving your work is what needs one."
+      );
+      setLoading(false);
+      return;
+    }
 
     if (mode === "sign-up") {
       const { data, error } = await supabase.auth.signUp({ email, password });
@@ -48,6 +60,16 @@ export function AuthForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6 w-full max-w-sm">
+
+      {/* Tell people BEFORE they type, not after they submit. This copy is also the honest answer
+          to "what do I lose without an account?" — which is only saving, not seeing. */}
+      {!isAuthConfigured && (
+        <p className="font-sans text-sm text-ink-muted-strong border-l-2 border-architect-blue pl-4">
+          <strong className="text-slate-ink">Accounts aren&apos;t set up on this copy of Keystone.</strong>{" "}
+          You can still describe a system and see its full design, verdict and cost — an account is
+          only needed to save your work.
+        </p>
+      )}
 
       {/* Mode toggle — architect-blue signals "interactive", never confidence */}
       <div className="flex gap-4 font-sans text-label">

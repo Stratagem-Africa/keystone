@@ -50,19 +50,30 @@ def build(system_rps: float = 60_000) -> SystemModel:
         _c("notifq",     K.QUEUE,         "Notification Queue",          40_000, 2,  2, 4_000),
         _c("pushapi",    K.EXTERNAL_API,  "Push/Email Provider (batched)",  6_000, 1,140, 0),
     ]}
+    # FLOW MIX CORRECTED 2026-09-07. It used to read 55% timeline / 15% post, which put 9,000
+    # writes/s onto a 9,000 rps primary — rho EXACTLY 1.000, a design that cannot absorb one extra
+    # request, shipped as a reference for people to copy. It looked survivable only because the
+    # engine clamped latency at rho=0.999 and printed a comfortable 51ms; with the M/M/c fix the
+    # same design correctly reports UNBOUNDED. The clamp was hiding a broken blueprint.
+    #
+    # 15% writes was also just wrong about the domain: a social timeline is one of the most
+    # read-skewed workloads there is (historically ~6k tweets/s against ~300k timeline reads/s —
+    # writes are low single-digit percent, not a sixth). Rebalanced to a defensible mix; the
+    # bottleneck moves to the API gateway, which is a far better teaching example than a primary
+    # pinned at 100%, and the design now holds at its own stated load.
     flows = [
-        Flow("load home timeline", 0.55, [FlowStep("cdn"), FlowStep("lb"), FlowStep("gw"),
+        Flow("load home timeline", 0.70, [FlowStep("cdn"), FlowStep("lb"), FlowStep("gw"),
              FlowStep("web"), FlowStep("timelinesvc"), FlowStep("tlcache"),
              FlowStep("tweetsrepl", visit_prob=0.25)]),
-        Flow("post a tweet", 0.15, [FlowStep("lb"), FlowStep("gw"), FlowStep("web"),
+        Flow("post a tweet", 0.04, [FlowStep("lb"), FlowStep("gw"), FlowStep("web"),
              FlowStep("tweetsvc"), FlowStep("tweetsdb"), FlowStep("fanoutq"), FlowStep("fanoutsvc")]),
-        Flow("follow / graph", 0.10, [FlowStep("lb"), FlowStep("gw"), FlowStep("web"),
+        Flow("follow / graph", 0.06, [FlowStep("lb"), FlowStep("gw"), FlowStep("web"),
              FlowStep("usersvc"), FlowStep("usercache"), FlowStep("usersdb", visit_prob=0.4)]),
         Flow("search", 0.10, [FlowStep("lb"), FlowStep("gw"), FlowStep("web"),
              FlowStep("searchsvc"), FlowStep("tweetsrepl")]),
-        Flow("upload media", 0.05, [FlowStep("cdn"), FlowStep("lb"), FlowStep("gw"),
+        Flow("upload media", 0.02, [FlowStep("cdn"), FlowStep("lb"), FlowStep("gw"),
              FlowStep("web"), FlowStep("mediasvc"), FlowStep("mediastore")]),
-        Flow("fan-out notifications", 0.05, [FlowStep("fanoutq"), FlowStep("notifsvc"),
+        Flow("fan-out notifications", 0.08, [FlowStep("fanoutq"), FlowStep("notifsvc"),
              FlowStep("notifq"), FlowStep("pushapi")]),
     ]
     assumptions = [

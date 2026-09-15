@@ -1,0 +1,552 @@
+{
+  "spec_version": 1,
+  "name": "Slack / Discord",
+  "workload": {
+    "system_rps": 40000,
+    "description": "80% server-to-client delivery events (32,000/s), 4% message sends (1,600/s) - a 20:1 fan-out - plus history reads, presence/typing, uploads and app load"
+  },
+  "components": [
+    {
+      "id": "cdn",
+      "kind": "cdn",
+      "name": "CDN (app bundle, avatars, attachment delivery)",
+      "per_instance_rps": 200000,
+      "instances": 1,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "lb",
+      "kind": "load_balancer",
+      "name": "Edge load balancer / WebSocket terminator",
+      "per_instance_rps": 40000,
+      "instances": 2,
+      "base_latency_ms": 1.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    },
+    {
+      "id": "ws",
+      "kind": "app_server",
+      "name": "Gateway servers (WebSocket fan-out to clients)",
+      "per_instance_rps": 6000,
+      "instances": 7,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "api",
+      "kind": "app_server",
+      "name": "REST API (send, history, search, membership)",
+      "per_instance_rps": 2000,
+      "instances": 5,
+      "base_latency_ms": 8.0,
+      "monthly_cost_per_instance": 7008,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 7008.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 7008.0,
+          "confidence_high": 7008.0,
+          "provenance": "GROUNDED",
+          "measured_context": "m6i.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); x86-64 (Intel Ice Lake). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.096/h x 730 = 7008c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "m6i.large"
+      }
+    },
+    {
+      "id": "chan",
+      "kind": "app_server",
+      "name": "Channel/guild servers (stateful per-channel fan-out, consistent-hash sharded)",
+      "per_instance_rps": 4000,
+      "instances": 11,
+      "base_latency_ms": 3.0,
+      "monthly_cost_per_instance": 5293,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 5293.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 5293.0,
+          "confidence_high": 5293.0,
+          "provenance": "GROUNDED",
+          "measured_context": "c7g.large \u2014 AWS EC2 us-east-1 / On-Demand / Linux / shared tenancy / 730 h per month; instance-hour only (excludes EBS, data transfer); arm64 (Graviton3). Band: zero-width: within the pinned scope the hourly list rate is a single exact published number with no variance. Month length (672-744 h), burstable credit surcharges, Savings Plans and Spot are OUT-OF-BAND modifiers, named per row, not band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ec2-ondemand-without-sec-sel/US%20East%20(N.%20Virginia)/Linux/index.json",
+              "note": "$0.0725/h x 730 = 5293c/month. Cross-checked to the cent against the AWS Price List Bulk API (version 20260904231117)."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "c7g.large"
+      }
+    },
+    {
+      "id": "cache",
+      "kind": "cache",
+      "name": "Redis cluster (presence, channel membership, recent messages)",
+      "per_instance_rps": 100000,
+      "instances": 2,
+      "base_latency_ms": 0.4,
+      "monthly_cost_per_instance": 15038,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 15038.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 15038.0,
+          "confidence_high": 15038.0,
+          "provenance": "GROUNDED",
+          "measured_context": "cache.r6g.large \u2014 AWS ElastiCache us-east-1 / On-Demand / Redis engine / standard support / 730 h per month; node-hour only. Band: zero-width at the Redis/Memcached standard-support rate. The Valkey engine is CHEAPER and Extended Support is DEARER; both are different products/support states, not a price range for this row, so they are named here rather than used as band edges.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/current/us-east-1/index.json",
+              "note": "$0.206/h x 730 = 15038c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "cache.r6g.large"
+      }
+    },
+    {
+      "id": "db",
+      "kind": "sql_db",
+      "name": "Message store (sharded by channel)",
+      "per_instance_rps": 8000,
+      "instances": 2,
+      "base_latency_ms": 5.0,
+      "monthly_cost_per_instance": 16425,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 16425.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 16425.0,
+          "confidence_high": 32850.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.r6g.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/us-east-1/index.json",
+              "note": "$0.225/h Single-AZ x 730 = 16425c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.r6g.large"
+      }
+    },
+    {
+      "id": "replica",
+      "kind": "replica",
+      "name": "Read replicas (scrollback / history)",
+      "per_instance_rps": 6000,
+      "instances": 2,
+      "base_latency_ms": 6.0,
+      "monthly_cost_per_instance": 12994,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 12994.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 12994.0,
+          "confidence_high": 25988.0,
+          "provenance": "GROUNDED",
+          "measured_context": "db.m6i.large \u2014 AWS RDS PostgreSQL us-east-1 / On-Demand / Single-AZ (band high = Multi-AZ) / 730 h per month; INSTANCE-HOURS ONLY (excludes storage, provisioned IOPS and backup above the free allocation). Band: deployment spread: low = Single-AZ, high = Multi-AZ. Both are on-demand, standard-tier, us-east-1 PostgreSQL, so the band is fully in scope. Multi-AZ is ~2x Single-AZ.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+              "note": "$0.178/h Single-AZ x 730 = 12994c/month. MySQL/MariaDB run ~3.9% cheaper than PostgreSQL for the same class. A read replica is billed as its own full instance, at the same rate as a primary."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "db.m6i.large"
+      }
+    },
+    {
+      "id": "q",
+      "kind": "queue",
+      "name": "Kafka (fan-out, push notifications, search indexing)",
+      "per_instance_rps": 4000,
+      "instances": 3,
+      "base_latency_ms": 2.0,
+      "monthly_cost_per_instance": 3329,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {
+        "monthly_cost_per_instance": {
+          "value": 3329.0,
+          "unit": "usd_minor_per_month",
+          "confidence_low": 3329.0,
+          "confidence_high": 3329.0,
+          "provenance": "GROUNDED",
+          "measured_context": "kafka.t3.small \u2014 AWS MSK us-east-1 / On-Demand / provisioned broker / 730 h per month; broker-hour only (excludes storage and data transfer). Band: zero-width: single published broker-hour rate in the pinned scope.",
+          "citations": [
+            {
+              "source": "AWS first-party pricing",
+              "reference": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonMSK/current/us-east-1/index.json",
+              "note": "$0.0456/broker-hour x 730 = 3329c/month."
+            }
+          ]
+        }
+      },
+      "match_context": {
+        "instance_class": "kafka.t3.small"
+      }
+    },
+    {
+      "id": "store",
+      "kind": "object_store",
+      "name": "Object store (file uploads and attachments)",
+      "per_instance_rps": 20000,
+      "instances": 1,
+      "base_latency_ms": 35.0,
+      "monthly_cost_per_instance": 0,
+      "egress_gb_per_month": 0,
+      "storage_gb": 0,
+      "requests_per_month": 0,
+      "llm_input_tokens_per_month": 0,
+      "llm_output_tokens_per_month": 0,
+      "provenance": "ASSUMPTION",
+      "groundings": {},
+      "match_context": {}
+    }
+  ],
+  "flows": [
+    {
+      "name": "event-fanout",
+      "share": 0.8,
+      "path": [
+        {
+          "component_id": "chan",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ws",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "send-message",
+      "share": 0.04,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "chan",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "q",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "read-history",
+      "share": 0.09,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "replica",
+          "visit_prob": 0.35
+        }
+      ]
+    },
+    {
+      "name": "presence-typing",
+      "share": 0.05,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "ws",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    },
+    {
+      "name": "attachment",
+      "share": 0.01,
+      "path": [
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "store",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "db",
+          "visit_prob": 0.3
+        }
+      ]
+    },
+    {
+      "name": "app-load",
+      "share": 0.01,
+      "path": [
+        {
+          "component_id": "cdn",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "lb",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "api",
+          "visit_prob": 1.0
+        },
+        {
+          "component_id": "cache",
+          "visit_prob": 1.0
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "subject": "workload",
+      "statement": "40,000 operations/s at peak, of which 32,000 are server-to-client delivery events and 1,600 are message sends: a FAN-OUT OF 20 DELIVERED EVENTS PER SEND, stated here as one number instead of being hidden in a share split. The 20:1 is a REASONED average for mixed DM + channel traffic; it is NOT a published figure. Two published anchors bracket it: WhatsApp's 2014 peak ran 712K outbound against 342K inbound messages, i.e. 2.08:1 for a DM-dominated product (Erlang Factory, WhatsApp scaling deck, 2014), while Discord's own worked example for a channel product is 1000:1 - 'If a server has 1000 people online, and they all were to say \"I love jello\" once, that's 1 million notifications' (discord.com/blog, 25 Oct 2023). WHERE YOU SIT ON THAT CURVE PICKS THE BOTTLENECK, and that is the whole lesson of this blueprint: below about 3.9 delivered events per send the stateless REST tier binds; at the 20:1 modelled here the gateway and channel tiers bind and the REST tier is not in the conversation; at Discord's 1000:1 for one large channel neither tier in this design survives and the fix is sharding the channel actor, not adding boxes. The previous version of this file asserted a 200:1 premise while encoding 3.67:1 and therefore named the REST API as the constraint - the error being corrected.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "ws",
+      "statement": "Gateway servers hold the client WebSockets and push 34,000 events/s here (message deliveries plus presence/typing). 6,000 events/s per instance is a DERATED figure, not a measurement: Discord published 'more than 26 million WebSocket events to clients per second' running on 400-500 Elixir machines (elixir-lang.org interview with Jake Heinz, 8 Oct 2020), which is about 58,000 events/s per machine - but those are large hosts, that machine count covers session AND guild processes together, and the price grounded on this row is a 2-vCPU c7g.large. Roughly a tenth of the published per-machine rate is the derating applied, and it is a judgement about instance class, not evidence. The tier is ALSO sized by CONCURRENT CONNECTIONS (memory, file descriptors, TLS session state) as much as by event rate, and Keystone's v1 engine has no notion of a held connection - size for sockets separately. Voice/video is NOT modelled.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "chan",
+      "statement": "The channel/guild tier is the one this blueprint exists to put in front of you, and the one whose capacity DOES NOT ADD - which is exactly what the engine below assumes it does. Here it is 11 instances sharing 33,600 events/s evenly. The real tier: Slack's Channel Servers are stateful and in-memory, hold channel history, own channels through a consistent hash ring and are reassigned by their managers (CHARM) in under 20 seconds when one dies, with the send path running Webapp -> Admin Server -> hash-ring lookup -> Channel Server -> every subscribed Gateway Server worldwide (slack.engineering/real-time-messaging, 11 Apr 2023). Discord's equivalent per-guild process took 'anywhere from 900ms to 2.1s' to publish one event for a large guild (discord.com/blog, 6 Jul 2017) and was fixed by sharding sessions behind relays handling 'up to 15,000 connected sessions per relay' and by dropping passive sessions - 'around 90% of user-guild connections in large servers were passive' (25 Oct 2023) - NOT by adding instances. SO: ADDING INSTANCES DOES NOTHING FOR ONE HOT CHANNEL, and this model will never show you that hotspot, exactly as realtime_chat warns for its sharded store. 4,000 events/s per instance is reasoned, not measured - no vendor publishes an events/s-per-host figure for this tier - and is set below the gateway's rate because this tier also does the subscriber-set lookup and per-channel ordering. It is modelled at FULL fan-out (one unit of work per delivered event), which is the pre-relay shape; the relay and passive-session optimisations that cut that work are not modelled.",
+      "confidence": "low",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "api",
+      "statement": "The REST tier carries 6,000 ops/s - sends, history reads, uploads and app load - and is deliberately NOT the constraint: 5 instances leave ~40% burst headroom. It was 10 instances and the named bottleneck in the previous version of this file, and that is the reader-facing defect being fixed. In a channel chat product the write path is a twentieth of the delivery path, so adding stateless REST boxes buys you nothing; both Slack and Discord published the opposite lesson. 'search' in this component's name is aspirational - see the 'search' assumption below.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "db",
+      "statement": "The message store is sharded by channel id across 2 primaries, so their write capacity genuinely adds - but the shard COUNT here is driven by data volume and hot-key spread, not by this request rate, which is why it sits far below the fan-out tiers at 1,720 writes/s. Two things the engine will not show you. (i) An even key distribution is assumed: a single hot channel lands on one shard and that hotspot is invisible here, the same caveat realtime_chat carries. (ii) NO PRODUCTION SYSTEM IN THIS CLASS CHOSE POSTGRES. Slack runs MySQL under Vitess - '2.3 million QPS at peak. 2M of those queries are reads and 300K are writes', median query latency 2 ms and p99 11 ms (slack.engineering/scaling-datastores-at-slack-with-vitess, 1 Dec 2020); Discord runs 72 ScyllaDB nodes, partitioned by 'the channel they're sent in, along with a bucket, which is a static time window', p99 insert improving from 5-70ms to 5ms (discord.com/blog, 6 Mar 2023). sql_db is the closest kind Keystone models and the throughput figure is set accordingly. The shard key - channel - is the part that is right and worth copying.",
+      "confidence": "low",
+      "source": "benchmark",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cache",
+      "statement": "Recent messages are cached, so history reads miss to a replica only ~35% of the time (deep scrollback). A cold cache would push all 3,600 history reads/s at the replicas - that is the scenario to test.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "presence",
+      "statement": "NOT MODELLED: presence/typing fan-out is not multiplied here. The 32,000 events/s is 20 x sends; presence deltas, typing indicators and read receipts are ADDITIONAL server-to-client pushes on top of that. Discord cut WebSocket traffic by about 40% by attacking exactly this traffic (discord.com/blog, 'How Discord Reduced WebSocket Traffic by 40%'), which tells you it is a large share of a real gateway's load. The gateway figure here is therefore OPTIMISTIC.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "search",
+      "statement": "NOT MODELLED: there is NO search index component in this model, although the queue's name mentions search indexing and the REST tier's mentions search. Real workspace search is a separate cluster fed asynchronously off the log; because it is async it would not move the binding constraint in steady state, but its cost, its storage and its own failure modes are absent from everything below.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "edge",
+      "statement": "NOT MODELLED: client bootstrap. Slack built Flannel, an application-level edge cache, precisely because a cold client asks for the whole workspace roster on connect - '4 million simultaneous connections at peak and 600K client queries per second' (slack.engineering/flannel-an-application-level-edge-cache-to-make-slack-scale, 31 May 2017). That is a real tier with real cost; it lands on the connect path, not the steady-state path, so it does not change which box saturates here.",
+      "confidence": "med",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "engine",
+      "statement": "Push notifications to APNs/FCM and any voice/video path are OUT of this model: Keystone's v1 engine has no honest per-instance price for a third-party API, and media streaming is out of v1 scope. Both are real costs and real failure modes that this design does not show.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    },
+    {
+      "subject": "cost",
+      "statement": "COMPUTE only - CDN, load balancer and object store are unpriced kinds, and attachment storage and egress volumes are not declared. The new channel/guild tier is priced by COPYING the gateway tier's grounded c7g.large rate, because Keystone's catalogue has no class for it; a real stateful channel server holds channel history in memory and would run on a larger memory-class instance, so that line is a FLOOR, not an estimate.",
+      "confidence": "high",
+      "source": "llm_inferred",
+      "provenance": "ASSUMPTION"
+    }
+  ],
+  "domain_flags": [],
+  "pricing": {
+    "egress_micro_usd_per_gb": 90000,
+    "storage_micro_usd_per_gb_month": 21000,
+    "request_micro_usd_per_thousand": 3000,
+    "llm_input_micro_usd_per_1k_tokens": 500,
+    "llm_output_micro_usd_per_1k_tokens": 4000,
+    "compute_pricing": "on_demand",
+    "groundings": {}
+  },
+  "_library": {
+    "category": "real_time",
+    "difficulty": "advanced",
+    "summary": "Team workspace chat: WebSocket fan-out over channels, a sharded message store and attachment uploads.",
+    "keywords": [
+      "slack",
+      "discord",
+      "slack clone",
+      "discord clone",
+      "team chat",
+      "team messaging",
+      "workspace chat",
+      "channels and threads",
+      "chat with channels",
+      "community server",
+      "chat server",
+      "message fan-out"
+    ]
+  }
+}

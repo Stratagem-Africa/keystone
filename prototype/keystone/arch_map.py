@@ -16,6 +16,7 @@ same (model, sim) yields byte-identical output — a committed golden, exactly l
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 
@@ -23,20 +24,23 @@ from keystone import __version__ as _ENGINE_VERSION
 from keystone.council import is_high_stakes
 from keystone.model import ComponentKind, SystemModel
 from keystone.provenance import GROUNDABLE_METRICS
-from keystone.simulation import SimulationResult
+from keystone.simulation import SimulationResult, simulate
 
 # Canonical left→right layer bands for layout. Every ComponentKind maps to exactly one band, so any
 # model lays out deterministically. This is a DISPLAY grouping only — not an engine concept.
 _LAYERS: tuple[tuple[str, str, tuple[ComponentKind, ...]], ...] = (
-    ("client",   "Client",   (ComponentKind.CLIENT,)),
-    ("edge",     "Edge",     (ComponentKind.CDN, ComponentKind.LOAD_BALANCER)),
-    ("gateway",  "Gateway",  (ComponentKind.API_GATEWAY,)),
-    ("compute",  "Compute",  (ComponentKind.APP_SERVER,)),
+    ("client",   "Your users",        (ComponentKind.CLIENT,)),
+    ("edge",     "Closest to users",  (ComponentKind.CDN, ComponentKind.LOAD_BALANCER)),
+    ("gateway",  "Front door",        (ComponentKind.API_GATEWAY,)),
+    ("compute",  "Your app code",     (ComponentKind.APP_SERVER,)),
     ("cache",    "Cache",    (ComponentKind.CACHE,)),
     ("data",     "Data",     (ComponentKind.SQL_DB, ComponentKind.REPLICA, ComponentKind.OBJECT_STORE)),
-    ("async",    "Async",    (ComponentKind.QUEUE,)),
+    ("async",    "Background work",   (ComponentKind.QUEUE,)),
     ("external", "External", (ComponentKind.EXTERNAL_API,)),
 )
+# Id of the synthetic users node. Prefixed so it can never collide with a real component id.
+_USERS_ID = "__users__"
+
 _KIND_LAYER: dict[ComponentKind, tuple[str, str, int]] = {
     k: (lid, label, i) for i, (lid, label, kinds) in enumerate(_LAYERS) for k in kinds
 }
@@ -44,22 +48,22 @@ _KIND_LAYER: dict[ComponentKind, tuple[str, str, int]] = {
 # stays self-contained (no icon-font/asset dependency, stdlib-first). `role` is a one-line, non-technical
 # description of what the component DOES, so a non-engineer can read the map without knowing the kind.
 _KIND_ICON: dict[ComponentKind, str] = {
-    ComponentKind.CLIENT: "👤", ComponentKind.CDN: "🌐", ComponentKind.LOAD_BALANCER: "⚖️",
-    ComponentKind.API_GATEWAY: "🚪", ComponentKind.APP_SERVER: "⚙️", ComponentKind.CACHE: "⚡",
-    ComponentKind.SQL_DB: "🗄️", ComponentKind.REPLICA: "📑", ComponentKind.QUEUE: "📨",
+    ComponentKind.CLIENT: "🧑‍💻", ComponentKind.CDN: "🛰️", ComponentKind.LOAD_BALANCER: "🔀",
+    ComponentKind.API_GATEWAY: "🛡️", ComponentKind.APP_SERVER: "⚙️", ComponentKind.CACHE: "⚡",
+    ComponentKind.SQL_DB: "🗄️", ComponentKind.REPLICA: "🗂️", ComponentKind.QUEUE: "📥",
     ComponentKind.OBJECT_STORE: "🪣", ComponentKind.EXTERNAL_API: "🔌",
 }
 _KIND_ROLE: dict[ComponentKind, str] = {
     ComponentKind.CLIENT: "Your users and their browsers",
-    ComponentKind.CDN: "Serves static content from the edge, close to users",
+    ComponentKind.CDN: "Delivers images, CSS and JavaScript from servers near your users, so they load faster",
     ComponentKind.LOAD_BALANCER: "Spreads incoming traffic across your servers",
     ComponentKind.API_GATEWAY: "The front door — routes and guards every request",
     ComponentKind.APP_SERVER: "The workhorse that runs your app's logic",
-    ComponentKind.CACHE: "Keeps hot data in memory for fast reads",
-    ComponentKind.SQL_DB: "The system of record — your durable data",
-    ComponentKind.REPLICA: "A read-only copy of the database, sharing the read load",
+    ComponentKind.CACHE: "Keeps frequently-used data in memory so it comes back fast",
+    ComponentKind.SQL_DB: "The permanent copy of your data — the one that must never be lost",
+    ComponentKind.REPLICA: "A copy of the database you can read from but not write to, so the main one is less busy",
     ComponentKind.QUEUE: "Holds background work to process later",
-    ComponentKind.OBJECT_STORE: "Stores files and large uploads (images, blobs)",
+    ComponentKind.OBJECT_STORE: "Stores the files people upload — images, video, documents",
     ComponentKind.EXTERNAL_API: "A third-party service your system depends on",
 }
 # A stable palette assigned to flows in model order (display only — carries no meaning about the number).
@@ -113,12 +117,39 @@ def _grounded_evidence(comp) -> list[dict]:
 _PROV_VOCAB = frozenset({"GROUNDED", "RECONCILE", "ASSUMPTION", "GAP"})
 
 
+# The metrics the ENGINE actually reads. Capacity and service time decide the bottleneck, the
+# breakpoint and every latency figure; cost decides none of them. Citing the price of a box tells
+# you nothing about whether it can serve 8,000 requests a second.
+_ENGINE_DRIVING_METRICS = frozenset({"per_instance_rps", "base_latency_ms"})
+
+
 def _node_provenance(comp, evidence: list[dict]) -> str:
-    """Node-level provenance label. RECONCILE if any grounded metric fell outside its cited band, else
-    GROUNDED if anything is grounded, else the component's own default (clamped to the known vocabulary)."""
+    """Node-level provenance label, decided by the metrics that DRIVE the engine.
+
+    THIS USED TO RETURN "GROUNDED IF ANYTHING IS GROUNDED", and across the 56-blueprint library that
+    meant 298 of 406 components rendered GROUNDED-green on the strength of ONE cited field —
+    `monthly_cost_per_instance`, from the AWS price list — while `per_instance_rps` and
+    `base_latency_ms` were uncited `llm_inferred` guesses on every single one of them. Those two are
+    the inputs the engine reads to produce the bottleneck, the breakpoint and every latency number.
+    So the badge said "measured" about the half nobody computes with, and said nothing about the
+    half that decides the answer.
+
+    CLAUDE.md: "Never present an ASSUMPTION as GROUNDED." That was a straight violation, and a
+    one-of-three promotion is exactly how a design gets trusted for the wrong reason.
+
+    A node is GROUNDED only when EVERY engine-driving metric it has is cited. Otherwise it keeps its
+    own honest label — and the cost citation it does have still appears in the evidence list, so
+    nothing is hidden; it just stops being counted as proof of something it is not proof of.
+    """
     if any(e["status"] == "RECONCILE" for e in evidence):
         return "RECONCILE"
-    if evidence:
+    grounded = {e["metric"] for e in evidence if e["status"] == "GROUNDED"}
+    # Only the driving metrics this component actually USES. A base_latency_ms of 0 contributes
+    # nothing to any figure, so demanding a citation for it would withhold the GROUNDED label from a
+    # component that is genuinely, fully evidenced. Requiring evidence for a number nobody computes
+    # with is as dishonest in the other direction.
+    required = {m for m in _ENGINE_DRIVING_METRICS if getattr(comp, m, 0)}
+    if required and required <= grounded:
         return "GROUNDED"
     p = (comp.provenance or "ASSUMPTION").upper()
     return p if p in _PROV_VOCAB else "ASSUMPTION"
@@ -155,9 +186,47 @@ def _round_floats(obj, ndigits: int = 6):
     return obj
 
 
-def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
+# Offered-load multiples the interactive simulator can scrub through (× the design load).
+_SWEEP_MULTIPLES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0)
+
+
+def build_load_sweep(model: SystemModel) -> list[dict]:
+    """Run the ENGINE at a range of offered loads (multiples of the design load) so the interactive map
+    can *play* the system straining under traffic. Every frame is a real `simulate()` run — the map only
+    displays these engine-computed values and never scales a number itself (prime directive holds: the
+    engine is the sole author of every utilisation / breakpoint / cost shown, at every load)."""
+    base = model.workload.system_rps or 0.0
+    frames: list[dict] = []
+    for mult in _SWEEP_MULTIPLES:
+        load = base * mult
+        scaled = dataclasses.replace(
+            model, workload=dataclasses.replace(model.workload, system_rps=load))
+        sim = simulate(scaled)
+        frames.append({
+            "load_rps": load,
+            "multiple": mult,
+            "bottleneck_id": sim.bottleneck_id,
+            "bottleneck_utilization": sim.bottleneck_utilization,
+            "breakpoint_rps_safe": sim.breakpoint_rps_safe,
+            "monthly_cost_cents": sim.monthly_cost,
+            "nodes": {
+                cid: {
+                    "utilization": cr.utilization,
+                    "arrival_rps": cr.arrival_rps,
+                    "saturated": bool(cr.saturated),
+                    "status": _status(cr.utilization, cr.saturated),
+                }
+                for cid, cr in sim.components.items()
+            },
+        })
+    return frames
+
+
+def build_arch_map(model: SystemModel, sim: SimulationResult, *, sweep: bool = False) -> dict:
     """The deterministic engine→map serialisation. Numbers come from `sim` (engine results) and the
-    model's declared inputs; provenance/evidence come from the model. Nothing here computes a metric."""
+    model's declared inputs; provenance/evidence come from the model. Nothing here computes a metric.
+    With `sweep=True`, also attaches an engine-computed load sweep (see `build_load_sweep`) so the
+    interactive map can animate the design straining under rising traffic."""
     # Nodes, sorted by (layer order, id) for a stable, layered layout.
     nodes: list[dict] = []
     for cid in sorted(model.components):
@@ -192,6 +261,31 @@ def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
             "provenance": _node_provenance(comp, evidence),
             "evidence": evidence,
         })
+    # THE USERS. `_LAYERS` has had a "client" layer labelled "Your users" from the start and ZERO of
+    # the 56 blueprints ever populated it, so every architecture opened on a load balancer with no
+    # sign of the people it exists for. Reported as "it shouldn't just start with load balancer",
+    # and that was right: a diagram of a system serving nobody reads as a diagram of nothing.
+    #
+    # Synthesised HERE rather than added to 56 files, because it is DISPLAY ONLY. It carries no
+    # capacity, no cost and no utilisation; the engine never sees it and no number moves. It is the
+    # offered load, drawn where it actually comes from.
+    entry_ids = {f.path[0].component_id for f in model.flows if f.path}
+    if entry_ids:
+        clid, cllabel, clorder = _KIND_LAYER[ComponentKind.CLIENT]
+        nodes.append({
+            "id": _USERS_ID, "name": "Your users", "kind": ComponentKind.CLIENT.value,
+            "icon": _KIND_ICON.get(ComponentKind.CLIENT, "👤"),
+            "role": f"{model.workload.system_rps:,.0f} requests a second arriving from real people",
+            "layer": clid, "layer_label": cllabel, "layer_order": clorder,
+            "capacity_rps": None, "per_instance_rps": None, "instances": None,
+            "base_latency_ms": None, "monthly_cost_cents": 0,
+            "arrival_rps": model.workload.system_rps,
+            "utilization": None, "mean_latency_ms": None, "saturated": False, "status": "ok",
+            "is_bottleneck": False, "is_spof": False,
+            "provenance": "ASSUMPTION", "evidence": [],
+            "synthetic": True,
+        })
+
     nodes.sort(key=lambda n: (n["layer_order"], n["id"]))
 
     layers = [{"id": lid, "label": label, "order": i} for i, (lid, label, _k) in enumerate(_LAYERS)]
@@ -205,7 +299,13 @@ def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
             "name": fl.name,
             "share": fl.share,
             "color": _FLOW_COLORS[i % len(_FLOW_COLORS)],
-            "steps": [{"component_id": s.component_id, "visit_prob": s.visit_prob} for s in fl.path],
+            # The users are prepended as step 0 so an edge is drawn from them into the entry tier —
+            # and so the journey walkthrough opens where a request actually starts, with a person,
+            # rather than mid-system at a load balancer. Display only: the engine already computed
+            # this flow's latency from the real path, and `visit_prob` 1.0 on a component with no
+            # capacity contributes nothing to any figure.
+            "steps": ([{"component_id": _USERS_ID, "visit_prob": 1.0}] if fl.path else [])
+                     + [{"component_id": s.component_id, "visit_prob": s.visit_prob} for s in fl.path],
             "latency": ({"mean_ms": lat.mean_ms, "p50_ms": lat.p50_ms,
                          "p95_ms": lat.p95_ms, "p99_ms": lat.p99_ms} if lat else None),
         })
@@ -229,6 +329,12 @@ def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
             "bottleneck_id": sim.bottleneck_id,
             "bottleneck_name": sim.bottleneck_name,
             "bottleneck_utilization": sim.bottleneck_utilization,
+            # How far ahead the named component is, and everyone tied with it. Without these the
+            # headline said "your bottleneck is X" with full confidence while the correction — that
+            # four components sit inside the noise — was buried in "Where this is wrong". A caveat
+            # that contradicts the headline it sits under is not a disclosure; it is a footnote.
+            "bottleneck_margin_pts": sim.bottleneck_margin_pts,
+            "bottleneck_contenders": list(sim.bottleneck_contenders),
             "breakpoint_rps_safe": sim.breakpoint_rps_safe,
             "breakpoint_rps_theoretical": sim.breakpoint_rps_theoretical,
             "spofs": list(sim.spofs),
@@ -246,6 +352,8 @@ def build_arch_map(model: SystemModel, sim: SimulationResult) -> dict:
                          "confidence": a.confidence, "provenance": a.provenance}
                         for a in model.assumptions],
     }
+    if sweep:
+        arch["sweep"] = build_load_sweep(model)
     return _json_safe(arch)
 
 
@@ -320,6 +428,18 @@ svg#edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .modetog{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .modetog button{flex:1;font-size:11.5px;font-weight:700;padding:7px 0;cursor:pointer;background:transparent;color:var(--muted);border:none;transition:.15s}
 .modetog button.on{background:linear-gradient(90deg,rgba(80,120,255,.32),rgba(110,80,255,.26));color:#fff}
+/* right-click sizer */
+.sizer{position:fixed;z-index:60;width:250px;background:rgba(16,22,48,.98);border:1px solid rgba(150,170,240,.25);
+  border-radius:10px;padding:8px;box-shadow:0 18px 44px rgba(0,0,0,.6);backdrop-filter:blur(6px)}
+.sizer-h{font-weight:700;font-size:12.5px;padding:2px 6px}
+.sizer-sub{font-size:11px;color:var(--muted);padding:0 6px 7px;border-bottom:1px solid rgba(150,170,240,.14);margin-bottom:6px}
+.sizer-b{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);
+  font:inherit;font-size:12.5px;padding:7px 6px;border-radius:6px;cursor:pointer}
+.sizer-b small{display:block;font-size:10.5px;color:var(--muted);margin-top:1px}
+.sizer-b:hover:not(:disabled){background:rgba(120,140,240,.16)}
+.sizer-b:disabled{opacity:.4;cursor:not-allowed}
+.sizer-b.primary{margin-top:5px;border-top:1px solid rgba(150,170,240,.14);color:var(--blue)}
+
 /* plain per-node status (shown ONLY in Simple mode) */
 .node .simplestat{display:none;margin-top:6px;font-size:10.5px;font-weight:700}
 .node .simplestat.s-ok{color:#86efac}
@@ -340,9 +460,30 @@ body.simple .node .simplestat{display:block}
 .jc:hover{border-color:var(--steel);background:rgba(90,120,255,.16)}
 .node.cur{box-shadow:0 0 0 2px var(--blue),0 10px 30px rgba(0,0,0,.55),0 0 34px -4px var(--blue)!important;opacity:1!important}
 circle.flow{opacity:.95;pointer-events:none}
+circle.req{opacity:.9;pointer-events:none}
+circle.resp{opacity:.42;fill:var(--muted);pointer-events:none}
 
 /* nodes */
-.node{position:absolute;width:190px;border-radius:12px;padding:9px 11px 10px;cursor:pointer;
+/* LOAD STATES. A component over its limit has to LOOK over its limit — reported as "shouldn't it be
+   blinking danger?", and that was fair: a tier at 140% looked identical to one at 4%. `hot` is a
+   warning, `saturated` is an alarm that pulses. `prefers-reduced-motion` drops the pulse and keeps
+   the colour, so the signal survives for anyone who cannot take the movement. */
+@keyframes ks-danger{
+  0%,100%{box-shadow:0 6px 18px rgba(0,0,0,.42), 0 0 0 0 rgba(248,113,113,.55)}
+  50%    {box-shadow:0 6px 22px rgba(0,0,0,.5),  0 0 0 7px rgba(248,113,113,0)}
+}
+.node.st-saturated{border-color:rgba(248,113,113,.85);animation:ks-danger 1.25s ease-in-out infinite}
+.node.st-hot{border-color:rgba(251,146,60,.6)}
+@media (prefers-reduced-motion: reduce){
+  .node.st-saturated{animation:none;border-color:rgba(248,113,113,.95);
+    box-shadow:0 6px 18px rgba(0,0,0,.42), 0 0 0 3px rgba(248,113,113,.35)}
+}
+/* The users are not a machine: no load bar, no danger state, just where the traffic comes from. */
+.node.users{background:linear-gradient(180deg,rgba(22,30,58,.9),rgba(12,18,38,.9));
+  border-style:dashed;border-color:rgba(150,170,240,.3);cursor:default}
+.node.users .util{display:none}
+
+.node{position:absolute;width:200px;border-radius:12px;padding:9px 11px 10px;cursor:pointer;
   background:linear-gradient(180deg,rgba(26,34,66,.94),rgba(14,20,44,.94));
   border:1px solid rgba(150,170,240,.16);box-shadow:0 6px 18px rgba(0,0,0,.42);
   transition:transform .15s ease,box-shadow .15s ease,opacity .18s ease;overflow:hidden}
@@ -352,7 +493,7 @@ circle.flow{opacity:.95;pointer-events:none}
   background:rgba(125,211,252,.1);box-shadow:inset 0 0 0 1px rgba(125,211,252,.18),0 0 14px rgba(125,211,252,.1)}
 .node .nm{font-size:12.5px;font-weight:700;line-height:1.15;padding-right:4px}
 .node .kd{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em;margin-top:2px}
-.node .role{font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+.node .role{font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .node .util{margin-top:7px;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
 .node .util > i{display:block;height:100%;border-radius:3px;background:var(--sc,var(--ok))}
 .node .meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10.5px;color:var(--muted)}
@@ -418,6 +559,11 @@ table.k td.n{text-align:right;font-variant-numeric:tabular-nums}
 .legend .ln{width:20px;height:0;border-top:3px solid;border-radius:2px}
 #hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:8;color:#6b76a0;font-size:11px;pointer-events:none}
 .credit{position:fixed;right:16px;bottom:12px;z-index:8;color:#5f6b93;font-size:10.5px}
+#loadbar{position:fixed;left:50%;bottom:46px;transform:translateX(-50%);z-index:22;display:flex;align-items:center;gap:12px;padding:9px 16px;max-width:min(780px,94vw)}
+#loadbar button{background:var(--blue);color:#04121f;border:none;border-radius:20px;padding:6px 14px;font-weight:800;font-size:12px;cursor:pointer;white-space:nowrap}
+#loadbar input[type=range]{width:220px;accent-color:var(--blue);cursor:pointer}
+#loadbar #loadReadout{font-size:12px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;min-width:210px}
+#loadbar .loadhint{font-size:10px;color:#6b76a0;max-width:180px;line-height:1.25}
 """
 
 
@@ -429,7 +575,11 @@ const DATA = JSON.parse(document.getElementById('arch-data').textContent);
 const $ = (s,r=document)=>r.querySelector(s);
 const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
 const pct=v=>v==null?'—':(v*100).toFixed(0)+'%';
-const rps=v=>v==null?'unbounded':Math.round(v).toLocaleString();
+const rps=v=>v==null?'no limit in this model':Math.round(v).toLocaleString();
+// Journey names arrive as backend flow ids — "driver_ping", "trip_update", "check_availability".
+// They were rendered raw, so the map showed snake_case to people who have never written code.
+// Display only: DATA.flows[].name stays the key used for hover, focus and stepping.
+const human=n=>{const w=String(n).replace(/[_-]+/g,' ').trim();return w.charAt(0).toUpperCase()+w.slice(1);};
 const ms=v=>v==null?'—':Math.round(v).toLocaleString()+' ms';
 const usd=c=>c==null?'—':'$'+(c/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const statusColor={ok:'var(--ok)',hot:'var(--hot)',saturated:'var(--sat)'};
@@ -438,11 +588,13 @@ const provColor={GROUNDED:'var(--green)',RECONCILE:'var(--amber)',ASSUMPTION:'va
 // matched=green ("reality confirms it"), soft=amber ("where this is wrong"), hard=red (failure).
 const AUDIT=DATA.meta.audit||null;
 const divColor={matched:'var(--green)',soft:'var(--amber)',hard:'#c2463b',not_compared:'var(--muted)',not_observed:'var(--steel)'};
-const divBadge={matched:'✓ matched',soft:'⚠ soft',hard:'⛔ HARD',not_compared:'– n/c',not_observed:''};
+const divBadge={matched:'✓ agrees',soft:'⚠ off',hard:'⛔ WAY OFF',not_compared:'– not checked',not_observed:''};
 const gapStr=g=>g==null?'':(g>=0?'+':'')+Math.round(g*100)+'%';
 
 // ---- layout ---------------------------------------------------------------
-const COLW=250,ROWH=140,PADX=70,PADY=90,NW=190,NH=94;
+// Row pitch (ROWH) is comfortably taller than a full card (icon+name+2-line role+bar+stat) so cards
+// never overlap; the role itself is clamped to 2 lines in CSS to bound card height.
+const COLW=280,ROWH=176,PADX=70,PADY=96,NW=200,NH=132;
 const nodeById={};DATA.nodes.forEach(n=>nodeById[n.id]=n);
 // dense-rank the layers actually present, so empty bands leave no gap
 const presentOrders=[...new Set(DATA.nodes.map(n=>n.layer_order))].sort((a,b)=>a-b);
@@ -485,7 +637,8 @@ DATA.flows.forEach(f=>{
 // ---- node cards -----------------------------------------------------------
 const nodeEls={};
 DATA.nodes.forEach(n=>{
-  const d=el('div','node'+(n.status==='hot'||n.status==='saturated'?' hot':''));
+  const d=el('div','node st-'+n.status+(n.status==='hot'||n.status==='saturated'?' hot':'')
+             +(n.synthetic?' users':''));
   d.style.left=pos[n.id].x+'px';d.style.top=pos[n.id].y+'px';
   // In audit mode the left edge signals DIVERGENCE (the audit's core finding); otherwise provenance.
   d.style.setProperty('--pc', n.divergence?(divColor[n.divergence.status]||'var(--steel)'):(provColor[n.provenance]||'var(--steel)'));
@@ -493,8 +646,8 @@ DATA.nodes.forEach(n=>{
   const tags=el('div','tags');
   if(n.divergence&&n.divergence.status!=='not_observed')
     tags.appendChild(el('span','tag dv '+n.divergence.status,(divBadge[n.divergence.status]+' '+gapStr(n.divergence.gap)).trim()));
-  if(n.is_bottleneck)tags.appendChild(el('span','tag bn','⚑ BN'));
-  if(n.is_spof)tags.appendChild(el('span','tag spof','SPOF'));
+  if(n.is_bottleneck){const t=el('span','tag bn','⚑ BOTTLENECK');t.title='This part fills up first. It sets the ceiling for the whole system — adding capacity anywhere else will not raise that ceiling until you fix this one.';tags.appendChild(t);}
+  if(n.is_spof){const t=el('span','tag spof','NO BACKUP');t.title='Single point of failure: there is only one of these. If it goes down, your whole app goes down with it.';tags.appendChild(t);}
   d.appendChild(tags);
   const top=el('div','top');top.appendChild(el('span','ic',n.icon||''));top.appendChild(el('div','nm',n.name));
   d.appendChild(top);
@@ -503,10 +656,21 @@ DATA.nodes.forEach(n=>{
   const SS={ok:'✓ plenty of headroom',hot:'⚠ running near its limit',saturated:'✕ over its limit'};
   d.appendChild(el('div','simplestat s-'+n.status, SS[n.status]||''));
   const meta=el('div','meta');
-  const u=el('span');u.appendChild(document.createTextNode('util '));const ub=el('b',null,pct(n.utilization));u.appendChild(ub);
-  const cap=el('span',null,rps(n.capacity_rps)+' rps cap');
+  const u=el('span');u.appendChild(document.createTextNode('full: '));const ub=el('b',null,pct(n.utilization));u.appendChild(ub);
+  const cap=el('span',null,'capacity '+rps(n.capacity_rps)+'/sec');
   meta.appendChild(u);meta.appendChild(cap);d.appendChild(meta);
   d.onclick=(e)=>{e.stopPropagation();openNode(n);};
+  // RIGHT-CLICK A TIER TO CHANGE ITS SIZE. Asked for directly: "if I right click, can I add more of
+  // that component, and the system auto-includes it and re-optimises?" It can, and it does not need
+  // new intelligence to do it — the engine already sizes and re-simulates. This gesture just asks it.
+  //
+  // The map is a sandboxed iframe (allow-scripts, no same-origin) so it cannot call the API itself.
+  // It posts the request to the parent studio, which re-runs the engine and swaps this map for the
+  // new one. Every number you then see is a fresh simulation of the edited design, never the old
+  // numbers with a box drawn on top.
+  if(!n.synthetic && n.instances!=null){
+    d.oncontextmenu=(e)=>{e.preventDefault();e.stopPropagation();openSizer(n,e.clientX,e.clientY);};
+  }
   // While a journey is focused, hover must NOT clobber it — leave the active-flow highlight intact.
   d.onmouseenter=()=>{if(!activeFlow)hoverNode(n.id);};
   d.onmouseleave=()=>{if(!activeFlow)clearHover();};
@@ -542,7 +706,7 @@ function narrateStep(f){
   $('#jcapS').textContent=(jStep===0
       ? ('A request enters at '+(cur.icon||'')+' '+cur.name+' — '+(cur.role||''))
       : ('then '+(prev?prev.name:'')+' hands off to '+(cur.icon||'')+' '+cur.name+' — '+(cur.role||'')))
-      +((jStep===ids.length-1&&lat)?('   ·   whole path: p50 '+ms(lat.p50_ms)+' · p95 '+ms(lat.p95_ms)+' · p99 '+ms(lat.p99_ms)):'');
+      +((jStep===ids.length-1&&lat)?('   ·   whole trip: typical (p50) '+ms(lat.p50_ms)+' · slowest 1 in 20 (p95) '+ms(lat.p95_ms)+' · slowest 1 in 100 (p99) '+ms(lat.p99_ms)):'');
 }
 function stepTo(d){const f=DATA.flows.find(x=>x.name===activeFlow);if(!f)return;const n=f.steps.length;jStep=(jStep+d+n)%n;narrateStep(f);}
 function playJourney(){stopTimer();jTimer=setInterval(()=>stepTo(1),1700);}
@@ -569,37 +733,75 @@ $('#jExit').onclick=()=>clearFlow();
 // ---- detail panel ---------------------------------------------------------
 const panel=$('#panel');
 function kv(parent,k,v,tag){const r=el('div','kv');r.appendChild(el('span','k',k));const vv=el('span','v',v);r.appendChild(vv);parent.appendChild(r);if(tag){const t=el('div','tagline',tag);parent.appendChild(t);} }
+// --- right-click sizer -------------------------------------------------------------------
+let sizerEl=null;
+function closeSizer(){ if(sizerEl){sizerEl.remove();sizerEl=null;} }
+document.addEventListener('click',closeSizer);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSizer();});
+
+function askParent(msg){
+  // The parent may not be listening (the map also opens as a standalone file). Say so rather than
+  // appearing to work — a control that silently does nothing is worse than one that is not there.
+  try{ parent.postMessage(Object.assign({source:'keystone-map'},msg),'*'); }catch(_){}
+}
+
+function openSizer(n,x,y){
+  closeSizer();
+  const m=el('div','sizer'); sizerEl=m;
+  m.style.left=Math.min(x,innerWidth-260)+'px'; m.style.top=Math.min(y,innerHeight-190)+'px';
+  m.onclick=(e)=>e.stopPropagation();
+  m.appendChild(el('div','sizer-h',n.name));
+  m.appendChild(el('div','sizer-sub','running '+n.instances+' — '+pct(n.utilization)+' full'));
+  const add=(label,delta,hint)=>{
+    const b=el('button','sizer-b',label);
+    b.onclick=()=>{ closeSizer(); askParent({type:'resize',id:n.id,instances:Math.max(1,n.instances+delta)}); };
+    if(hint){const s2=el('small',null,hint); b.appendChild(s2);}
+    m.appendChild(b); return b;
+  };
+  add('Add one more',1,'see what it costs and what it fixes');
+  add('Add five',5,'for a tier that is badly under-provisioned');
+  const rm=add('Remove one',-1,'is this over-provisioned?');
+  if(n.instances<=1){ rm.disabled=true; rm.title='Only one left — removing it is a total failure, which this engine does not model.'; }
+  const fix=el('button','sizer-b primary','Fix the whole design for me');
+  fix.appendChild(el('small',null,'size every tier to today\'s load, then re-check it'));
+  fix.onclick=()=>{ closeSizer(); askParent({type:'remediate'}); };
+  m.appendChild(fix);
+  document.body.appendChild(m);
+}
+
 function openNode(n){
   DATA.nodes.forEach(m=>nodeEls[m.id].classList.toggle('sel',m.id===n.id));
-  $('#pKind').textContent=n.kind.replace(/_/g,' ')+(n.is_bottleneck?' · BOTTLENECK':'')+(n.is_spof?' · SPOF':'');
+  $('#pKind').textContent=n.kind.replace(/_/g,' ')+(n.is_bottleneck?' · BOTTLENECK (fills up first)':'')+(n.is_spof?' · SINGLE POINT OF FAILURE (no backup)':'');
   $('#pName').textContent=n.name;
   $('#pTech').textContent=n.instances+'× instance'+(n.instances>1?'s':'')+' · '+rps(n.capacity_rps)+' rps capacity';
   const b=$('#pBody');b.textContent='';
-  const s1=el('div','sec','Engine-computed (this run)');b.appendChild(s1);
-  kv(b,'Arrival', rps(n.arrival_rps)+' rps');
-  kv(b,'Utilisation', pct(n.utilization), n.status==='saturated'?'SATURATED — beyond the model’s stable range':(n.status==='hot'?'running hot (≥85%)':'within safe range'));
-  kv(b,'Mean service', ms(n.mean_latency_ms));
-  const s2=el('div','sec','Design inputs (your model)');b.appendChild(s2);
+  const s1=el('div','sec','What the engine worked out (at this traffic level)');b.appendChild(s1);
+  kv(b,'Traffic reaching it', rps(n.arrival_rps)+' requests/sec');
+  kv(b,'How full it is', pct(n.utilization), n.status==='saturated'?'SATURATED — more traffic arrives than this part can handle. Past this point the engine is outside the range where its maths holds, so do not rely on any number on this page.':(n.status==='hot'?'Running hot — 85% or more of its capacity is in use. Little room left for a spike.':'Under 85% — inside the range where the model holds, with room to absorb a spike.'));
+  kv(b,'Average latency (time this part takes)', ms(n.mean_latency_ms));
+  const s2=el('div','sec','Numbers you gave us (inputs, not results)');b.appendChild(s2);
   kv(b,'Capacity', rps(n.capacity_rps)+' rps ('+n.instances+'× '+rps(n.per_instance_rps)+')');
-  kv(b,'Base latency', ms(n.base_latency_ms));
+  kv(b,'Base latency (its delay when not busy)', ms(n.base_latency_ms));
   kv(b,'Monthly cost', usd(n.monthly_cost_cents));
-  const s3=el('div','sec','Provenance');b.appendChild(s3);
+  const s3=el('div','sec','Where these numbers came from');b.appendChild(s3);
   const pv=el('span','prov '+n.provenance,n.provenance);b.appendChild(pv);
+  b.appendChild(el('div','tagline',{GROUNDED:'A published measurement backs this up — the source is listed below.',RECONCILE:'A published measurement exists, but your number sits outside it. We kept YOUR number; someone should check why they disagree.',ASSUMPTION:'A guess. Nothing measured backs this up yet.',GAP:'A known hole: evidence for this was flagged as missing and has not been filled.'}[n.provenance]||''));
   if(n.evidence.length){
     n.evidence.forEach(e=>{
       const c=el('div','ev');
-      c.appendChild(el('div','m',e.metric+' — '+e.status));
-      c.appendChild(el('div','band','your value '+fmtEv(e,e.your_value)+'  ·  cited central '+fmtEv(e,e.central)+'  ·  band '+fmtEv(e,e.low)+'–'+fmtEv(e,e.high)));
+      const METRIC_LABEL={per_instance_rps:'what one instance handles, requests per second',base_latency_ms:'its delay when not busy, in milliseconds',monthly_cost_per_instance:'monthly cost per instance'};
+      c.appendChild(el('div','m',(METRIC_LABEL[e.metric]||e.metric.replace(/_/g,' '))+' — '+e.status));
+      c.appendChild(el('div','band','you said '+fmtEv(e,e.your_value)+'  ·  published measurement '+fmtEv(e,e.central)+'  ·  published range '+fmtEv(e,e.low)+' to '+fmtEv(e,e.high)));
       if(e.measured_on)c.appendChild(el('div','on','measured on: '+e.measured_on));
       e.sources.forEach(sc=>c.appendChild(el('div','src','↳ '+sc.source+' — '+sc.reference)));
       b.appendChild(c);
     });
-    b.appendChild(el('div','note','The engine used YOUR value, not the benchmark. RECONCILE = your value fell outside the cited band and was kept, not overwritten — a human should check the context (hardware / region / workload).'));
+    b.appendChild(el('div','note','The engine used YOUR number, not the published one — we never silently swap in someone else’s measurement. RECONCILE means your number landed outside the published range and we kept it anyway. That is not automatically wrong: the benchmark may have run on different hardware, in a different region, or under a different kind of work. Someone should look and decide.'));
   }else{
-    b.appendChild(el('div','note','No cited evidence attached to this component’s inputs — treat its capacity/latency as an ASSUMPTION (L0). Grounding adds citations; it never changes a computed number.'));
+    b.appendChild(el('div','note','Nothing measured backs up this part’s numbers. Treat its capacity and its delay as ASSUMPTIONS — educated guesses, not measured facts (L0, directional). When a published measurement does exist we show it here as evidence; it never changes what the engine calculated.'));
   }
   if(n.divergence&&n.divergence.rows.length){
-    b.appendChild(el('div','sec','Observed vs predicted (audit)'));
+    b.appendChild(el('div','sec','What your live system actually did, vs what we predicted'));
     n.divergence.rows.forEach(r=>{
       const c=el('div','ev');
       c.appendChild(el('div','m',r.metric+' — '+r.verdict+(r.severity?' ('+r.severity+')':'')));
@@ -608,7 +810,7 @@ function openNode(n){
       if(r.note)c.appendChild(el('div','on',r.note));
       b.appendChild(c);
     });
-    b.appendChild(el('div','note','Observed values are read-only EVIDENCE — they never changed an engine number (prime directive); divergences are surfaced for review, never auto-resolved (ADR-004).'));
+    b.appendChild(el('div','note','What we measured from your live system is evidence only. It never changed a single calculated number on this page. Where reality and the prediction disagree we show you the gap and stop — we never quietly rewrite your design to match.'));
   }
   panel.classList.add('open');
 }
@@ -622,15 +824,15 @@ window.addEventListener('keydown',e=>{if(e.key==='Escape'){closePanel();clearFlo
 // ---- header / verdict / where-wrong / metrics -----------------------------
 $('#ttl').textContent=DATA.meta.title;
 $('#subttl').textContent=AUDIT?'Audit map · model vs OBSERVED reality — where your running system diverges from the design'
-  :'Architecture map · every result is engine-computed; every input is declared and carries its provenance';
-$('#bL0').textContent=DATA.meta.accuracy_level;
-$('#bLoad').textContent=rps(DATA.meta.offered_load_rps)+' req/s offered';
+  :'A map of your design. Every result here was calculated by Keystone’s engine, never written by an AI. Every input you gave is shown with where it came from.';
+$('#bL0').textContent=DATA.meta.accuracy_level+' — never checked against a real system';$('#bL0').title='L0 (Directional) is the lowest accuracy level: the numbers point you the right way, but none of them has been validated against a running system.';
+$('#bLoad').textContent='simulated at '+rps(DATA.meta.offered_load_rps)+' requests/sec';
 // Show the engine's FULL confidence qualifier — never strip the parenthetical (it is the honesty
 // payload, e.g. "directional…" / "a component is saturated; beyond the model's stable range").
 $('#bConf').textContent='confidence: '+(DATA.meta.confidence||'');
 $('#bConf').title=DATA.meta.confidence||'';
 if(AUDIT){const ab=$('#bAudit');ab.style.display='';
-  ab.textContent='audit: '+AUDIT.matched+' matched · '+AUDIT.diverged+' diverged ('+AUDIT.hard+' hard)';
+  ab.textContent='checked against your live system: '+AUDIT.matched+' agreed · '+AUDIT.diverged+' disagreed ('+AUDIT.hard+' badly)';
   ab.title=AUDIT.overall;
   $('#legProv').style.display='none';$('#legDiv').style.display='';}
 if(DATA.meta.high_stakes){$('#hs').classList.add('on');
@@ -639,8 +841,8 @@ if(DATA.meta.high_stakes){$('#hs').classList.add('on');
 // journeys
 const jb=$('#jbtns');
 DATA.flows.forEach(f=>{const btn=el('button','jbtn');const sw=el('span','sw');sw.style.background=f.color;
-  const t=el('span');t.appendChild(sw);t.appendChild(document.createTextNode(f.name));btn.appendChild(t);
-  btn.appendChild(el('small',null,(f.share*100).toFixed(0)+'% of traffic'+(f.latency?' · p99 '+ms(f.latency.p99_ms):'')));
+  const t=el('span');t.appendChild(sw);t.appendChild(document.createTextNode(human(f.name)));btn.appendChild(t);
+  btn.appendChild(el('small',null,(f.share*100).toFixed(0)+'% of traffic'+(f.latency?' · slowest 1 in 100 (p99): '+ms(f.latency.p99_ms):'')));
   btn.onclick=()=>{const was=btn.classList.contains('active');clearFlow();if(!was){btn.classList.add('active');focusFlow(f);}};jb.appendChild(btn);});
 
 // verdict drawer content
@@ -656,25 +858,25 @@ function simpleVerdict(b){const v=DATA.verdict;
   b.appendChild(list);
   b.appendChild(el('div','sec','What it costs'));
   b.appendChild(el('div','bigfact','about '+usd(v.monthly_cost_cents)+' / month'));
-  b.appendChild(el('div','sec','What it handles'));
+  b.appendChild(el('div','sec','Where it starts to strain'));
   b.appendChild(el('div','bigfact','~'+rps(v.breakpoint_rps_safe)+' requests / sec'));
   b.appendChild(el('div','bigsub','before your '+v.bottleneck_name+' becomes the limit'
     +(v.spofs.length?' · single points of failure to watch: '+v.spofs.join(', '):'')));
-  b.appendChild(el('div','note','Directional estimates from the engine — open “Where this is wrong” for the caveats, or switch to Technical for the full numbers.'));}
+  b.appendChild(el('div','note','These are rough estimates from a model, not measurements of a running system. Open “Where this is wrong” before you rely on any of them, or switch to Technical for the full numbers.'));}
 function buildVerdict(){const v=DATA.verdict,b=$('#dbVerdict');b.textContent='';
   if(SIMPLE&&!AUDIT){simpleVerdict(b);return;}
   if(AUDIT){b.appendChild(el('div','sec','Audit — model vs observed reality'));
     b.appendChild(el('div','wrongli','Overall: '+AUDIT.overall));
-    b.appendChild(el('div','wrongli','Reconciliation: '+AUDIT.matched+' matched · '+AUDIT.diverged+' diverged ('+AUDIT.hard+' hard) · '+AUDIT.unit_mismatch+' unit-mismatch · '+AUDIT.no_prediction+' not predicted (of '+AUDIT.observed_count+' observed).'));
+    b.appendChild(el('div','wrongli','Of '+AUDIT.observed_count+' measurements taken from your live system: '+AUDIT.matched+' agreed with the prediction · '+AUDIT.diverged+' disagreed ('+AUDIT.hard+' of them badly) · '+AUDIT.unit_mismatch+' could not be compared because the units did not line up · '+AUDIT.no_prediction+' had nothing to compare against, because the model does not predict them.'));
     // When the map reads as a pass (matches, no divergences), say plainly that a match is not a guarantee.
     if(AUDIT.reads_as_pass)
       b.appendChild(el('div','wrongli','A matched metric is consistent with the prediction within tolerance — it is NOT a validation pass or a guarantee of correctness (L0, Directional).'));
     (DATA.audit_unmatched||[]).forEach(u=>b.appendChild(el('div','wrongli','• not tied to a component — '+(u.component_id||'(system)')+' / '+u.metric+': '+u.note)));
     b.appendChild(el('div','note','Observed values are read-only evidence — no engine number was changed (prime directive); divergences are surfaced for review, never auto-resolved (ADR-004) — your model’s value is kept, not overwritten. L0: a divergence flags where to look, not a certified defect.'));}
-  const rows=[['Bottleneck',v.bottleneck_name+'  ('+pct(v.bottleneck_utilization)+' utilisation)'],
-    ['Max safe load','~'+rps(v.breakpoint_rps_safe)+' req/s  (85% ceiling) · ~'+rps(v.breakpoint_rps_theoretical)+' theoretical'],
-    ['Latency (dominant path)','p50 '+ms(v.latency.p50_ms)+' · p95 '+ms(v.latency.p95_ms)+' · p99 '+ms(v.latency.p99_ms)],
-    ['Single points of failure',v.spofs.length?v.spofs.join(', '):'none detected'],
+  const rows=[['Bottleneck (the part that runs out first)',v.bottleneck_name+'  ('+pct(v.bottleneck_utilization)+' full at this traffic level)'],
+    ['Traffic before it strains','about '+rps(v.breakpoint_rps_safe)+' requests/sec — where the busiest part reaches 85% full, the last point we would call safe · about '+rps(v.breakpoint_rps_theoretical)+' requests/sec — where that part is completely full. That second figure is a breaking point, not a capability.'],
+    ['How long a request takes (busiest path)','typical (p50) '+ms(v.latency.p50_ms)+' · slowest 1 in 20 (p95) '+ms(v.latency.p95_ms)+' · slowest 1 in 100 (p99) '+ms(v.latency.p99_ms)],
+    ['Single points of failure (only one of them — if it dies, the app goes down)',v.spofs.length?v.spofs.join(', '):'none found in this design'],
     ['Estimated monthly cost',usd(v.monthly_cost_cents)],
     ['Overall confidence',DATA.meta.confidence]];
   const tbl=el('table','k');rows.forEach(([k,val])=>{const tr=el('tr');tr.appendChild(el('th',null,k));tr.appendChild(el('td',null,val));tbl.appendChild(tr);});b.appendChild(tbl);}
@@ -683,13 +885,14 @@ buildVerdict();
 // metrics drawer
 function buildMetrics(){const b=$('#dbMetrics');b.textContent='';
   const fmt=(u,x)=>x==null?'—':u==='rps'?rps(x)+' req/s':u==='ratio'?pct(x):u&&u.indexOf('usd')>=0?usd(x)+'/mo':ms(x);
-  const tbl=el('table','k');const hr=el('tr');['Metric','Value','Range (cited inputs)','Model','Confidence'].forEach(h=>hr.appendChild(el('th',null,h)));tbl.appendChild(hr);
-  DATA.metrics.forEach(m=>{const tr=el('tr');tr.appendChild(el('td',null,m.key));
+  const tbl=el('table','k');const hr=el('tr');['Metric','Value','Range (from published measurements)','How it was worked out','Confidence'].forEach(h=>hr.appendChild(el('th',null,h)));tbl.appendChild(hr);
+  const KEY_LABEL={breakpoint_rps_safe:'traffic before it strains (safe)',breakpoint_rps_theoretical:'traffic where it runs out completely',bottleneck_utilization:'how full the busiest part is',monthly_cost:'estimated monthly cost',p50_ms:'typical request time (p50)',p95_ms:'slowest 1 in 20 (p95)',p99_ms:'slowest 1 in 100 (p99)',mean_latency_ms:'average request time'};
+  DATA.metrics.forEach(m=>{const tr=el('tr');tr.appendChild(el('td',null,KEY_LABEL[m.key]||m.key.replace(/_/g,' ')));
     tr.appendChild(el('td','n',fmt(m.unit,m.value)));
     tr.appendChild(el('td','n',m.low!=null?fmt(m.unit,m.low)+' – '+fmt(m.unit,m.high):'—'));
     tr.appendChild(el('td',null,m.model));tr.appendChild(el('td',null,m.confidence||''));tbl.appendChild(tr);});
   b.appendChild(tbl);
-  b.appendChild(el('div','note','Range = the output span when each GROUNDED input is swept across its cited band (assumed inputs held fixed). Input-evidence uncertainty only — NOT a validated-accuracy guarantee; the true value can fall outside it. A — means no grounded input moves that number. Accuracy stays L0 (Directional) until field-calibrated.'));
+  b.appendChild(el('div','note','How to read the Range column: some of your inputs have a published measurement behind them (marked GROUNDED). We re-ran the maths at the low end and the high end of every one of those published ranges, holding the guessed inputs fixed. The Range is how far the answer moved. It covers uncertainty in those measured inputs only — it is NOT a promise that the true value lands inside it. It can land outside. A “—” means no measured input moves that number. Accuracy is still L0 (Directional): the direction is useful, but nothing here has been checked against a real running system.'));
   if(DATA.derivation.length){b.appendChild(el('div','sec','How these numbers were computed'));const ul=el('div');DATA.derivation.forEach(s=>{const li=el('div','wrongli','• '+s);ul.appendChild(li);});b.appendChild(ul);} }
 buildMetrics();
 
@@ -697,8 +900,8 @@ buildMetrics();
 function buildWrong(){const b=$('#dbWrong');b.textContent='';
   if(!DATA.caveats.length){b.appendChild(el('div','note','No caveats recorded for this run.'));}
   DATA.caveats.forEach(c=>b.appendChild(el('div','wrongli','• '+c)));
-  if(DATA.assumptions.length){b.appendChild(el('div','sec','Assumptions (each editable)'));
-    const tbl=el('table','k');const hr=el('tr');['Subject','Statement','Confidence','Provenance'].forEach(h=>hr.appendChild(el('th',null,h)));tbl.appendChild(hr);
+  if(DATA.assumptions.length){b.appendChild(el('div','sec','What we assumed — change any of these and the numbers change'));
+    const tbl=el('table','k');const hr=el('tr');['What it’s about','What we assumed','Confidence','Where it came from'].forEach(h=>hr.appendChild(el('th',null,h)));tbl.appendChild(hr);
     DATA.assumptions.forEach(a=>{const tr=el('tr');tr.appendChild(el('td',null,a.subject));tr.appendChild(el('td',null,a.statement));tr.appendChild(el('td',null,a.confidence));tr.appendChild(el('td',null,a.provenance));tbl.appendChild(tr);});b.appendChild(tbl);} }
 buildWrong();
 
@@ -708,7 +911,7 @@ function toggleDrawer(which,title){if(curDrawer===which){drawer.classList.remove
   ['Verdict','Metrics','Wrong'].forEach(w=>$('#db'+w).style.display=(w===which?'block':'none'));
   drawer.classList.add('open');}
 $('#tVerdict').onclick=()=>toggleDrawer('Verdict','Verdict');
-$('#tMetrics').onclick=()=>toggleDrawer('Metrics','Headline metrics (model · confidence)');
+$('#tMetrics').onclick=()=>toggleDrawer('Metrics','Headline metrics — how each was worked out, and how sure we are');
 $('#tWrong').onclick=()=>toggleDrawer('Wrong','Where this is wrong — read before trusting a number');
 $('#drawerClose').onclick=()=>{drawer.classList.remove('open');curDrawer=null;};
 toggleDrawer('Verdict','Verdict'); // open on load so the verdict + honesty controls are visible immediately
@@ -733,6 +936,107 @@ window.addEventListener('mouseup',()=>{drag=null;stage.classList.remove('grabbin
 stage.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:1/1.1;const r=stage.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;tx=mx-(mx-tx)*f;ty=my-(my-ty)*f;sc=Math.max(.3,Math.min(2.2,sc*f));apply();},{passive:false});
 $('#vFit').onclick=fit;$('#vIn').onclick=()=>{sc=Math.min(2.2,sc*1.15);apply();};$('#vOut').onclick=()=>{sc=Math.max(.3,sc/1.15);apply();};$('#vReset').onclick=fit;
 stage.addEventListener('click',e=>{if(!e.target.closest('.node,#panel,#dock,#drawer')){clearFlow();closePanel();}});
+
+// ---- ambient flow: requests stream forward + responses return, always, on every wire -----------
+// Speed rises with the offered load (LOADI) so you can SEE the system get busier under traffic.
+let LOADI=1, ambRAF=null, ambT0=null; const ambient=[];
+const flowColor={}; DATA.flows.forEach(f=>flowColor[f.name]=f.color);
+// Traffic that does not respond to load is decoration. Each request carries the utilisation of the
+// component it is HEADING INTO, so it can slow down, redden, and pile up in front of a tier that is
+// full — which is what actually happens to a request in a real system, and the single clearest way
+// to show someone where their design hurts.
+function nodeUtil(id){ const n=DATA.nodes.find(x=>x.id===id); return (n&&n.utilization!=null)?n.utilization:0; }
+
+// How fast a request moves toward a tier at this utilisation. Deliberately NOT linear: a queue is
+// fine until it is not, so the slowdown is gentle to ~70% and then bites hard, mirroring the
+// 1/(1-rho) the engine itself computes. At and past 100% it is a crawl, because the queue is
+// growing faster than it drains and no request is getting through on time.
+function congestion(u){
+  if(u>=1) return 0.05;
+  return Math.max(0.08, Math.pow(1-u, 1.6));
+}
+function loadTint(u, base){
+  if(u>=1)   return 'var(--sat)';
+  if(u>=0.85)return 'var(--hot)';
+  return base;
+}
+function buildAmbient(){
+  edgeEls.forEach((e,i)=>{
+    const len=e.path.getTotalLength()||1, col=flowColor[e.flow]||'var(--blue)';
+    const share=(DATA.flows.find(f=>f.name===e.flow)?.share)||0.3;
+    const reqN=1+Math.round(share*2);
+    for(let k=0;k<reqN;k++){
+      const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('r','2.6');c.setAttribute('class','req');c.style.fill=col;svg.appendChild(c);
+      ambient.push({c,p:e.path,len,ph:((i*0.37+k/reqN)%1),dir:1,to:e.to,base:col});
+    }
+    const r=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    r.setAttribute('r','2');r.setAttribute('class','resp');svg.appendChild(r);
+    ambient.push({c:r,p:e.path,len,ph:((i*0.37+0.5)%1),dir:-1});
+  });
+}
+function ambientTick(ts){
+  if(ambT0==null)ambT0=ts; const dt=(ts-ambT0)/1000;
+  const spd=0.11*Math.min(3.2,Math.max(0.35,LOADI));
+  ambient.forEach(q=>{
+    const util=q.to?nodeUtil(q.to):0;
+    const k=q.dir<0?1:congestion(util);              // responses are not queued by the tier ahead
+    let u=((dt*spd*(q.dir<0?0.6:1)*k)+q.ph)%1;
+    if(q.dir<0)u=1-u;
+    // PILE-UP. Past 100% the tier cannot take them, so requests stack in front of it instead of
+    // sailing through — the visual answer to "shouldn't the traffic stop?". They bunch in the last
+    // stretch of the edge rather than freezing dead, so it reads as a queue, not a broken render.
+    if(util>=1 && q.dir>0) u=0.80+(u%1)*0.18;
+    const pt=q.p.getPointAtLength(u*q.len);
+    q.c.setAttribute('cx',pt.x); q.c.setAttribute('cy',pt.y);
+    if(q.dir>0 && q.base){
+      const tint=loadTint(util,q.base);
+      if(q.tint!==tint){ q.tint=tint; q.c.style.fill=tint; }
+      q.c.setAttribute('r', util>=1?'3.4':'2.6');
+    }
+  });
+  ambRAF=requestAnimationFrame(ambientTick);
+}
+
+// ---- load simulator: scrub / play the engine-computed sweep; wires + nodes respond live ---------
+// Every frame is a real engine run (see build_load_sweep) — the map only DISPLAYS these values and
+// computes nothing itself (prime directive).
+const SW=DATA.sweep||[];
+const SSTAT={ok:'✓ plenty of headroom',hot:'⚠ running near its limit',saturated:'✕ over its limit'};
+let frameI=SW.findIndex(f=>Math.abs((f.multiple||0)-1)<1e-6); if(frameI<0)frameI=0;
+function applyFrame(i){
+  if(!SW.length)return; frameI=Math.max(0,Math.min(SW.length-1,i)); const fr=SW[frameI]; LOADI=fr.multiple||1;
+  DATA.nodes.forEach(n=>{ const nf=fr.nodes[n.id], d=nodeEls[n.id]; if(!nf||!d)return;
+    d.style.setProperty('--sc',statusColor[nf.status]||'var(--muted)');
+    d.classList.toggle('hot',nf.status==='hot'||nf.status==='saturated');
+    // The load-state classes have to MOVE with the slider. They were set once at render and never
+    // updated, so dragging the load to 10x left every card looking calm while the readout said the
+    // design was over its limit — the panel and the picture disagreeing about the same run.
+    d.classList.remove('st-ok','st-hot','st-saturated');
+    d.classList.add('st-'+nf.status);
+    // Keep the node's LIVE utilisation where the traffic animation reads it, so requests slow,
+    // redden and pile up as you drag — the whole point of the dial.
+    n.utilization = nf.utilization;
+    const fill=d.querySelector('.util i'); if(fill)fill.style.width=Math.min(100,(nf.utilization||0)*100)+'%';
+    const ub=d.querySelector('.meta b'); if(ub)ub.textContent=pct(nf.utilization);
+    const ss=d.querySelector('.simplestat'); if(ss){ss.className='simplestat s-'+nf.status; ss.textContent=SSTAT[nf.status]||'';}
+  });
+  const over=(fr.bottleneck_utilization||0)>1, ro=$('#loadReadout');
+  if(ro){ro.textContent=Math.round(fr.load_rps).toLocaleString()+' requests/sec · '+fr.multiple+'× your design load · busiest part '+pct(fr.bottleneck_utilization)+' full'+(over?'  ✕ OVER ITS LIMIT':''); ro.style.color=over?'var(--sat)':'var(--muted)';}
+  const sl=$('#loadSlider'); if(sl&&+sl.value!==frameI)sl.value=frameI;
+}
+let playRAF=null,playT0=null;
+function stopPlay(){if(playRAF)cancelAnimationFrame(playRAF);playRAF=null;const b=$('#loadPlay');if(b)b.textContent='▶ Push to '+(SW.length?SW[SW.length-1].multiple:10)+'×';}
+function playLoad(){ if(playRAF){stopPlay();return;} if(!SW.length)return; playT0=null; const dur=4200, b=$('#loadPlay'); if(b)b.textContent='⏸ Running…';
+  (function step(ts){ if(playT0==null)playT0=ts; const p=Math.min(1,(ts-playT0)/dur); applyFrame(Math.round(p*(SW.length-1))); if(p<1){playRAF=requestAnimationFrame(step);} else {stopPlay();} })(performance.now());
+}
+if(SW.length){
+  const sl=$('#loadSlider'); if(sl){sl.max=SW.length-1; sl.value=frameI; sl.oninput=()=>{stopPlay();applyFrame(+sl.value);};}
+  const pb=$('#loadPlay'); if(pb)pb.onclick=playLoad;
+  applyFrame(frameI);
+} else { const lb=$('#loadbar'); if(lb)lb.style.display='none'; }
+buildAmbient(); ambRAF=requestAnimationFrame(ambientTick);
+
 fit();
 // Re-fit once the iframe/window has actually laid out, and whenever it resizes, so the map always
 // frames itself to the current viewport (it's commonly embedded full-screen in an iframe).
@@ -784,7 +1088,7 @@ def render_html(arch: dict, *, title: str | None = None) -> str:
     <button class="tbtn" id="tWrong">▸ Where this is wrong</button>
   </div>
   <div>
-    <div class="lbl">Play a journey (a request flow)</div>
+    <div class="lbl">Follow one request through your app</div>
     <div id="jbtns"></div>
   </div>
   <div>
@@ -820,23 +1124,29 @@ def render_html(arch: dict, *, title: str | None = None) -> str:
 </div>
 
 <div class="legend glass">
-  <div class="col" id="legProv"><div class="t">Provenance (confidence)</div>
-    <div class="r"><span class="chip" style="background:#2fb67c"></span>Grounded (cited)</div>
-    <div class="r"><span class="chip" style="background:#e8a33d"></span>Assumption / reconcile / gap</div></div>
+  <div class="col" id="legProv"><div class="t">Left edge of each box: where its numbers came from</div>
+    <div class="r"><span class="chip" style="background:#2fb67c"></span>GROUNDED — a published measurement backs this up</div>
+    <div class="r"><span class="chip" style="background:#e8a33d"></span>ASSUMPTION, RECONCILE or GAP — a guess · your number disagrees with the published one · or evidence known to be missing</div></div>
   <div class="col" id="legDiv" style="display:none"><div class="t">Audit · model vs observed</div>
     <div class="r"><span class="chip" style="background:#2fb67c"></span>matched (within tolerance)</div>
     <div class="r"><span class="chip" style="background:#e8a33d"></span>soft divergence</div>
     <div class="r"><span class="chip" style="background:#c2463b"></span>hard divergence</div>
-    <div class="r"><span class="chip" style="background:#5b6472"></span>not compared (unit / not predicted)</div>
-    <div class="r"><span class="chip" style="background:#c3c8d2"></span>not observed (no telemetry)</div></div>
-  <div class="col"><div class="t">Load (engine result)</div>
+    <div class="r"><span class="chip" style="background:#5b6472"></span>not checked — the units did not match, or we do not predict this one</div>
+    <div class="r"><span class="chip" style="background:#c3c8d2"></span>no real-world data — nothing was measured for this part</div></div>
+  <div class="col"><div class="t">Bar on each box: how full that part is (calculated)</div>
     <div class="r"><span class="chip" style="background:#8a93a6"></span>ok</div>
-    <div class="r"><span class="chip" style="background:#c2410c"></span>hot (≥85%)</div>
-    <div class="r"><span class="chip" style="background:#a5342a"></span>saturated</div></div>
+    <div class="r"><span class="chip" style="background:#c2410c"></span>running hot — 85% or more full, little room for a spike</div>
+    <div class="r"><span class="chip" style="background:#a5342a"></span>saturated — over its limit, more traffic than it can handle</div></div>
 </div>
 
-<div id="hint">drag to pan · scroll to zoom · hover a node to trace its flows · click for detail + provenance</div>
-<div class="credit">Keystone · deterministic engine · self-contained</div>
+<div id="loadbar" class="glass">
+  <button id="loadPlay">▶ Push to 10×</button>
+  <input id="loadSlider" type="range" min="0" max="0" value="0" aria-label="traffic level to test"/>
+  <span id="loadReadout"></span>
+  <span class="loadhint">traffic simulator — drag or Push; every number is the engine's, at that load</span>
+</div>
+<div id="hint">drag to move around · scroll to zoom · hover a box to see what connects to it · click a box for details and where its numbers came from</div>
+<div class="credit">Keystone · same design in, same numbers out · works offline</div>
 
 <script id="arch-data" type="application/json">{blob}</script>
 <script>{_render_js()}</script>

@@ -63,6 +63,11 @@ MIGRATIONS = [
     REPO_ROOT / "db" / "migrations" / "0002_tenant_id_auth_hook.sql",
     REPO_ROOT / "db" / "migrations" / "0003_jobs_table.sql",
     REPO_ROOT / "db" / "migrations" / "0004_model_store_save_rpc.sql",
+    # 0005 must follow 0004: it ALTERs functions and a constraint from 0001-0003 and does not depend
+    # on the save RPC, but running the harness in file order keeps "apply them as a deployer would"
+    # true. Registered for the same reason 0003's omission was a gap — a migration the isolation
+    # harness does not apply is a migration nothing tests.
+    REPO_ROOT / "db" / "migrations" / "0005_pin_search_path_and_allow_fanout.sql",
 ]
 
 

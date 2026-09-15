@@ -64,7 +64,7 @@ export function Metric({ value, unit, low, high, provenance, model }: MetricProp
 
   const rangeLabel =
     low === null || high === null
-      ? "no cited range yet — unknown, not zero"
+      ? "no published range for this yet — the uncertainty is unknown, not zero"
       : `${low}–${high} ${unit}`;
 
   return (
@@ -74,7 +74,7 @@ export function Metric({ value, unit, low, high, provenance, model }: MetricProp
     <span
       tabIndex={0}
       className="group relative inline-flex flex-col gap-0.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-architect-blue"
-      aria-label={`${value}${unit}, provenance ${provenance}, range ${rangeLabel}, model ${model}`}
+      aria-label={`${value}${unit}. Evidence level: ${provenance}. Estimated range: ${rangeLabel}. Worked out with: ${model}`}
     >
       {/* Value in mono — typeface signals "engine computed this" (docs/09 §2.5) */}
       <span className="font-mono text-mono-data tabular-nums leading-none">
@@ -103,10 +103,10 @@ export function Metric({ value, unit, low, high, provenance, model }: MetricProp
           how this number was made
         </span>
         <span className="font-serif text-label text-slate-ink">
-          model: <span className="font-mono">{model}</span>
+          worked out with: <span className="font-mono">{model}</span>
         </span>
         <span className="font-serif text-label text-slate-ink">
-          range: <span className="font-mono">{rangeLabel}</span>
+          estimated range: <span className="font-mono">{rangeLabel}</span>
         </span>
       </span>
     </span>
