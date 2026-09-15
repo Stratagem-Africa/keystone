@@ -236,3 +236,55 @@ class TestBudgetAndRateLimitWiredIntoTransport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPriceIsKeyedOnTheVendorNotJustTheWeights(unittest.TestCase):
+    """#179 — a model id is not globally unique, so pricing on the id alone bills the wrong vendor.
+
+    `moonshotai/kimi-k2` is a public weight. OpenRouter serves it at $0.57/M in; Groq, NVIDIA NIM
+    and a local vLLM serve the SAME id at their own rates, one of which is zero. Keyed on the id
+    alone, every one of those calls was billed OpenRouter's price — so the free provider path
+    (#182) would have reported spend that was never incurred, in a module whose entire stated
+    purpose is to report only what it can prove.
+    """
+
+    KNOWN = ("openrouter", "moonshotai/kimi-k2", 570_000)   # provider, id, µUSD/M in
+
+    def test_the_same_id_from_another_vendor_is_not_billed_at_this_vendors_rate(self):
+        provider, model, _ = self.KNOWN
+        for other in ("groq", "nvidia", "cerebras", "xai"):
+            with self.subTest(other):
+                m = CostMeter()
+                m.record(other, model, 1_000_000, 1_000_000)
+                self.assertEqual(m.total_micro_usd(), 0,
+                                 f"{other} was billed {provider}'s rate for the same weights")
+                self.assertEqual(m.unpriced_models, {model},
+                                 "an unknown vendor pair must be FLAGGED, not silently priced")
+
+    def test_the_vendor_we_do_have_a_cited_price_for_still_prices(self):
+        provider, model, in_rate = self.KNOWN
+        m = CostMeter()
+        m.record(provider, model, 1_000_000, 0)
+        self.assertEqual(m.total_micro_usd(), in_rate)
+        self.assertEqual(m.unpriced_models, set())
+
+    def test_both_spellings_of_the_anthropic_provider_price_the_same(self):
+        """`make_llm` passes through whichever the operator typed ('claude' or 'anthropic') and
+        both reach the same transport at the same price. A missed alias would read as $0 spend on
+        the DEFAULT council model — the most expensive silent failure available here."""
+        totals = set()
+        for spelling in ("claude", "anthropic", "  Anthropic  "):
+            m = CostMeter()
+            m.record(spelling, "claude-haiku-4-5-20251001", 1_000_000, 500_000)
+            self.assertEqual(m.unpriced_models, set(), f"{spelling!r} did not resolve to a price")
+            totals.add(m.total_micro_usd())
+        self.assertEqual(totals, {1_000_000 + 2_500_000})
+
+    def test_a_free_slug_still_wins_over_any_vendor_table(self):
+        """The ':free' suffix and the free-provider list are checked BEFORE the table, so a free
+        call is never billed even when that (provider, id) pair also has a paid row."""
+        m = CostMeter()
+        m.record("openrouter", "moonshotai/kimi-k2:free", 1_000_000, 1_000_000)
+        m.record("ollama", "moonshotai/kimi-k2", 1_000_000, 1_000_000)
+        self.assertEqual(m.total_micro_usd(), 0)
+        self.assertEqual(m.unpriced_models, set())

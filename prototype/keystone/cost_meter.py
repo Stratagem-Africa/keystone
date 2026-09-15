@@ -30,25 +30,36 @@ class BudgetExceededError(RuntimeError):
     A pre-flight guard, not a refund: callers check the budget BEFORE issuing a request,
     so this stops the *next* call rather than undoing an already-spent one."""
 
-# List price, integer µUSD per 1,000,000 tokens: model id -> (input, output).
-# These are LIST prices for ESTIMATION only — verify against your invoice. Keyed on
-# the exact model id the transport sends (OpenAICompatibleLLM/AnthropicLLM `_model`).
-# Extend the same way we grow the grounding corpus: one cited source per row.
-_LIST_PRICES: dict[str, tuple[int, int]] = {
+# List price, integer µUSD per 1,000,000 tokens: (PROVIDER, model id) -> (input, output).
+# These are LIST prices for ESTIMATION only — verify against your invoice. Keyed on the
+# exact model id the transport sends (OpenAICompatibleLLM/AnthropicLLM `_model`) TOGETHER
+# WITH the provider that served it. Extend the same way we grow the grounding corpus: one
+# cited source per row.
+#
+# THE PROVIDER IS HALF THE KEY, and leaving it out was a real mis-pricing (#179). A model
+# id is not globally unique: `moonshotai/kimi-k2` is a public weight served by OpenRouter,
+# Groq, NVIDIA NIM and a local vLLM, at four different prices — one of them zero. Keyed on
+# the id alone, every one of those calls was billed OpenRouter's rate, so the free path
+# that #182 is built on would have reported spend it never incurred. A price is a property
+# of the VENDOR RELATIONSHIP, not of the weights.
+#
+# An unknown pair resolves to None → "unpriced (cost unknown)", never another vendor's
+# number. Declining to guess is the same rule the honesty charter applies to every figure.
+_LIST_PRICES: dict[tuple[str, str], tuple[int, int]] = {
     # Moonshot Kimi line — OpenRouter public pricing, snapshot 2026-07
     # https://openrouter.ai/moonshotai
-    "moonshotai/kimi-k3":          (3_000_000, 15_000_000),
-    "moonshotai/kimi-k2.7-code":   (  720_000,  3_500_000),
-    "moonshotai/kimi-k2.6":        (  660_000,  3_410_000),
-    "moonshotai/kimi-k2.5":        (  375_000,  2_025_000),
-    "moonshotai/kimi-k2-thinking": (  600_000,  2_500_000),
-    "moonshotai/kimi-k2-0905":     (  600_000,  2_500_000),
-    "moonshotai/kimi-k2":          (  570_000,  2_300_000),
+    ("openrouter", "moonshotai/kimi-k3"):          (3_000_000, 15_000_000),
+    ("openrouter", "moonshotai/kimi-k2.7-code"):   (  720_000,  3_500_000),
+    ("openrouter", "moonshotai/kimi-k2.6"):        (  660_000,  3_410_000),
+    ("openrouter", "moonshotai/kimi-k2.5"):        (  375_000,  2_025_000),
+    ("openrouter", "moonshotai/kimi-k2-thinking"): (  600_000,  2_500_000),
+    ("openrouter", "moonshotai/kimi-k2-0905"):     (  600_000,  2_500_000),
+    ("openrouter", "moonshotai/kimi-k2"):          (  570_000,  2_300_000),
     # Anthropic — the DEFAULT council model (.env.example COUNCIL_MODEL / CONSENSUS_PRIMARY),
     # so the common path prices honestly instead of reading a fake $0. Standard API list price
     # $1/M in · $5/M out, snapshot 2026-07 (anthropic.com/pricing; corroborated). Batch/cache
     # discounts NOT modelled — AnthropicLLM sends no cache_control today (see anthropic_usage).
-    "claude-haiku-4-5-20251001":   (1_000_000,  5_000_000),
+    ("claude", "claude-haiku-4-5-20251001"): (1_000_000,  5_000_000),
     # Other OpenAI/Gemini/etc. list prices intentionally OMITTED until a cited snapshot exists —
     # an un-cited price would be an invented number (honesty charter). Such a model is reported
     # "unpriced (cost unknown)", never $0.
@@ -60,17 +71,21 @@ _LIST_PRICES: dict[str, tuple[int, int]] = {
 #   - model id '…:free'  : OpenRouter free-tier slug
 _FREE_PROVIDERS = frozenset({"ollama", "github"})
 
+# `make_llm` passes through whichever spelling the operator typed, and both reach the same
+# Anthropic transport at the same price — so they are one vendor relationship, not two rows.
+_PROVIDER_ALIASES = {"anthropic": "claude"}
+
 
 def _price(provider: str | None, model: str) -> tuple[int, int] | None:
     """Resolve (input_µUSD_per_M, output_µUSD_per_M) for a call, or None if the price
     is genuinely unknown. Known-zero paths return (0, 0) — an honest zero, distinct
     from an unknown one."""
-    p = (provider or "").strip().lower()
+    p = _PROVIDER_ALIASES.get((provider or "").strip().lower(), (provider or "").strip().lower())
     if p in _FREE_PROVIDERS:
         return (0, 0)
     if str(model).strip().lower().endswith(":free"):
         return (0, 0)
-    return _LIST_PRICES.get(model)
+    return _LIST_PRICES.get((p, str(model).strip()))
 
 
 def _int_or_none(v: object) -> int | None:
