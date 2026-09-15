@@ -313,7 +313,7 @@ def _build_model(data: dict, source: Source, clean_text: str) -> SystemModel:
             # monthly cost per instance is cloud-pricing (benchmark/KB) territory, not
             # extracted from prose — left 0 (cost grounding is a documented KB GAP).
             monthly_cost_per_instance=0,  # integer minor units (cents) — harm floor (ADR-008)
-            provenance="assumption",
+            provenance="ASSUMPTION",
         )
     if not comps:
         raise IngestError("extraction produced no components")
@@ -454,9 +454,9 @@ class DeterministicStubIngestor:
         model = SystemModel(
             name=source.name or "Ingested system",
             components={
-                "lb": Component("lb", ComponentKind.LOAD_BALANCER, "Load balancer", per_instance_rps=20000.0, base_latency_ms=1.0, provenance="assumption"),
-                "app": Component("app", ComponentKind.APP_SERVER, "App server", per_instance_rps=1000.0, instances=1, base_latency_ms=10.0, provenance="assumption"),
-                "db": Component("db", ComponentKind.SQL_DB, "Primary database", per_instance_rps=2000.0, instances=1, base_latency_ms=5.0, provenance="assumption"),
+                "lb": Component("lb", ComponentKind.LOAD_BALANCER, "Load balancer", per_instance_rps=20000.0, base_latency_ms=1.0, provenance="ASSUMPTION"),
+                "app": Component("app", ComponentKind.APP_SERVER, "App server", per_instance_rps=1000.0, instances=1, base_latency_ms=10.0, provenance="ASSUMPTION"),
+                "db": Component("db", ComponentKind.SQL_DB, "Primary database", per_instance_rps=2000.0, instances=1, base_latency_ms=5.0, provenance="ASSUMPTION"),
             },
             flows=[Flow("request", 1.0, [FlowStep("lb"), FlowStep("app"), FlowStep("db")])],
             workload=Workload(system_rps=100.0, description="placeholder workload (stub — document not read)"),

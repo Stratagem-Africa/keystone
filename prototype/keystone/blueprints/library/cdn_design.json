@@ -381,28 +381,28 @@
       "subject": "edge",
       "statement": "COST WARNING - read this before quoting the total. The edge PoPs and the shield are a MANAGED CDN: they have no per-instance price in Keystone's grounded catalogue (CloudFront bills per GB and per request, per distribution), so their compute line is $0. Bandwidth IS modelled: 9,331,200 GB/month = 120k rps x 30 KB average response, priced at the $0.09/GB LIST rate. That single line dominates every other cost in this design by two orders of magnitude, which is the true shape of CDN economics.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "edge",
       "statement": "The $0.09/GB list rate is what a small account pays. At ~9 PB/month nobody pays list: committed-use CDN contracts at this volume run roughly 5-20x cheaper. Treat the bandwidth figure as an UPPER BOUND, and the real number as a negotiation, not a calculation.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "engine",
       "statement": "The v1 engine is single-region. A CDN is inherently multi-region: `edge` at instances=9 stands in for 9 PoPs and `shield` for 3 regional tiers, but the engine treats them as one load-balanced pool with one latency, so it cannot express geographic RTT, per-region hit ratios, or a regional PoP failure shifting load to its neighbours.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "app",
       "statement": "The binding constraint here is the ORIGIN application tier, not the edge - and that is the lesson of the design. Across ALL traffic the CDN absorbs 86% of requests; the other 14% (12.75% dynamic pass-through plus 1.2% static/video origin fills) still reach origin. Static assets alone are absorbed at 98.8% - do not quote that figure for the whole system. The requests that survive to origin are the expensive dynamic ones, so origin capacity is what you actually size. Edge PoP count is the CDN vendor's problem, not a dial you turn.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     }
   ],

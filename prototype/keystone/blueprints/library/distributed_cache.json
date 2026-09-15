@@ -222,14 +222,14 @@
       "subject": "architecture",
       "statement": "ARCHITECTURE CHOICE - this file commits to Redis Cluster, and therefore has NO proxy tier. The Redis Cluster specification states its first design goal verbatim: 'High performance and linear scalability up to 1000 nodes. There are no proxies, asynchronous replication is used, and no merge operations are performed on values.' (redis.io, Redis Cluster specification). Routing does not disappear, it MOVES INTO THE CLIENT: a slot-aware client holds the hash-slot map and opens a connection straight to the node that owns the key, following MOVED/ASK redirects. An earlier version of this blueprint put an mcrouter/Envoy-style consistent-hashing proxy in front of nodes it also called 'Redis Cluster', and that proxy came out as the binding tier - sending the reader to go and scale a tier this deployment does not have. If you are actually running memcached + mcrouter then a proxy tier is real and belongs in your model; this file is not that design.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "architecture",
       "statement": "NOT MODELLED - the calling application tier and anything in front of it. Because routing lives in the Redis client library, there is no separate network hop between the application and the shard for this file to size, so the previous entry tier was removed rather than kept as an L4 load balancer: a single LB VIP in front of a cluster-mode deployment breaks the direct-to-slot path that MOVED redirects assume. Budget the app tier separately - this blueprint sizes the cache and the origin it protects, nothing else.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -257,14 +257,14 @@
       "subject": "creplica",
       "statement": "READS GO TO THE PRIMARIES by default; the replicas here are failover capacity, not a read tier. The Redis Cluster spec: 'Normally replica nodes will redirect clients to the authoritative master for the hash slot involved in a given command, however clients can use replicas in order to scale reads using the READONLY command. READONLY tells a Redis Cluster replica node that the client is ok reading possibly stale data.' An earlier version of this blueprint routed 100% of GETs to READONLY replicas without stating that cost, which also left the primaries looking almost idle. If you do enable READONLY, you are accepting stale reads by the spec's own words: 'Redis Cluster uses asynchronous replication between nodes... There is always a window of time when it is possible to lose writes during partitions.'",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "creplica",
       "statement": "NO INVALIDATION BUS. An earlier version fanned every write through a Kafka topic out to each shard and replica; that duplicates work Redis Cluster already does, since 'asynchronous replication is used' between a primary and its replicas by the spec's own first design goal. `creplica` therefore carries the WRITE stream only (SET, invalidate, write-through, and cache fills) and none of the read stream. Caveat on the latency figure: that replication is asynchronous and off the client's critical path, but the engine adds every step's service time to its flow, so the modelled GET/SET latency slightly OVERSTATES what a client sees. Trust the arrival rate on `creplica`, not its latency contribution.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -278,7 +278,7 @@
       "subject": "cache",
       "statement": "Shard count (3 primaries + 3 replicas) is set by DATASET SIZE and failover topology, not by request rate - which is why the primaries sit at low utilisation. Sizing a Redis Cluster on rps alone would under-provision memory and cause evictions the engine does not model.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -313,7 +313,7 @@
       "subject": "engine",
       "statement": "The engine models steady-state throughput. A distributed cache's two most dangerous failure modes - a COLD cache after a flush (every GET becomes an origin read: all 135,000 GET rps onto an origin read replica provisioned for 8,000) and a hot-slot imbalance - are not steady-state, so run them as explicit what-if scenarios rather than reading them off this baseline.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     }
   ],

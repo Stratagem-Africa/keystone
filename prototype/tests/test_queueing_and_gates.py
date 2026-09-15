@@ -6,6 +6,7 @@ doing the pinning.
 """
 from __future__ import annotations
 
+import json
 import math
 import unittest
 
@@ -475,3 +476,148 @@ class AskedForTwoThingsGotOneTest(unittest.TestCase):
                      "coinbase", "revolut", "venmo", "lyft"):
             with self.subTest(name):
                 self.assertIsNotNone(match(f"an app like {name}"))
+
+
+class EverythingKeystoneProducesCanBeSavedTest(unittest.TestCase):
+    """A model that simulates but cannot be PERSISTED is a trap: it renders perfectly, and fails the
+    first time someone tries to keep it. Found while reviewing #21's model store — the DEFAULT
+    ingest path produced `provenance="assumption"` (lowercase) while the store and the schema accept
+    only uppercase, and `model.py`'s own default contradicted the comment sitting beside it.
+
+    Two vocabularies were drifting, both introduced on this side, neither caught by anything:
+      * `provenance` — lowercase "assumption" vs the schema's GROUNDED | GAP | ASSUMPTION
+      * `source`     — "engineering" and "fallback" vs 0001:396's llm_inferred | benchmark | user
+
+    The report and the UI never noticed because they upper-case for display. That is exactly how a
+    value stays wrong for months while looking right everywhere a human looks — so the check has to
+    be mechanical, and it has to cover every path that can produce a model.
+    """
+
+    def _assert_saveable(self, model, label):
+        from keystone.ingestion import IngestError
+        from keystone.model_store import _validate_for_persistence
+        try:
+            _validate_for_persistence(model)
+        except IngestError as e:
+            self.fail(f"{label} simulates but cannot be saved: {e}")
+
+    def test_every_library_blueprint_is_saveable(self):
+        from keystone.blueprint_library import library
+        for entry in library():
+            with self.subTest(entry.key):
+                self._assert_saveable(entry.build(), entry.key)
+
+    def test_every_hand_built_blueprint_is_saveable(self):
+        for build in (url_shortener.build, payments.build, ticket_booking.build, twitter.build):
+            model = build()
+            with self.subTest(model.name):
+                self._assert_saveable(model, model.name)
+
+    def test_the_default_ingest_path_is_saveable(self):
+        """`INGEST_PROVIDER=stub` is the $0 dev default — the one everybody actually runs."""
+        from keystone.ingestion import Source, make_ingestor
+        model = make_ingestor("stub").ingest(Source(text="a url shortener", name="demo")).model
+        self._assert_saveable(model, "stub ingestor")
+
+    def test_every_generate_path_is_saveable(self):
+        """Including the generic fallback, which had its own out-of-vocabulary `source`."""
+        for intent in ("a url shortener",
+                       "something nobody has ever built before",   # -> generic starting point
+                       "Facebook with crypto wallet for all users",
+                       "an app like Uber with video call capabilities"):
+            with self.subTest(intent):
+                self._assert_saveable(generate_architecture(intent, provider="stub"), intent)
+
+    def test_the_vocabularies_match_the_schema(self):
+        """Pin both sets to what 0001 actually stores, so a new value cannot be invented in Python
+        without someone noticing the migration it would need."""
+        import pathlib
+        import re
+        from keystone.model_store import _VALID_PROVENANCE
+        sql = (pathlib.Path(__file__).resolve().parents[2]
+               / "db" / "migrations" / "0001_canonical_model_store.sql").read_text()
+        m = re.search(r"check \(source in \(([^)]*)\)\)", sql)
+        self.assertIsNotNone(m, "0001's source CHECK moved — re-point this test")
+        schema_sources = {s.strip().strip("'") for s in m.group(1).split(",")}
+        self.assertEqual(schema_sources, {"llm_inferred", "benchmark", "user"})
+        self.assertEqual(set(_VALID_PROVENANCE), {"GROUNDED", "GAP", "ASSUMPTION"})
+
+        # AND the dataclass defaults must be MEMBERS of those sets. This is the assertion that
+        # would have caught the whole family on the day it was written: every one of the four bugs
+        # was a default sitting next to a comment listing a vocabulary it was not in. Checking the
+        # defaults directly needs no call site to exercise them, so a latent one cannot hide.
+        import dataclasses
+
+        from keystone.model import Assumption, Component
+        defaults = {f.name: f.default for f in dataclasses.fields(Assumption)}
+        self.assertIn(defaults["source"], schema_sources,
+                      "Assumption.source's default is not a value the schema can store")
+        self.assertIn(defaults["provenance"], _VALID_PROVENANCE)
+        comp = {f.name: f.default for f in dataclasses.fields(Component)}
+        self.assertIn(comp["provenance"], _VALID_PROVENANCE,
+                      "Component.provenance's default is not a value the schema can store")
+
+
+class ExportImportRoundTripStaysSaveableTest(unittest.TestCase):
+    """Export a model, import it back, and it must still be persistable.
+
+    It was not. `export.py` rebuilt anything the JSON omitted from its own fallbacks, and two of
+    those fallbacks were the same out-of-vocabulary literals found in `model.py`:
+    `provenance="assumption"` and `source="assumption"`. So Keystone would write a file, read its
+    own file back, and hand you a model the store refused — with an error about a value the user
+    never typed. A round trip is the one property an export format has to have.
+    """
+
+    def _round_trip(self, model):
+        from keystone.export import from_dict, to_dict
+        return from_dict(json.loads(json.dumps(to_dict(model))))
+
+    def test_a_minimal_payload_round_trips_into_a_saveable_model(self):
+        """The omitting case — a hand-written or third-party payload that leaves the optional
+        provenance/source fields out entirely, which is what the defaults exist for."""
+        from keystone.export import from_dict, to_dict
+        from keystone.ingestion import IngestError
+        from keystone.model_store import _validate_for_persistence
+
+        payload = to_dict(generate_architecture("a url shortener", provider="stub"))
+        for c in payload["components"]:
+            c.pop("provenance", None)
+        for a in payload.get("assumptions", []):
+            a.pop("provenance", None)
+            a.pop("source", None)
+        try:
+            _validate_for_persistence(from_dict(payload))
+        except IngestError as e:
+            self.fail(f"a payload that omits the optional fields imports unsaveable: {e}")
+
+    def test_every_blueprint_survives_a_round_trip(self):
+        from keystone.blueprint_library import library
+        from keystone.ingestion import IngestError
+        from keystone.model_store import _validate_for_persistence
+        for entry in library():
+            with self.subTest(entry.key):
+                try:
+                    _validate_for_persistence(self._round_trip(entry.build()))
+                except IngestError as e:
+                    self.fail(f"{entry.key} cannot be saved after a round trip: {e}")
+
+    def test_a_round_trip_preserves_provenance_rather_than_defaulting_it(self):
+        """Distinct from the above: the defaults must not be papering over LOST data. A GAP that
+        comes back as an ASSUMPTION is a disclosure silently downgraded."""
+        model = generate_architecture("an app like Uber with video call capabilities",
+                                      provider="stub")
+        before = sorted((a.subject, a.provenance, a.source) for a in model.assumptions)
+        after = sorted((a.subject, a.provenance, a.source) for a in self._round_trip(model).assumptions)
+        self.assertEqual(before, after)
+        self.assertIn("GAP", [p for _s, p, _src in before],
+                      "this intent should carry a coverage GAP — if it does not, the test no "
+                      "longer exercises the case it was written for")
+
+    def test_an_evidence_free_grounding_is_refused_with_its_location(self):
+        """`Grounding` fails closed on GROUNDED-without-citations (provenance.py:88). Pin both
+        halves: that it still refuses, and that the refusal says WHERE."""
+        from keystone.export import ExportError, _grounding_in
+        with self.assertRaises(ExportError) as caught:
+            _grounding_in({"value": 1, "unit": "rps", "confidence_low": 1, "confidence_high": 1},
+                          "components[db].groundings[per_instance_rps]")
+        self.assertIn("components[db].groundings[per_instance_rps]", str(caught.exception))

@@ -377,7 +377,7 @@
       "subject": "limiter",
       "statement": "Every request costs one Redis round trip for the token bucket - there is no cached fast path, because a stale counter is a quota bypass. This makes Redis availability a hard dependency of the whole API, not an optimisation.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -398,7 +398,7 @@
       "subject": "gw",
       "statement": "Keystone's grounded catalogue has NO per-instance price for a managed API gateway - AWS API Gateway bills per request, not per node - so the gateway tier reports $0 compute here. That is a stated GAP, not a free component: at 25k rps a managed gateway's per-request charge would dominate this bill. Priced as self-hosted (Envoy/Kong on your own instances), it would add roughly the same as the auth tier.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {

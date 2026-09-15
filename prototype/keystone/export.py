@@ -145,16 +145,24 @@ def _citation_in(d: Any, where: str) -> Citation:
 def _grounding_in(d: Any, where: str) -> Grounding:
     if not isinstance(d, dict):
         raise ExportError(f"{where}: grounding must be an object")
-    return Grounding(
-        value=_req(d, "value", where),
-        unit=_req(d, "unit", where),
-        confidence_low=_req(d, "confidence_low", where),
-        confidence_high=_req(d, "confidence_high", where),
-        citations=tuple(_citation_in(c, f"{where}.citations[{i}]")
-                        for i, c in enumerate(d.get("citations", []))),
-        provenance=d.get("provenance", "GROUNDED"),
-        measured_context=d.get("measured_context", ""),
-    )
+    try:
+        return Grounding(
+            value=_req(d, "value", where),
+            unit=_req(d, "unit", where),
+            confidence_low=_req(d, "confidence_low", where),
+            confidence_high=_req(d, "confidence_high", where),
+            citations=tuple(_citation_in(c, f"{where}.citations[{i}]")
+                            for i, c in enumerate(d.get("citations", []))),
+            # GROUNDED is the right default HERE and only here: `Grounding.__post_init__`
+            # (provenance.py:88) refuses to build one that is not GROUNDED and refuses one with
+            # zero citations, so an evidence-free payload cannot sneak through wearing the label.
+            provenance=d.get("provenance", "GROUNDED"),
+            measured_context=d.get("measured_context", ""),
+        )
+    except ValueError as exc:
+        # That guard raises a bare ValueError, which escaped this module and cost the caller the
+        # one thing every other error here carries: WHERE in the payload the bad value was.
+        raise ExportError(f"{where}: {exc}") from exc
 
 
 def _component_in(d: Any, i: int) -> Component:
@@ -182,7 +190,7 @@ def _component_in(d: Any, i: int) -> Component:
             requests_per_month=d.get("requests_per_month", 0),
             llm_input_tokens_per_month=d.get("llm_input_tokens_per_month", 0),
             llm_output_tokens_per_month=d.get("llm_output_tokens_per_month", 0),
-            provenance=d.get("provenance", "assumption"),
+            provenance=d.get("provenance", "ASSUMPTION"),
             groundings={k: _grounding_in(g, f"{where}.groundings[{k}]")
                         for k, g in (d.get("groundings") or {}).items()},
             match_context=dict(d.get("match_context") or {}),
@@ -247,7 +255,7 @@ def from_dict(payload: Any) -> SystemModel:
             Assumption(subject=_req(a, "subject", f"assumptions[{i}]"),
                        statement=_req(a, "statement", f"assumptions[{i}]"),
                        confidence=a.get("confidence", "med"),
-                       source=a.get("source", "assumption"),
+                       source=a.get("source", "llm_inferred"),
                        provenance=a.get("provenance", "ASSUMPTION"))
             for i, a in enumerate(payload.get("assumptions") or [])
         ],

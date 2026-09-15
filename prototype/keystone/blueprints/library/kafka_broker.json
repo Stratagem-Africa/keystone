@@ -375,7 +375,7 @@
       "subject": "broker",
       "statement": "DISK, RETENTION AND STORAGE COST ARE STILL NOT MODELLED. Charging (RF-1) follower fetches covers the NETWORK and CPU path that AWS's equation sizes; it does not cover bytes at rest. Every produced message is also written to disk three times, and the v1 analytical engine has no disk-capacity, no retention and no storage-cost dimension - size disks from retention x throughput x RF separately, and note that MSK bills broker storage and data transfer apart from the broker-hour priced here.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
@@ -389,7 +389,7 @@
       "subject": "ctrl",
       "statement": "The KRaft controller quorum is sized for quorum safety (3 nodes), not throughput - it carries only metadata traffic, so its utilisation is low by design. THE ADMIN FLOW DIRECTION IS CORRECTED: clients do not address the controller. Confluent's CFK docs describe the client 'finds the address of the broker it is interested in and connects directly to the broker to produce or consume data', and the KRaft docs state 'The active controller handles all RPCs made from the brokers' and that 'Client configurations are not impacted by Confluent Platform moving to KRaft'. The admin flow therefore runs lb -> broker -> ctrl (it previously ran lb -> ctrl -> broker, which is backwards), and only a fraction of those RPCs reach the controller at all: a broker answers metadata from its own replica of the metadata log and forwards only cluster-mutating operations (topic/partition/ACL changes). No public figure exists for the admin-op share of metadata traffic; the 10% forward rate used here is an ASSUMPTION.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -410,14 +410,14 @@
       "subject": "tier",
       "statement": "COLD-READ LATENCY IS A TAIL, NOT A MEAN. Because one segment fetch is amortised across ~1,000 replayed messages, the engine's arithmetic spreads the object store's first-byte latency across all of them, so the backfill flow's mean latency barely moves. The first consumer to touch a cold segment really does wait the whole fetch. The engine reports means and cannot express that step - read backfill latency as an average, not as what a replay feels like.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
       "subject": "lb",
       "statement": "The load balancer is charged one visit per message, which OVERSTATES it. Confluent's operator load-balancer docs describe the bootstrap pattern: the client uses the load balancer to discover the cluster, then connects directly to the broker it needs. Steady-state produce and consume traffic does not traverse the LB at all - only bootstrap and advertised-listener discovery do. The visit is left at 1.0 because the v1 engine has no 'connection setup only' concept and the LB is nowhere near binding either way, but do not read its utilisation as a real load.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
@@ -431,7 +431,7 @@
       "subject": "engine",
       "statement": "Kafka's defining property is an ORDERED, durable, replayable log with consumer-group offsets. The v1 analytical engine models it as a queueing station with capacity and service time; it cannot express partition ordering, consumer lag, rebalance storms or retention. Those are the failure modes to reason about outside this model.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     }
   ],

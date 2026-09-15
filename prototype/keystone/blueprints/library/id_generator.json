@@ -144,7 +144,7 @@
       "subject": "algorithm",
       "statement": "This file commits to ONE algorithm: Twitter Snowflake (64-bit time|datacenter|worker|sequence), minted in process with no coordination per ID. The archived 2010 README specifies 'sequence number - 12 bits - rolls over every 4096 per machine', so a worker mints IDs locally and never fetches a range from anywhere. The previous version also modelled a Postgres 'segment allocator' handing out 1,000-ID blocks on the generate path; block allocation is the OTHER family - Flickr's 2010 ticket servers (REPLACE INTO plus LAST_INSERT_ID() across two MySQL boxes split odd/even by auto-increment-offset) and Meituan Leaf's segment mode, whose README makes leaf.segment.enable (a MySQL leaf_alloc table) and leaf.snowflake.enable (ZooKeeper for workId, no database at all) independently switchable ALTERNATIVES. Welding the two together put a database on a hot path that in this design has none, and it is why the old file pointed at the wrong component. The sql_db segment allocator and its read replica have therefore been deleted, not re-weighted. If you want the segment/ticket-server design instead, it has a different shape and a different binding constraint, and this blueprint will not tell you where that constraint is.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -165,7 +165,7 @@
       "subject": "app_fleet",
       "statement": "12 nodes are kept even though the fleet now sits far below its capacity ceiling at this load. The node count is set by availability and worker-id spread - zone spread, rolling restarts, and one distinct worker id per process - not by throughput: a Snowflake fleet is sized so that losing a zone does not lose the ID service. The engine computes both the resulting utilisation and the resulting monthly bill; read both, because this over-provision is a real cost and a smaller fleet would still carry the stated load.",
       "confidence": "med",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
@@ -186,49 +186,49 @@
       "subject": "shape",
       "statement": "The load-balancer-plus-service-nodes shape modelled here is the 2010 Twitter shape, and it is no longer how most teams solve this. The twitter-archive/snowflake repository is archived (2021-09-18) with the note 'We have retired the initial release of Snowflake'. Instagram skipped the service entirely and put generation inside the database - 'We've delegated ID creation to each table inside each shard, by using PL/PGSQL' - explicitly because 'the additional complexity required to run an ID service was a point against it'. Modern practice is an embedded library in the calling process, which deletes the load balancer, the app tier, and therefore this blueprint's entire bottleneck. Use this file to learn where a standalone ID SERVICE binds; do not read it as a recommendation to build one.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "clock",
       "statement": "Snowflake correctness depends on monotonic wall-clock time. Clock skew / leap-second stalls are a CORRECTNESS failure mode, not a capacity one, and the v1 analytical engine cannot model them - it computes throughput and latency only. Treat NTP discipline and the reject-on-backwards-clock guard as an unmodelled requirement.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "lb",
       "statement": "NOT MODELLED: the engine reasons in requests per second. An L4 load balancer's real limits are new connections per second, packets per second and bandwidth, none of which this model represents. Its utilisation here is a proxy - useful for deciding WHICH tier binds first, not a number to size network hardware from.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
       "subject": "decode",
       "statement": "NOT MODELLED: decoding a Snowflake ID back into its timestamp, datacenter and worker fields is a shift and a mask performed by the CLIENT, so it generates no server traffic and no longer appears as a flow. The previous version routed a 'decode_id' flow through a read replica, which billed a second database for arithmetic that never leaves the caller's process; that replica has been deleted. If your product genuinely looks up metadata BY id, that is a separate service with its own datastore, and it is not modelled here - add it before trusting this bottleneck or this cost.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
       "subject": "coord",
       "statement": "NOT MODELLED: worker-id uniqueness. Two processes holding or configured with the same worker id will mint duplicate IDs at full rate, and no utilisation, latency or cost figure in this report changes when that happens. The coordination store exists for correctness, not throughput - sizing it from the arrival rate the engine computes for it would be reading the wrong signal entirely. Lease expiry, split-brain on the registry, and the blast radius of a duplicate id are all outside the engine.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
       "subject": "workload",
       "statement": "NOT MODELLED: burst shape below the second. Peak is entered as a flat 50,000 rps, but a Snowflake worker's sequence saturates at MILLISECOND granularity - exhausting the 4,096 sequence slots inside a single millisecond makes the worker spin-wait for the next tick, adding latency that a per-second average cannot show. Any sub-second spike behaviour is invisible in these figures.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     },
     {
       "subject": "cost",
       "statement": "NOT MODELLED: the load-balancer tier carries a per-instance cost of zero because Keystone has no grounded per-instance price for that kind, and inventing one would be worse than declaring the gap. A real L4 load balancer at this rate is billed on hours plus processed bytes/connections, so the monthly total below is a FLOOR for the network tier, not a full bill.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "GAP"
     }
   ],

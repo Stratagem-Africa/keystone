@@ -157,11 +157,11 @@ def generic_starting_point(intent: str = "") -> SystemModel:
                       "placeholders to edit. Every number below is the engine's arithmetic on "
                       "those placeholders, so it describes this generic shape and nothing else. "
                       "Designing an arbitrary intent needs the LLM design path (issue #182)."),
-                confidence="low", source="fallback", provenance="GAP"),
+                confidence="low", source="llm_inferred", provenance="GAP"),
             Assumption(
                 subject="workload",
                 statement="1,000 req/s placeholder, 90:10 read:write — not derived from your intent",
-                confidence="low", source="fallback", provenance="GAP"),
+                confidence="low", source="llm_inferred", provenance="GAP"),
         ],
     )
 

@@ -394,21 +394,21 @@
       "subject": "meta",
       "statement": "The metadata index is SHARDED by bucket+key hash across 3 Postgres primaries. instances=3 here means three independent shards, not three copies of one database, so the engine's divide-arrivals-across-instances model is the correct shape for once.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "data",
       "statement": "Data nodes are modelled at ~6,000 object ops/s each. Real placement is erasure-coded (e.g. 8+3): one client PUT becomes 11 fragment writes across failure domains. The engine counts the client operation once, so internal write amplification on the data plane is NOT reflected here.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {
       "subject": "data",
       "statement": "COST GAP, stated plainly: this design BUILDS an object store, so the data-plane nodes are your own hardware - and Keystone's grounded catalogue has no per-instance price for the `object_store` kind (AWS prices S3 per GB-month and per request, not per node). The data plane therefore reports $0, which is WRONG in the direction that flatters the design. The compute total below covers the front-end, metadata and background tiers only; disks, racks and replication bandwidth are unpriced.",
       "confidence": "high",
-      "source": "engineering",
+      "source": "llm_inferred",
       "provenance": "ASSUMPTION"
     },
     {

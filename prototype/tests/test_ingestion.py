@@ -122,7 +122,7 @@ class TestStubIngestor(unittest.TestCase):
         self.assertIsInstance(res.model, SystemModel)
         validate_model(res.model)  # does not raise
         self.assertTrue(res.model.components)
-        self.assertTrue(all(c.provenance == "assumption" for c in res.model.components.values()))
+        self.assertTrue(all(c.provenance == "ASSUMPTION" for c in res.model.components.values()))
         self.assertTrue(all(a.provenance == "ASSUMPTION" for a in res.model.assumptions))
         self.assertIs(res.assumptions, res.model.assumptions)  # one ledger, not two
 
@@ -222,7 +222,7 @@ class TestClaudeIngestion(unittest.TestCase):
 
     def test_all_values_are_assumptions_never_grounded(self):
         res = make_ingestor("claude", model="m", client=FakeLLM()).ingest(Source(text="x"))
-        self.assertTrue(all(c.provenance == "assumption" for c in res.model.components.values()))
+        self.assertTrue(all(c.provenance == "ASSUMPTION" for c in res.model.components.values()))
         self.assertTrue(all(a.provenance == "ASSUMPTION" and a.source == "llm_inferred"
                             for a in res.model.assumptions))
 
@@ -470,7 +470,7 @@ class TestADR002ReviewFixes(unittest.TestCase):
                              "provenance": "GROUNDED", "source": "benchmark"}],
         })
         res = make_ingestor("claude", model="m", client=FakeLLM(payload)).ingest(Source(text="x"))
-        self.assertTrue(all(c.provenance == "assumption" for c in res.model.components.values()))
+        self.assertTrue(all(c.provenance == "ASSUMPTION" for c in res.model.components.values()))
         self.assertTrue(all(a.provenance == "ASSUMPTION" and a.source == "llm_inferred"
                             for a in res.model.assumptions))
         self.assertTrue(all(a.confidence != "high" for a in res.model.assumptions))  # capped at med
