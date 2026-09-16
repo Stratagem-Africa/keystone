@@ -68,6 +68,7 @@ MIGRATIONS = [
     # true. Registered for the same reason 0003's omission was a gap — a migration the isolation
     # harness does not apply is a migration nothing tests.
     REPO_ROOT / "db" / "migrations" / "0005_pin_search_path_and_allow_fanout.sql",
+    REPO_ROOT / "db" / "migrations" / "0006_project_deletion_rpc.sql",
 ]
 
 

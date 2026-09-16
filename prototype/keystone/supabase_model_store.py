@@ -26,8 +26,21 @@ from keystone.model import (
     SystemModel,
     Workload,
 )
-from keystone.model_store import ModelDiff, Project, VersionMeta, _diff_models, _validate_for_persistence
+from keystone.model_store import (
+    DeletionResult,
+    ModelDiff,
+    Project,
+    VersionMeta,
+    _diff_models,
+    _validate_for_persistence,
+)
 from keystone.provenance import Citation, Grounding
+
+
+class StorageNotConfiguredError(Exception):
+    """Raised by `_purge_storage_objects` — see its docstring. Caught by `delete_project`,
+    never allowed to abort the DB-row purge (ADR-005 §5: erasure of a user's DB data must
+    not be held hostage by an unrelated Storage-plumbing gap)."""
 
 
 def _serialize_groundings(groundings: dict[str, Grounding]) -> dict:
@@ -337,3 +350,80 @@ class SupabaseModelStore:
 
     def diff(self, project: Project, v1: int, v2: int) -> ModelDiff:
         return _diff_models(v1, v2, self.get_model(project, v1), self.get_model(project, v2))
+
+    def delete_project(self, project: Project) -> DeletionResult:
+        # Collecting the Storage/R2 pointers and deleting the project row must happen in ONE
+        # transaction, not two separate PostgREST calls: `source_document` cascades on
+        # `project` delete (0001), so a plain `.table("source_document").select(...)` followed
+        # by a separate `.table("project").delete(...)` leaves a real window where a
+        # source_document inserted between the two calls gets cascade-deleted without ever
+        # being read — silently orphaning whatever Storage/R2 object it pointed at, with no
+        # record that it needed purging (found by independent review). `keystone_delete_project`
+        # (0006) does both inside one function call = one implicit transaction, same reason
+        # 0004 needed an RPC for save_model.
+        result = self._client.rpc(
+            "keystone_delete_project", {"p_project_id": project.id}
+        ).execute()
+        data = result.data
+        # Same defensive unwrap as save_model's response handling (PostgREST's exact wire
+        # shape for a scalar-returning RPC is unverified from this sandbox) — INCLUDING the
+        # dict-keyed-by-function-name case save_model guards against (a second independent
+        # review caught that the first version of this method only handled the list-wrapped
+        # case), AND matching save_model's fail-CLOSED handling of an empty/malformed
+        # response (a THIRD independent review caught that the first version of this method
+        # silently coerced an empty/anomalous response into `project_deleted=False` —
+        # indistinguishable from a legitimate "not your project" no-op, which the RPC always
+        # returns as a well-formed object, never an empty one — masking a real failure as a
+        # successful-looking erasure that may not have actually run).
+        if isinstance(data, list):
+            if not data:
+                raise RuntimeError(
+                    "keystone_delete_project returned no data — the deletion may not have "
+                    "actually run; check Postgres logs before retrying"
+                )
+            data = data[0]
+        if isinstance(data, dict):
+            data = data.get("keystone_delete_project", data)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"keystone_delete_project returned an unexpected shape: {data!r}")
+        deleted = bool(data.get("project_deleted", False))
+        uris = list(data.get("source_document_uris") or [])
+
+        storage_purged = 0
+        storage_errors: list[str] = []
+        if uris:
+            # Broad except is deliberate, not lazy: this call must NEVER block the DB-row
+            # erasure above (already committed by the time we get here) — a real Storage/R2
+            # implementation can fail in ways this file can't enumerate (network timeout,
+            # bucket permission error, vendor SDK exception), and every one of them must be
+            # recorded as a gap, not allowed to look like the whole deletion failed when the
+            # part that actually matters (the user's DB rows) already succeeded.
+            try:
+                storage_purged = self._purge_storage_objects(uris)
+            except Exception as exc:
+                storage_errors.append(str(exc))
+
+        return DeletionResult(
+            project_deleted=deleted,
+            storage_objects_found=len(uris),
+            storage_objects_purged=storage_purged,
+            storage_purge_errors=storage_errors,
+        )
+
+    def _purge_storage_objects(self, uris: list[str]) -> int:
+        """GAP (ADR-005 §5; issue #21, Epic 5.3 — docs/08-Work-Breakdown.md): no Storage/R2
+        client exists anywhere in this repo, and it is not yet decided WHICH vendor a real
+        upload would even land in — `.env.example` only scaffolds `R2_*` vars, but
+        `source_document.uri`'s own schema comment (0001) hedges between "Storage/R2"
+        without picking one, and nothing writes a `source_document` row today (`ingestion.py`
+        never persists; `api/main.py`'s upload handler reads bytes in-memory only). Guessing
+        at either vendor's API here would mean shipping a call that's never been run against
+        anything real — worse than an honest gap, since it would look done without being
+        verified. This is deliberately the seam a real implementation plugs into once that
+        choice is made (posted to Bifola on #21) and Epic 5.3 actually writes an object
+        somewhere: same shape as `save_model`'s `.rpc(...)` call, or an S3-compatible client
+        for R2, calling out to whichever bucket `uris` point at."""
+        raise StorageNotConfiguredError(
+            f"{len(uris)} source_document object(s) were not purged from Storage: no "
+            "Storage/R2 client is configured (see ADR-005 §5 / issue #21 Epic 5.3)."
+        )

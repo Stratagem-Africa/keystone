@@ -107,6 +107,41 @@ class TestStubModelStoreRoundTrip(unittest.TestCase):
             store.get_model(project)   # nothing was ever saved
 
 
+class TestStubModelStoreDeleteProject(unittest.TestCase):
+    """Issue #21 Milestone 6 (ADR-005 §5). Stub has no source_document/Storage concept at
+    all, so there's nothing to purge and no GAP to report here — that's the real seam,
+    tested against SupabaseModelStore instead."""
+
+    def test_delete_removes_all_versions(self):
+        store = StubModelStore()
+        project = Project(id="proj-1")
+        store.save_model(project, _sample_model(name="v1"))
+        store.save_model(project, _sample_model(name="v2"))
+        result = store.delete_project(project)
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.storage_objects_found, 0)
+        self.assertEqual(result.storage_objects_purged, 0)
+        self.assertEqual(result.storage_purge_errors, [])
+        with self.assertRaises(KeyError):
+            store.get_model(project)
+
+    def test_delete_is_idempotent(self):
+        """A repeat delete of an already-gone (or never-existed) project must not raise —
+        ADR-005 §5 frames this as "erasure," and a second erasure request isn't an error."""
+        store = StubModelStore()
+        project = Project(id="does-not-exist")
+        result = store.delete_project(project)
+        self.assertFalse(result.project_deleted)
+
+    def test_delete_does_not_affect_other_projects(self):
+        store = StubModelStore()
+        a, b = Project(id="proj-a"), Project(id="proj-b")
+        store.save_model(a, _sample_model())
+        store.save_model(b, _sample_model())
+        store.delete_project(a)
+        self.assertEqual(store.get_model(b).name, "sample")
+
+
 class TestStubModelStoreListVersionsAndDiff(unittest.TestCase):
     def test_list_versions_reflects_save_order_and_parent_chain(self):
         store = StubModelStore()
