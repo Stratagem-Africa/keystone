@@ -1,0 +1,83 @@
+name: Deploy check
+
+# MANUAL build + smoke-test — issue #24 (docs/08 Epic 6.3), descoped by Bifola on 2026-09-12.
+# Keystone runs locally on each person's machine (the council uses their own `claude -p`), so there is
+# no hosted target and NOTHING here deploys. This only proves the backend image and the frontend worker
+# bundle still BUILD and BOOT, so a future hosted surface (e.g. a read-only demo) isn't built under
+# pressure. No secrets, no `fly deploy`, no `wrangler deploy`, and no Fly app is claimed. If a real
+# deploy is ever added it must stay Bifola-triggered (CONTRIBUTING.md: production is Bifola-gated).
+#
+# DORMANT like ci.yml — GitHub Actions is unavailable on this account (billing), so this only runs
+# by hand once Actions returns. Until then, run the same steps by hand: `docker build` + `docker run`
+# + `curl /health` for the backend, and `cd frontend && npm ci && npm run build:worker` for the frontend.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend image boots (docker build + /health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t keystone-api:smoke .
+
+      - name: Start container
+        run: docker run -d --name keystone-smoke -p 8000:8000 keystone-api:smoke
+
+      # Same probe fly.toml uses: GET /health -> {"status":"ok"}. Fails fast if the container
+      # dies on boot (e.g. a missing dependency) instead of waiting out the full 30 seconds.
+      - name: Wait for /health
+        run: |
+          for _ in $(seq 1 30); do
+            if [ -z "$(docker ps -q -f name=keystone-smoke)" ]; then
+              echo "container exited before becoming healthy"; exit 1
+            fi
+            if body=$(curl -fsS http://127.0.0.1:8000/health 2>/dev/null); then
+              echo "health: $body"
+              echo "$body" | grep -q '"status":"ok"' && exit 0
+              echo "unexpected /health body"; exit 1
+            fi
+            sleep 1
+          done
+          echo "no healthy response after 30s"; exit 1
+
+      - name: Container logs
+        if: failure()
+        run: docker logs keystone-smoke || true   # no container exists if the build step failed
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f keystone-smoke
+
+  frontend:
+    name: frontend worker bundle builds (npm ci + OpenNext)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22   # wrangler (a devDependency) requires >=22; next needs >=20.9
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No NEXT_PUBLIC_SUPABASE_* here on purpose (same as scripts/check-frontend.sh): the app must
+      # build with no account configured, and a runner has none.
+      - name: Build Cloudflare worker bundle
+        run: npm run build:worker
+
+      - name: Check the bundle was produced
+        run: test -s .open-next/worker.js
