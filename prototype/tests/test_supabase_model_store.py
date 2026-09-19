@@ -348,6 +348,56 @@ class TestDeleteProject(unittest.TestCase):
         result = store.delete_project(Project(id="not-mine"))
         self.assertFalse(result.project_deleted)
 
+    def test_failed_purge_keeps_every_uri_and_logs_them(self):
+        """Bifola's PR #200 review, finding 1: by the time a purge fails the source_document
+        rows are already cascade-deleted, so the uri strings exist nowhere else. They must
+        come back on the result AND be logged (so they survive a caller that drops it)."""
+        uris = ["t1/p1/a.txt", "t1/p1/b.txt"]
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": uris,
+        })
+        store = _make_store(client)
+        with self.assertLogs("keystone.supabase_model_store", level="WARNING") as logs:
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.unpurged_uris, uris)
+        joined = "\n".join(logs.output)
+        self.assertIn("t1/p1/a.txt", joined)
+        self.assertIn("t1/p1/b.txt", joined)
+
+    def test_no_uris_means_nothing_unpurged_and_nothing_logged(self):
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": [],
+        })
+        store = _make_store(client)
+        with self.assertNoLogs("keystone.supabase_model_store", level="WARNING"):
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertEqual(result.unpurged_uris, [])
+
+    def test_dict_shaped_junk_responses_fail_closed(self):
+        """Bifola's PR #200 review, finding 2. The RPC ALWAYS returns
+        {'project_deleted': bool, 'source_document_uris': [str, ...]}, so each of these is a
+        malformed response and must raise -- NOT degrade into a `project_deleted=False` that
+        looks like a legitimate "not your project" no-op (or, for "false", into True)."""
+        junk = {
+            "list-wrapped empty dict": [{}],
+            "empty dict": {},
+            "unrelated keys": {"foo": 1},
+            "missing uris key": {"project_deleted": True},
+            "missing project_deleted key": {"source_document_uris": []},
+            "truthy string project_deleted": {"project_deleted": "false", "source_document_uris": []},
+            "int project_deleted": {"project_deleted": 1, "source_document_uris": []},
+            "string instead of uri list": {"project_deleted": True, "source_document_uris": "s3://a"},
+            "None uri list": {"project_deleted": True, "source_document_uris": None},
+            "non-string uri element": {"project_deleted": True, "source_document_uris": ["ok", 7]},
+        }
+        for label, response in junk.items():
+            with self.subTest(label):
+                client = _FakeClient(table_data={}, rpc_result=response)
+                store = _make_store(client)
+                with self.assertRaises(RuntimeError):
+                    store.delete_project(Project(id="proj-1"))
+
     def test_purge_storage_objects_seam_raises_storage_not_configured(self):
         client = _FakeClient(table_data={}, rpc_result={"project_deleted": True, "source_document_uris": []})
         store = _make_store(client)

@@ -11,6 +11,7 @@ here lets exceptions propagate.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import asdict
 from datetime import datetime
@@ -35,6 +36,8 @@ from keystone.model_store import (
     _validate_for_persistence,
 )
 from keystone.provenance import Citation, Grounding
+
+logger = logging.getLogger(__name__)
 
 
 class StorageNotConfiguredError(Exception):
@@ -386,11 +389,32 @@ class SupabaseModelStore:
             data = data.get("keystone_delete_project", data)
         if not isinstance(data, dict):
             raise RuntimeError(f"keystone_delete_project returned an unexpected shape: {data!r}")
-        deleted = bool(data.get("project_deleted", False))
-        uris = list(data.get("source_document_uris") or [])
+        # The RPC ALWAYS returns both keys with these exact types (0006's jsonb_build_object),
+        # so anything else is a malformed response, not a "nothing happened" no-op. Bifola's
+        # PR #200 review showed the earlier `.get(..., False)` / `bool(...)` / `list(...)`
+        # failed OPEN for dict-shaped junk: `{}` -> project_deleted=False (identical to a
+        # legitimate "not your project"), `"false"` -> True (truthy string), and a string uri
+        # -> a list of its characters.
+        deleted = data.get("project_deleted")
+        uris = data.get("source_document_uris")
+        if (
+            not isinstance(deleted, bool)
+            or not isinstance(uris, list)
+            or not all(isinstance(u, str) for u in uris)
+        ):
+            # The RPC has ALREADY run by the time we parse its reply, so the project may be
+            # gone and its source_document rows cascade-deleted. The raw response is embedded
+            # deliberately: if it carries uris, this message is the only place they survive.
+            raise RuntimeError(
+                "keystone_delete_project returned a malformed response — the deletion may "
+                "ALREADY have committed, so do not blindly retry, and treat the raw response "
+                f"below as the only record of any Storage uris: {data!r} — expected "
+                "{'project_deleted': bool, 'source_document_uris': [str, ...]}"
+            )
 
         storage_purged = 0
         storage_errors: list[str] = []
+        unpurged_uris: list[str] = []
         if uris:
             # Broad except is deliberate, not lazy: this call must NEVER block the DB-row
             # erasure above (already committed by the time we get here) — a real Storage/R2
@@ -402,12 +426,24 @@ class SupabaseModelStore:
                 storage_purged = self._purge_storage_objects(uris)
             except Exception as exc:
                 storage_errors.append(str(exc))
+                # The source_document rows are already gone (cascade), so these strings
+                # exist nowhere else — keep ALL of them (an exception can't tell us which
+                # were purged before it fired) and log them so they survive even if the
+                # caller drops the result. Durable fix (a purge-queue table written in the
+                # same transaction as the delete) belongs with Epic 5.3.
+                unpurged_uris = list(uris)
+                logger.warning(
+                    "project %s deleted but %d Storage object(s) were NOT purged and no "
+                    "source_document row remains to record them: %s",
+                    project.id, len(unpurged_uris), unpurged_uris,
+                )
 
         return DeletionResult(
             project_deleted=deleted,
             storage_objects_found=len(uris),
             storage_objects_purged=storage_purged,
             storage_purge_errors=storage_errors,
+            unpurged_uris=unpurged_uris,
         )
 
     def _purge_storage_objects(self, uris: list[str]) -> int:

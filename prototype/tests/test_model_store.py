@@ -122,6 +122,7 @@ class TestStubModelStoreDeleteProject(unittest.TestCase):
         self.assertEqual(result.storage_objects_found, 0)
         self.assertEqual(result.storage_objects_purged, 0)
         self.assertEqual(result.storage_purge_errors, [])
+        self.assertEqual(result.unpurged_uris, [])
         with self.assertRaises(KeyError):
             store.get_model(project)
 

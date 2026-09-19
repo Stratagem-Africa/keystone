@@ -86,8 +86,45 @@ begin
     from source_document
     where project_id = p_project_id;
 
+  -- Lock every row (this project's AND any other same-tenant row) that points at one of
+  -- those uris, in a fixed order (`order by id`), BEFORE deleting. Without this the survivor
+  -- filter below has its own race (found by the independent review of this round): projects
+  -- A and B share uri X and are deleted concurrently; under READ COMMITTED each transaction
+  -- still sees the OTHER's not-yet-committed row as a survivor, both withhold X, and the
+  -- object is orphaned with no record anywhere. With the lock, the second deleter BLOCKS on
+  -- the first's rows until it commits, then re-reads: the first deleter withheld X (B still
+  -- referenced it), the second finds no survivors and reports it -- the LAST deleter of a
+  -- shared uri always owns its purge. Fixed order = two deleters contend for the lowest id
+  -- first, so they queue instead of deadlocking. `authenticated` has UPDATE on
+  -- source_document (0001:610), so FOR UPDATE is permitted rather than silently locking nothing.
+  perform id from source_document where uri = any(v_uris) order by id for update;
+
   delete from project where id = p_project_id;
   get diagnostics v_deleted_count = row_count;
+
+  -- Narrow "uris this project referenced" to "uris SAFE TO PURGE": drop any uri a surviving
+  -- row still points at (Bifola's PR #200 review). `uri` has no UNIQUE constraint and
+  -- `authenticated` can UPDATE source_document.project_id, so two rows can legitimately share
+  -- an object; a purge that trusted the raw list would delete a file another document still
+  -- uses. Runs AFTER the delete so this project's own (now cascade-deleted) rows don't count
+  -- as survivors. `distinct` also stops a duplicated uri inflating storage_objects_found.
+  -- Under RLS this only sees the CALLER's tenant: it defends same-tenant sharing and the
+  -- UPDATE-moved-a-document case, NOT a cross-tenant collision, which still relies on the
+  -- `{tenant_id}/{project_id}/...` path convention (nothing enforces it).
+  --
+  -- KNOWN LIMITS of this being a best-effort filter (found by review, deliberately not
+  -- "fixed" here): (1) it cannot see a row another transaction has inserted or repointed but
+  -- NOT yet committed -- the lock above only covers rows that already exist -- so a writer
+  -- attaching a shared uri concurrently with the last delete can still have that object
+  -- purged from under it. Closing that needs the WRITER (the Epic 5.3 upload path, which
+  -- does not exist yet) to coordinate, e.g. a per-uri advisory lock, or a reference count /
+  -- purge-queue table; a snapshot read in this function cannot. (2) The lock above takes row
+  -- locks on OTHER same-tenant documents sharing a uri, so deleting a project that shares a
+  -- widely-used uri briefly blocks writes to those rows until this transaction commits.
+  select coalesce(array_agg(t.u order by t.u), array[]::text[])
+    into v_uris
+    from (select distinct u from unnest(v_uris) as x(u)) t
+    where not exists (select 1 from source_document s where s.uri = t.u);
 
   return jsonb_build_object(
     'project_deleted', v_deleted_count > 0,
@@ -98,7 +135,8 @@ $$;
 
 comment on function keystone_delete_project(uuid) is
   'ADR-005 §5 (issue #21 "Milestone 6"): atomically collects the source_document.uri values '
-  'a project references and deletes the project row (which cascades to every project_id-'
+  'a project referenced -- minus any uri a surviving row VISIBLE TO THE CALLER (their own '
+  'tenant, under RLS) still points at -- and deletes the project row (which cascades to every project_id-'
   'scoped table, 0001) -- one function call = one transaction, closing the read-then-delete '
   'race a two-call Python implementation would have. SECURITY INVOKER: RLS applies exactly '
   'as it would to either statement run directly, so a cross-tenant project_id is silently '

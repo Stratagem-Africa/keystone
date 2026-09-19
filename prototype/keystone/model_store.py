@@ -124,11 +124,18 @@ class DeletionResult:
     the honest v1 state (no Storage/R2 client exists anywhere in this repo yet). The DB
     row purge (`project_deleted`) is NOT gated on Storage succeeding — a project a user
     asked to delete must still actually go away even if a stray object can't be purged
-    yet; the error is surfaced for an audit sweep to catch later, not used to block erasure."""
+    yet; the error is surfaced for an audit sweep to catch later, not used to block erasure.
+
+    `unpurged_uris` is what makes that sentence true (Bifola's PR #200 review): by the time
+    a purge fails, the `source_document` rows are already cascade-deleted, so the uri
+    strings exist NOWHERE else — an error message carrying only a count would leave a sweep
+    nothing to find. The caller must persist these (the durable fix, a purge-queue table
+    written in the same transaction as the delete, belongs with Epic 5.3)."""
     project_deleted: bool
     storage_objects_found: int
     storage_objects_purged: int
     storage_purge_errors: list[str]
+    unpurged_uris: list[str]
 
 
 @dataclass(frozen=True)
@@ -240,6 +247,7 @@ class StubModelStore:
             storage_objects_found=0,
             storage_objects_purged=0,
             storage_purge_errors=[],
+            unpurged_uris=[],
         )
 
 
