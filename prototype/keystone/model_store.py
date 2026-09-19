@@ -112,6 +112,33 @@ class VersionMeta:
 
 
 @dataclass(frozen=True)
+class DeletionResult:
+    """What `delete_project` actually did — deliberately observable rather than a bare
+    bool, because "deleted" has two independent halves (ADR-005 §5: erasure means BOTH the
+    DB rows AND the Storage/R2 objects a project's `source_document`s point at), and a
+    caller (an account-deletion endpoint, an admin tool) needs to know if either half was
+    a no-op so it can decide whether to warn/retry.
+
+    `storage_purge_errors` is non-empty whenever Storage cleanup couldn't be attempted or
+    failed — see `SupabaseModelStore._purge_storage_objects`'s docstring for why that's
+    the honest v1 state (no Storage/R2 client exists anywhere in this repo yet). The DB
+    row purge (`project_deleted`) is NOT gated on Storage succeeding — a project a user
+    asked to delete must still actually go away even if a stray object can't be purged
+    yet; the error is surfaced for an audit sweep to catch later, not used to block erasure.
+
+    `unpurged_uris` is what makes that sentence true (Bifola's PR #200 review): by the time
+    a purge fails, the `source_document` rows are already cascade-deleted, so the uri
+    strings exist NOWHERE else — an error message carrying only a count would leave a sweep
+    nothing to find. The caller must persist these (the durable fix, a purge-queue table
+    written in the same transaction as the delete, belongs with Epic 5.3)."""
+    project_deleted: bool
+    storage_objects_found: int
+    storage_objects_purged: int
+    storage_purge_errors: list[str]
+    unpurged_uris: list[str]
+
+
+@dataclass(frozen=True)
 class ModelDiff:
     """What changed between two versions of the same project — deliberately SHALLOW (which
     components/flows differ, not which fields within a changed one). The milestone's only
@@ -136,6 +163,7 @@ class ModelStore(Protocol):
     def get_model(self, project: Project, version: int | Literal["head"] = "head") -> SystemModel: ...
     def list_versions(self, project: Project) -> list[VersionMeta]: ...
     def diff(self, project: Project, v1: int, v2: int) -> ModelDiff: ...
+    def delete_project(self, project: Project) -> DeletionResult: ...
 
 
 def _diff_models(v1: int, v2: int, a: SystemModel, b: SystemModel) -> ModelDiff:
@@ -206,6 +234,21 @@ class StubModelStore:
 
     def diff(self, project: Project, v1: int, v2: int) -> ModelDiff:
         return _diff_models(v1, v2, self.get_model(project, v1), self.get_model(project, v2))
+
+    def delete_project(self, project: Project) -> DeletionResult:
+        # Stub has no Storage/source_document concept at all (it only ever holds in-memory
+        # SystemModel snapshots) — so there is nothing to purge, not a GAP. Idempotent:
+        # deleting an unknown/already-deleted project is a no-op, not an error, matching
+        # ADR-005 §5's "erasure" framing (a repeat delete request should not itself raise).
+        with self._lock:
+            existed = self._versions.pop(project.id, None) is not None
+        return DeletionResult(
+            project_deleted=existed,
+            storage_objects_found=0,
+            storage_objects_purged=0,
+            storage_purge_errors=[],
+            unpurged_uris=[],
+        )
 
 
 def make_model_store(provider: str | None = None, *, access_token: str | None = None) -> ModelStore:

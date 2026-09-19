@@ -21,7 +21,7 @@ from keystone.ingestion import IngestError
 from keystone.model import Component, ComponentKind, Flow, FlowStep, PricingRates, SystemModel, Workload
 from keystone.model_store import Project
 from keystone.provenance import Citation, Grounding
-from keystone.supabase_model_store import SupabaseModelStore
+from keystone.supabase_model_store import StorageNotConfiguredError, SupabaseModelStore
 
 
 class _FakeQuery:
@@ -240,6 +240,169 @@ class TestGetModel(unittest.TestCase):
         flow_b = next(f for f in model.flows if f.name == "B")
         self.assertEqual([s.component_id for s in flow_a.path], ["app", "db"])
         self.assertEqual([s.component_id for s in flow_b.path], ["app", "db"])
+
+
+class TestDeleteProject(unittest.TestCase):
+    """Issue #21 Milestone 6 (ADR-005 §5). `delete_project` calls `keystone_delete_project`
+    (0006) — ONE RPC, not a select-then-delete pair — precisely because two separate
+    PostgREST calls leave a race where a source_document inserted between them is
+    cascade-deleted without ever being read (found by independent review of the earlier
+    two-call version). `_purge_storage_objects` is a deliberate GAP (see its docstring) —
+    no Storage/R2 client exists anywhere in this repo yet — so these tests assert the SEAM
+    (the RPC call, error containment, the DB-row purge already having happened by the time
+    Storage cleanup is even attempted), not a real Storage call."""
+
+    def test_calls_the_rpc_with_project_id(self):
+        client = _FakeClient(
+            table_data={},
+            rpc_result={"project_deleted": True, "source_document_uris": []},
+        )
+        store = _make_store(client)
+        store.delete_project(Project(id="proj-1"))
+        self.assertEqual(len(client.rpc_calls), 1)
+        name, payload = client.rpc_calls[0]
+        self.assertEqual(name, "keystone_delete_project")
+        self.assertEqual(payload, {"p_project_id": "proj-1"})
+
+    def test_reports_uris_the_rpc_collected_before_deleting(self):
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True,
+            "source_document_uris": ["t1/p1/a.txt", "t1/p1/b.txt"],
+        })
+        store = _make_store(client)
+        result = store.delete_project(Project(id="proj-1"))
+
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.storage_objects_found, 2)
+        self.assertEqual(result.storage_objects_purged, 0, "no Storage client is wired up yet")
+        self.assertEqual(len(result.storage_purge_errors), 1)
+        self.assertIn("2 source_document object(s)", result.storage_purge_errors[0])
+
+    def test_storage_gap_does_not_block_the_db_row_purge(self):
+        """The DB erasure half is already done by the time Storage cleanup is even
+        attempted (both happened inside the RPC's own transaction) — see DeletionResult's
+        docstring for why that ordering is the deliberate priority."""
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": ["t1/p1/a.txt"],
+        })
+        store = _make_store(client)
+        result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted)
+
+    def test_a_real_storage_failure_is_recorded_not_raised(self):
+        """Finding from independent review: the original narrow `except
+        StorageNotConfiguredError` would let ANY other exception a real Storage/R2
+        implementation raises propagate out of delete_project — but the DB row is already
+        gone by then (the RPC already committed), so that would misreport a successful
+        erasure as a total failure. Must be caught broadly and recorded instead."""
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": ["t1/p1/a.txt"],
+        })
+        store = _make_store(client)
+        with patch.object(store, "_purge_storage_objects", side_effect=RuntimeError("bucket unreachable")):
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted, "DB erasure must not be reported as failed")
+        self.assertEqual(result.storage_purge_errors, ["bucket unreachable"])
+
+    def test_no_source_documents_means_no_gap_reported(self):
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": [],
+        })
+        store = _make_store(client)
+        result = store.delete_project(Project(id="proj-1"))
+        self.assertEqual(result.storage_objects_found, 0)
+        self.assertEqual(result.storage_purge_errors, [])
+
+    def test_empty_list_response_raises_instead_of_reporting_not_deleted(self):
+        """Third independent review finding: the RPC always returns a well-formed object
+        (even for a legitimate no-op — see test_no_matching_project_row_reports_not_deleted
+        below), so an EMPTY response means something went wrong at the transport/PostgREST
+        layer, not "nothing to delete." Silently reporting that as `project_deleted=False`
+        would look identical to a real no-op and mask a genuine failure — must raise
+        instead, matching save_model's existing fail-closed handling of the same shape."""
+        client = _FakeClient(table_data={}, rpc_result=[])
+        store = _make_store(client)
+        with self.assertRaises(RuntimeError):
+            store.delete_project(Project(id="proj-1"))
+
+    def test_unwraps_dict_wrapped_response(self):
+        """Same wire-shape ambiguity save_model's `test_unwraps_dict_wrapped_response`
+        guards — a second independent review caught that the first version of this method
+        only handled the list-wrapped case, not this one."""
+        client = _FakeClient(table_data={}, rpc_result={
+            "keystone_delete_project": {"project_deleted": True, "source_document_uris": ["a.txt"]},
+        })
+        store = _make_store(client)
+        result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.storage_objects_found, 1)
+
+    def test_no_matching_project_row_reports_not_deleted(self):
+        """Cross-tenant / already-deleted / unknown project: RLS makes the RPC's own DELETE
+        match zero rows rather than raise (verified directly against real Postgres) — the
+        client distinguishes this via `project_deleted`, not an exception."""
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": False, "source_document_uris": [],
+        })
+        store = _make_store(client)
+        result = store.delete_project(Project(id="not-mine"))
+        self.assertFalse(result.project_deleted)
+
+    def test_failed_purge_keeps_every_uri_and_logs_them(self):
+        """Bifola's PR #200 review, finding 1: by the time a purge fails the source_document
+        rows are already cascade-deleted, so the uri strings exist nowhere else. They must
+        come back on the result AND be logged (so they survive a caller that drops it)."""
+        uris = ["t1/p1/a.txt", "t1/p1/b.txt"]
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": uris,
+        })
+        store = _make_store(client)
+        with self.assertLogs("keystone.supabase_model_store", level="WARNING") as logs:
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.unpurged_uris, uris)
+        joined = "\n".join(logs.output)
+        self.assertIn("t1/p1/a.txt", joined)
+        self.assertIn("t1/p1/b.txt", joined)
+
+    def test_no_uris_means_nothing_unpurged_and_nothing_logged(self):
+        client = _FakeClient(table_data={}, rpc_result={
+            "project_deleted": True, "source_document_uris": [],
+        })
+        store = _make_store(client)
+        with self.assertNoLogs("keystone.supabase_model_store", level="WARNING"):
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertEqual(result.unpurged_uris, [])
+
+    def test_dict_shaped_junk_responses_fail_closed(self):
+        """Bifola's PR #200 review, finding 2. The RPC ALWAYS returns
+        {'project_deleted': bool, 'source_document_uris': [str, ...]}, so each of these is a
+        malformed response and must raise -- NOT degrade into a `project_deleted=False` that
+        looks like a legitimate "not your project" no-op (or, for "false", into True)."""
+        junk = {
+            "list-wrapped empty dict": [{}],
+            "empty dict": {},
+            "unrelated keys": {"foo": 1},
+            "missing uris key": {"project_deleted": True},
+            "missing project_deleted key": {"source_document_uris": []},
+            "truthy string project_deleted": {"project_deleted": "false", "source_document_uris": []},
+            "int project_deleted": {"project_deleted": 1, "source_document_uris": []},
+            "string instead of uri list": {"project_deleted": True, "source_document_uris": "s3://a"},
+            "None uri list": {"project_deleted": True, "source_document_uris": None},
+            "non-string uri element": {"project_deleted": True, "source_document_uris": ["ok", 7]},
+        }
+        for label, response in junk.items():
+            with self.subTest(label):
+                client = _FakeClient(table_data={}, rpc_result=response)
+                store = _make_store(client)
+                with self.assertRaises(RuntimeError):
+                    store.delete_project(Project(id="proj-1"))
+
+    def test_purge_storage_objects_seam_raises_storage_not_configured(self):
+        client = _FakeClient(table_data={}, rpc_result={"project_deleted": True, "source_document_uris": []})
+        store = _make_store(client)
+        with self.assertRaises(StorageNotConfiguredError):
+            store._purge_storage_objects(["t1/p1/a.txt"])
 
 
 if __name__ == "__main__":
