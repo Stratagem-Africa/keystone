@@ -197,5 +197,41 @@ class StatusTest(unittest.TestCase):
         self.assertNotIn("email", status, "status must not carry the account identity")
 
 
+class ForeignModelSlugIsRefusedTest(unittest.TestCase):
+    """A model id means nothing without the provider it belongs to.
+
+    This transport inherits whatever COUNCIL_MODEL / INGEST_MODEL is in the environment or a local
+    `.env`. With a second provider configured as a fallback, that value is somebody else's slug —
+    and it was passed straight through as `claude -p --model qwen/qwen3.6-27b`, which the CLI
+    answered with a bare 404 that named neither the variable nor the provider. Reported by Jem on
+    #190 after it bit her in run_from_note.py, and reproduced: the same `.env` shape is common for
+    anyone who has ever configured a free-tier fallback.
+
+    The point of failing at construction is the ERROR TEXT. A 404 from a subprocess tells you
+    nothing actionable; naming the variable does.
+    """
+
+    def test_a_vendor_prefixed_slug_is_refused_with_an_actionable_message(self):
+        for slug in ("qwen/qwen3.6-27b", "openrouter/auto", "moonshotai/kimi-k2", "groq/compound-mini"):
+            with self.subTest(slug):
+                with self.assertRaises(LLMError) as caught:
+                    ClaudeCliLLM(slug)
+                msg = str(caught.exception)
+                self.assertIn(slug, msg, "the message must quote the offending value")
+                self.assertIn("COUNCIL_MODEL", msg, "...and name the variable to fix")
+
+    def test_real_claude_ids_and_the_empty_default_still_work(self):
+        """The guard keys on '/', which no Claude id contains — so it must not reject a valid one,
+        nor the empty default that means 'use the account's own model'."""
+        for ok in ("", None, "opus", "sonnet", "haiku", "claude-opus-4-8", "claude-haiku-4-5-20251001"):
+            with self.subTest(repr(ok)):
+                self.assertEqual(ClaudeCliLLM(ok).model, ok or "")
+
+    def test_it_fires_through_the_provider_factory_too(self):
+        """make_llm is the path the council and ingestor actually use."""
+        with self.assertRaises(LLMError):
+            make_llm("claude_cli", "qwen/qwen3.6-27b")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,14 +8,16 @@ Welcome, Jem. This gets you building today. Read it once, then start.
 
 ## 0. For your Claude — coordination rules (read these FIRST, every session)
 
-You'll use Claude Code too. **Bifola's Claude reviews your pushes and pushes fixes/improvements straight back onto your branch** — so two rules keep us from clobbering each other:
+You'll use Claude Code too. **Bifola's Claude reviews your pushes and leaves you clear feedback — what to change, why it matters, and where to look. It does not edit your branch.** You make the fixes yourself; that is how you learn the codebase (§2 step 5 says the same thing, and so does `CLAUDE.md`).
 
-1. **PULL BEFORE YOU WORK.** At the start of every session: `git fetch origin && git pull` on your branch. The reviewer may have pushed changes since you last looked.
-2. **PULL BEFORE YOU COMMIT.** Again right before you commit or push. Your branch is frequently *ahead* of your local copy; committing on a stale branch causes divergence and conflicts.
+Two rules still matter, because **`main` moves underneath you** — PRs merge while you work, and a concurrent session may land changes an hour after you last looked:
+
+1. **PULL BEFORE YOU WORK.** At the start of every session: `git fetch origin && git pull`.
+2. **PULL BEFORE YOU COMMIT.** Again right before you commit or push. Committing on a stale branch causes divergence and conflicts.
 
 If you ever see *"your branch and origin/… have diverged,"* stop and `git pull --rebase` before doing anything else.
 
-> Tell your Claude, in its instructions: **"Before you work and before every commit, run `git fetch && git pull` on my branch — Bifola's Claude pushes review fixes directly to it. Never commit on a stale branch."**
+> Tell your Claude, in its instructions: **"Before I work and before every commit, run `git fetch origin && git pull` — `main` moves while I work. Never commit on a stale branch."**
 
 ---
 
