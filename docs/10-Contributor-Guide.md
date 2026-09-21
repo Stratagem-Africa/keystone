@@ -49,11 +49,59 @@ Frontend: **Next.js + Tailwind on Cloudflare** (OpenNext). Backend: **FastAPI on
 ```bash
 git clone https://github.com/Stratagem-Africa/keystone.git
 cd keystone
-# the engine runs with zero deps and no key:
-cd prototype && python3 run_url_shortener.py
-python3 -m unittest discover -s tests   # 25 tests — must stay green
+./setup.sh
 ```
+
+That is the whole thing. `setup.sh` checks what you have, names anything missing and how to get it,
+installs the frontend dependencies, and — on macOS — builds `Keystone.app`, puts a **Keystone**
+shortcut on your Desktop, and installs a git hook so every later `git pull` rebuilds the app for
+you. It is safe to re-run at any time.
+
+**What you need first:**
+
+| Tool | Why | If missing |
+|---|---|---|
+| **python3** | the engine, the API, the tests | `xcode-select --install` (macOS), or python.org |
+| **node 20+ and npm** | **the frontend, and half the merge gate** | [nodejs.org](https://nodejs.org), or `brew install node` |
+| Claude Code CLI | *optional* — only the council's reasoning | `npm install -g @anthropic-ai/claude-code`, then `claude` |
+
+**Node is not optional for you.** You own the frontend, and `scripts/check.sh` runs its frontend
+half — eslint, `next build`, `tsc`, the design-token guard — only when `frontend/node_modules`
+exists. Without it that half prints `==> frontend: skipped` and **the gate still exits green**. A
+pass on a machine with no node is a Python-only pass, which is how a lint error reached `main` in
+#140. Install node and the gate is whole again.
+
 Copy `.env.example` → `.env` (gitignored) when you need config. **Never commit `.env`.**
+
+### Running it
+
+```bash
+./scripts/keystone-local.sh            # the whole app: API + studio on 127.0.0.1:3000/studio
+./scripts/keystone-local.sh --offline  # no AI at all — the engine and all 56 designs, $0
+```
+
+On macOS, double-clicking the Desktop **Keystone** shortcut does the same thing. Either way you get
+**the same Next.js frontend the web app serves** — one codebase, not a second UI to keep in sync.
+
+The desktop wrapper exists for one reason: the council can run on `claude -p`, which is a program on
+*your* laptop, so Keystone has to run locally to use your own subscription instead of a paid API
+key. A Dock icon is just a nicer way to start a local process than remembering a shell command.
+Nothing is hosted, shared or billed — it binds to loopback only, so nothing outside your machine can
+reach it.
+
+### The gate — run both halves before every push
+
+```bash
+./scripts/check.sh     # tests + ruff + mypy + eslint + next build + tsc
+```
+
+Keep it green; never push on red. Some Postgres-backed tests are deliberately **not** in that run
+(they need a real database). If your change touches `db/migrations/` or `db/testing/`, also run:
+
+```bash
+KEYSTONE_TEST_DATABASE_URL=postgresql://postgres@localhost:5432/postgres \
+  ./scripts/test_tenant_isolation.sh
+```
 
 ## 6. Your first sprint — pick any (all independent)
 
