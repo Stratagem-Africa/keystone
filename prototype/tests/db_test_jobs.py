@@ -19,6 +19,7 @@ import unittest
 import uuid
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from tenant_isolation_test_helpers import DatabaseTestCase, sign_in_as
 
@@ -55,6 +56,26 @@ class TestJobsIsolation(DatabaseTestCase):
             self.cur.execute("select * from jobs where job_id = %s", (job_id,))
             rows = self.cur.fetchall()
         self.assertEqual(rows, [], "B must see zero of A's job rows (RLS filters, not an error)")
+
+    def test_user_cannot_read_another_users_arch_map(self):
+        # 0007 added jobs.arch_map (#183). own_jobs is a ROW-level policy, so it should cover the
+        # new column exactly like every other one -- this proves it instead of assuming it.
+        job_id = uuid.uuid4()
+        arch = {"verdict": {"bottleneck_id": "svc"}, "nodes": []}
+        with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
+            self.cur.execute(
+                "insert into jobs (job_id, user_id, intent_text, arch_map) values (%s, %s, %s, %s)",
+                (job_id, self.tenant_a.user_id, "test intent", Jsonb(arch)),
+            )
+        with sign_in_as(self.cur, user_id=self.tenant_b.user_id, tenant_id=self.tenant_b.tenant_id):
+            self.cur.execute("select arch_map from jobs where job_id = %s", (job_id,))
+            rows = self.cur.fetchall()
+        self.assertEqual(rows, [], "B must not be able to read A's arch_map")
+        # ...and the owner CAN read it back, so the empty result above is RLS, not a missing column/value.
+        with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
+            self.cur.execute("select arch_map from jobs where job_id = %s", (job_id,))
+            row = self.cur.fetchone()
+        self.assertEqual(row[0], arch)
 
     def test_user_cannot_update_another_users_job(self):
         job_id = self._insert_job(as_user=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id)

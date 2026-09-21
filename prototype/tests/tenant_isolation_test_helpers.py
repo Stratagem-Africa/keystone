@@ -68,6 +68,10 @@ MIGRATIONS = [
     # true. Registered for the same reason 0003's omission was a gap — a migration the isolation
     # harness does not apply is a migration nothing tests.
     REPO_ROOT / "db" / "migrations" / "0005_pin_search_path_and_allow_fanout.sql",
+    # 0006 is #200's (project deletion) and is not on main yet; 0007 is independent of it (it only adds
+    # jobs.arch_map, #183), so it follows 0005 here and the number gap is intentional. Registered so the
+    # isolation gate builds the arch_map column it is supposed to be proving own_jobs protects.
+    REPO_ROOT / "db" / "migrations" / "0007_jobs_arch_map.sql",
 ]
 
 
