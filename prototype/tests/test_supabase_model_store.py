@@ -21,6 +21,7 @@ from keystone.ingestion import IngestError
 from keystone.model import Component, ComponentKind, Flow, FlowStep, PricingRates, SystemModel, Workload
 from keystone.model_store import Project
 from keystone.provenance import Citation, Grounding
+from keystone import supabase_model_store
 from keystone.supabase_model_store import StorageNotConfiguredError, SupabaseModelStore
 
 
@@ -365,13 +366,79 @@ class TestDeleteProject(unittest.TestCase):
         self.assertIn("t1/p1/a.txt", joined)
         self.assertIn("t1/p1/b.txt", joined)
 
+    def _store_with_uris(self, uris):
+        client = _FakeClient(table_data={}, rpc_result={"project_deleted": True, "source_document_uris": uris})
+        return _make_store(client)
+
+    def test_partial_purge_is_not_silent(self):
+        """Bifola's PR #200 re-review, #4. A seam returning 2 of 3 used to give purged=2,
+        errors=[], unpurged_uris=[] -- no error, no log, and the third object's source_document
+        row already cascade-deleted. Anything not reported purged is unpurged, exception or not."""
+        uris = ["t/p/a", "t/p/b", "t/p/c"]
+        store = self._store_with_uris(uris)
+        with patch.object(store, "_purge_storage_objects", return_value=["t/p/a", "t/p/c"]):
+            with patch.object(supabase_model_store.logger, "warning") as warn:
+                result = store.delete_project(Project(id="proj-1"))
+        self.assertTrue(result.project_deleted)
+        self.assertEqual(result.storage_objects_found, 3)
+        self.assertEqual(result.storage_objects_purged, 2)
+        self.assertEqual(result.unpurged_uris, ["t/p/b"])
+        self.assertEqual(len(result.storage_purge_errors), 1, "a shortfall must never come back with no error")
+        self.assertIn("1 of 3", result.storage_purge_errors[0])
+        warn.assert_called_once()
+        self.assertEqual(result.storage_objects_purged + len(result.unpurged_uris), result.storage_objects_found)
+
+    def test_zero_purged_without_raising_is_worded_correctly(self):
+        """Line-by-line review: the seam's contract permits returning `[]` (purged nothing)
+        WITHOUT raising -- the original wording always said '...for the rest', which is false
+        when nothing was purged at all."""
+        uris = ["t/p/a", "t/p/b"]
+        store = self._store_with_uris(uris)
+        with patch.object(store, "_purge_storage_objects", return_value=[]):
+            result = store.delete_project(Project(id="proj-1"))
+        self.assertEqual(result.storage_objects_purged, 0)
+        self.assertEqual(result.unpurged_uris, uris)
+        self.assertEqual(len(result.storage_purge_errors), 1)
+        self.assertNotIn("for the rest", result.storage_purge_errors[0])
+        self.assertIn("no successes", result.storage_purge_errors[0])
+
+    def test_full_purge_reports_no_error_and_no_log(self):
+        uris = ["t/p/a", "t/p/b"]
+        store = self._store_with_uris(uris)
+        with patch.object(store, "_purge_storage_objects", return_value=list(uris)):
+            with patch.object(supabase_model_store.logger, "warning") as warn:
+                result = store.delete_project(Project(id="proj-1"))
+        self.assertEqual(result.storage_objects_purged, 2)
+        self.assertEqual(result.unpurged_uris, [])
+        self.assertEqual(result.storage_purge_errors, [])
+        warn.assert_not_called()
+
+    def test_a_seam_returning_the_wrong_shape_is_recorded_as_a_failure(self):
+        """The seam's contract is 'return the list of uris you purged'. A count (the old
+        int contract), or uris that were never passed in, is a broken seam: recorded as a
+        failed purge with every uri kept -- never a crash after the rows are already gone."""
+        for label, bad in {"old int contract": 2, "uri never passed in": ["t/p/zzz"], "None": None}.items():
+            with self.subTest(label):
+                store = self._store_with_uris(["t/p/a", "t/p/b"])
+                with patch.object(store, "_purge_storage_objects", return_value=bad):
+                    result = store.delete_project(Project(id="proj-1"))
+                self.assertTrue(result.project_deleted)
+                self.assertEqual(result.storage_objects_purged, 0)
+                self.assertEqual(result.unpurged_uris, ["t/p/a", "t/p/b"])
+                self.assertEqual(len(result.storage_purge_errors), 1)
+
     def test_no_uris_means_nothing_unpurged_and_nothing_logged(self):
         client = _FakeClient(table_data={}, rpc_result={
             "project_deleted": True, "source_document_uris": [],
         })
         store = _make_store(client)
-        with self.assertNoLogs("keystone.supabase_model_store", level="WARNING"):
+        # NOT `assertNoLogs`: that is Python 3.10+, and the merge gate can run on an older
+        # interpreter (Bifola's macOS stock python3 is 3.9.6, below our own requires-python).
+        # Patching THIS module's logger is portable and asserts something sharper: that this
+        # logger stayed silent, not merely that no WARNING reached a logger of that name.
+        with patch.object(supabase_model_store.logger, "warning") as warn:
             result = store.delete_project(Project(id="proj-1"))
+        warn.assert_not_called()
         self.assertEqual(result.unpurged_uris, [])
 
     def test_dict_shaped_junk_responses_fail_closed(self):
@@ -390,6 +457,9 @@ class TestDeleteProject(unittest.TestCase):
             "string instead of uri list": {"project_deleted": True, "source_document_uris": "s3://a"},
             "None uri list": {"project_deleted": True, "source_document_uris": None},
             "non-string uri element": {"project_deleted": True, "source_document_uris": ["ok", 7]},
+            "empty-string uri": {"project_deleted": True, "source_document_uris": [""]},
+            "not deleted yet carries uris": {"project_deleted": False, "source_document_uris": ["a.txt"]},
+            "duplicate uri": {"project_deleted": True, "source_document_uris": ["a.txt", "a.txt"]},
         }
         for label, response in junk.items():
             with self.subTest(label):
@@ -397,6 +467,18 @@ class TestDeleteProject(unittest.TestCase):
                 store = _make_store(client)
                 with self.assertRaises(RuntimeError):
                     store.delete_project(Project(id="proj-1"))
+
+    def test_malformed_response_is_logged_before_raising(self):
+        """Removed-behavior review: the exception message embeds the raw response, but a
+        caller that doesn't log the exception itself would lose it -- the same reason a
+        failed purge is logged separately from being put in the return value."""
+        client = _FakeClient(table_data={}, rpc_result={"project_deleted": True, "source_document_uris": "not-a-list"})
+        store = _make_store(client)
+        with patch.object(supabase_model_store.logger, "warning") as warn:
+            with self.assertRaises(RuntimeError):
+                store.delete_project(Project(id="proj-1"))
+        warn.assert_called_once()
+        self.assertIn("not-a-list", str(warn.call_args))
 
     def test_purge_storage_objects_seam_raises_storage_not_configured(self):
         client = _FakeClient(table_data={}, rpc_result={"project_deleted": True, "source_document_uris": []})

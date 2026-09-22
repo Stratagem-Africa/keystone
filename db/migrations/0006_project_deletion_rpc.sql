@@ -94,9 +94,14 @@ begin
   -- object is orphaned with no record anywhere. With the lock, the second deleter BLOCKS on
   -- the first's rows until it commits, then re-reads: the first deleter withheld X (B still
   -- referenced it), the second finds no survivors and reports it -- the LAST deleter of a
-  -- shared uri always owns its purge. Fixed order = two deleters contend for the lowest id
-  -- first, so they queue instead of deadlocking. `authenticated` has UPDATE on
-  -- source_document (0001:610), so FOR UPDATE is permitted rather than silently locking nothing.
+  -- shared uri always owns its purge. The fixed `order by id` makes deleters queue on the
+  -- lowest contended id first, which NARROWS deadlocks but does NOT rule them out -- see
+  -- KNOWN LIMIT (3) below (an earlier version of this comment claimed otherwise; that was
+  -- wrong, and reproduced as 40P01 on real Postgres).
+  -- HARD DEPENDENCY on the grant at 0001:610: `FOR UPDATE` needs UPDATE on source_document.
+  -- If `authenticated` ever loses it this function RAISES 42501 for EVERY call (verified on
+  -- real PG, even for a project with no documents) -- it does not "silently lock nothing";
+  -- silently locking nothing is what an RLS policy that narrows the visible rows would do.
   perform id from source_document where uri = any(v_uris) order by id for update;
 
   delete from project where id = p_project_id;
@@ -110,17 +115,40 @@ begin
   -- as survivors. `distinct` also stops a duplicated uri inflating storage_objects_found.
   -- Under RLS this only sees the CALLER's tenant: it defends same-tenant sharing and the
   -- UPDATE-moved-a-document case, NOT a cross-tenant collision, which still relies on the
-  -- `{tenant_id}/{project_id}/...` path convention (nothing enforces it).
+  -- `{tenant_id}/{project_id}/...` path convention (nothing enforces it). The harmful case is
+  -- ONE deleter plus one SURVIVING row in another tenant that is invisible to it under RLS
+  -- (not both tenants deleting): the uri looks unreferenced, so it is reported safe to purge
+  -- while the other tenant's row still points at it. A `check (uri like tenant_id::text ||
+  -- '/%')` on source_document would close it, but only makes sense together with Epic 5.3's
+  -- object-key format, so it is deliberately not added here.
   --
   -- KNOWN LIMITS of this being a best-effort filter (found by review, deliberately not
-  -- "fixed" here): (1) it cannot see a row another transaction has inserted or repointed but
+  -- "fixed" here):
+  -- (1) OVER-purge: it cannot see a row another transaction has inserted or repointed but
   -- NOT yet committed -- the lock above only covers rows that already exist -- so a writer
   -- attaching a shared uri concurrently with the last delete can still have that object
   -- purged from under it. Closing that needs the WRITER (the Epic 5.3 upload path, which
   -- does not exist yet) to coordinate, e.g. a per-uri advisory lock, or a reference count /
-  -- purge-queue table; a snapshot read in this function cannot. (2) The lock above takes row
-  -- locks on OTHER same-tenant documents sharing a uri, so deleting a project that shares a
-  -- widely-used uri briefly blocks writes to those rows until this transaction commits.
+  -- purge-queue table; a snapshot read in this function cannot.
+  -- (2) The lock above takes row locks on OTHER same-tenant documents sharing a uri, so
+  -- deleting a project that shares a widely-used uri blocks writes to those rows until this
+  -- transaction commits. `source_document` has no index on `uri` or `project_id` (0001
+  -- creates none beyond the primary key), so both statements seq-scan: measured by review at
+  -- ~2.3 s over 500k rows WHILE HOLDING those locks -- so "blocks" can mean seconds, not
+  -- milliseconds, at scale. Follow-up migration: indexes on (tenant_id, uri) and (project_id).
+  -- (3) DEADLOCK: two concurrent calls can deadlock (SQLSTATE 40P01). `v_uris` is read at the
+  -- top, but the lock statement re-evaluates `uri = any(v_uris)` on a FRESH READ COMMITTED
+  -- snapshot, so a document repointed in between (an UPDATE, which authenticated may do)
+  -- drops out of this call's ordered lock set while the cascade still has to lock it later
+  -- -- in an order the other deleter never agreed to. Reproduced 3/3 on PG 17 with the window
+  -- widened by a pg_sleep between the two statements (the real window is microseconds, so
+  -- this is rare, not impossible). Postgres aborts one victim and the whole call rolls back:
+  -- NOTHING is deleted, so the CALLER MAY SAFELY RETRY on 40P01.
+  -- (4) UNDER-purge: an `UPDATE source_document SET uri = ...` touches no foreign key, so the
+  -- project-row lock at the top does not fence it. Repoint a victim's uri mid-delete and this
+  -- call reports the OLD uri while the row it actually cascade-deletes carries the NEW one --
+  -- so the new object is deleted from the DB without ever being reported for purge. (Present
+  -- since the first version of this function; not a regression from the survivor filter.)
   select coalesce(array_agg(t.u order by t.u), array[]::text[])
     into v_uris
     from (select distinct u from unnest(v_uris) as x(u)) t

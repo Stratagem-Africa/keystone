@@ -200,6 +200,20 @@ class TestSharedUriConcurrentDeletes(DatabaseTestCase):
 
     scratch_db_name = "keystone_test_delete_project_concurrency"
 
+    def tearDown(self) -> None:
+        # Every test in this class COMMITS (needed so a second, real connection can see the
+        # seed data) -- which makes DatabaseTestCase's usual tearDown `rollback()` a NO-OP
+        # here, so committed rows would otherwise accumulate across this class's test methods
+        # for the rest of the run (found by line-by-line review). RLS means a later test's
+        # freshly-`seed_tenant`-minted tenant can't actually SEE an earlier test's leftover
+        # rows (different tenant_id each time), so this was inert today, not a live bug -- but
+        # relying on that instead of real isolation is fragile, so clean up explicitly as
+        # superuser (self.cur's role is already back to superuser here -- every sign_in_as
+        # block in this class's tests resets it on exit before the test method returns).
+        self.cur.execute("delete from project where tenant_id = %s", (self.tenant_a.tenant_id,))
+        self.conn.commit()
+        super().tearDown()
+
     def _new_project_with_doc(self, uri: str):
         tenant = self.tenant_a
         project_id = self.cur.execute(
@@ -212,6 +226,25 @@ class TestSharedUriConcurrentDeletes(DatabaseTestCase):
             (project_id, uri),
         )
         return project_id
+
+    def _start_deleter(self, project_id, outcome: dict, key: str = "second") -> threading.Thread:
+        """Run keystone_delete_project(project_id) as tenant A on its OWN connection/thread,
+        leaving the result (or the exception, surfaced by the caller's assertions rather than
+        swallowed) in `outcome`."""
+        def run() -> None:
+            try:
+                with psycopg.connect(self.db_url, autocommit=False) as conn2:
+                    cur2 = conn2.cursor()
+                    with sign_in_as(cur2, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
+                        cur2.execute("select keystone_delete_project(%s)", (project_id,))
+                        outcome[key] = cur2.fetchone()[0]
+                    conn2.commit()
+            except Exception as exc:
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        return thread
 
     def _wait_for_lock_waiter(self, *, timeout: float, thread: threading.Thread) -> bool:
         deadline = time.monotonic() + timeout
@@ -236,24 +269,12 @@ class TestSharedUriConcurrentDeletes(DatabaseTestCase):
 
         outcome: dict = {}
 
-        def second_deleter() -> None:
-            try:
-                with psycopg.connect(self.db_url, autocommit=False) as conn2:
-                    cur2 = conn2.cursor()
-                    with sign_in_as(cur2, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
-                        cur2.execute("select keystone_delete_project(%s)", (project_b,))
-                        outcome["second"] = cur2.fetchone()[0]
-                    conn2.commit()
-            except Exception as exc:   # surfaced by the assertions below, not swallowed
-                outcome["error"] = exc
-
         # Transaction 1: delete A and leave the transaction OPEN (holding its locks).
         with sign_in_as(self.cur, user_id=self.tenant_a.user_id, tenant_id=self.tenant_a.tenant_id):
             self.cur.execute("select keystone_delete_project(%s)", (project_a,))
             first = self.cur.fetchone()[0]
 
-        thread = threading.Thread(target=second_deleter)
-        thread.start()
+        thread = self._start_deleter(project_b, outcome)
         # Wait until Postgres itself reports a backend waiting on a lock -- proof the second
         # deleter is genuinely blocked on the first's rows, not just "slow" -- instead of a
         # fixed sleep (which on a slow box could commit transaction 1 before the second one
@@ -274,6 +295,47 @@ class TestSharedUriConcurrentDeletes(DatabaseTestCase):
         self.assertEqual(
             outcome["second"]["source_document_uris"], [shared],
             "the LAST deleter of a shared uri must report it -- otherwise the object is orphaned",
+        )
+
+    def test_project_row_lock_makes_a_racing_insert_visible_to_the_deleter(self):
+        """Covers the FOR UPDATE on the project row (0006's first statement) -- Bifola's PR #200
+        re-review, #2: deleting that line left all 46 DB tests green, because the shared-uri
+        test above targets two DIFFERENT projects so their project-row locks never contend.
+
+        A writer inserts a second document for project A and holds its transaction OPEN (the
+        FK check takes a KEY SHARE lock on A's project row). The delete must wait for it and
+        then SEE that document. Asserting only "it blocked" would not do: without the
+        project-row lock the RPC still blocks -- later, at the `delete`, on the same KEY SHARE
+        lock -- but by then it has already read its uri list, so the cascade deletes the racing
+        document unreported (an orphaned Storage object with no record). Only the returned
+        list tells the two apart."""
+        own_uri, racing_uri = "own/doc.pdf", "racing/late-upload.pdf"
+        project_a = self._new_project_with_doc(own_uri)
+        self.conn.commit()   # visible to the deleter's connection
+
+        # The writer: a second document for A, transaction left open.
+        self.cur.execute(
+            "insert into source_document (project_id, type, uri, checksum) "
+            "values (%s, 'text', %s, 'deadbeef')",
+            (project_a, racing_uri),
+        )
+
+        outcome: dict = {}
+        thread = self._start_deleter(project_a, outcome)
+        blocked = self._wait_for_lock_waiter(timeout=10.0, thread=thread)
+        self.assertNotIn("error", outcome, f"deleter raised instead of blocking: {outcome.get('error')!r}")
+        self.assertTrue(blocked, "the deleter must wait for the writer's open transaction")
+        self.conn.commit()   # the writer commits -> the deleter unblocks
+        thread.join(timeout=15)
+        self.assertFalse(thread.is_alive(), "deleter never unblocked")
+        self.assertNotIn("error", outcome, outcome.get("error"))
+
+        result = outcome["second"]
+        self.assertTrue(result["project_deleted"])
+        self.assertEqual(
+            sorted(result["source_document_uris"]), sorted([own_uri, racing_uri]),
+            "the racing document was cascade-deleted but never reported -- the project-row "
+            "lock is what makes the deleter wait BEFORE it reads its uri list",
         )
 
 

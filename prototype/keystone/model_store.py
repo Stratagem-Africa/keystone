@@ -130,7 +130,19 @@ class DeletionResult:
     a purge fails, the `source_document` rows are already cascade-deleted, so the uri
     strings exist NOWHERE else — an error message carrying only a count would leave a sweep
     nothing to find. The caller must persist these (the durable fix, a purge-queue table
-    written in the same transaction as the delete, belongs with Epic 5.3)."""
+    written in the same transaction as the delete, belongs with Epic 5.3).
+
+    `storage_objects_found` means "uris SAFE TO PURGE", not "uris the project referenced":
+    `keystone_delete_project` (0006) withholds any uri a surviving same-tenant row still
+    points at, so this can be lower than what the project's own documents pointed to. That is
+    a deliberate, best-effort deviation from ADR-005 §5's "leaves zero Storage objects" (see
+    the amendment there) — purging a shared object would destroy another document's file. It
+    is best-effort because it cannot see uncommitted concurrent writes or other tenants'
+    rows; the durable answer is the Epic 5.3 purge queue / reference count.
+
+    Invariants: `unpurged_uris` and `storage_purge_errors` are non-empty together whenever
+    Storage cleanup did not fully succeed, and `storage_objects_purged + len(unpurged_uris)
+    == storage_objects_found`."""
     project_deleted: bool
     storage_objects_found: int
     storage_objects_purged: int
