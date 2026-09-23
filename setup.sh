@@ -20,11 +20,32 @@ echo; bold "Keystone setup"; echo
 
 # ---------------------------------------------------------------- 1. what's here
 missing=0
-if command -v python3 >/dev/null; then ok "python3 $(python3 -V 2>&1 | cut -d' ' -f2)"
+# Presence was not enough: this checked only that SOME python3 existed, so an interpreter older
+# than the one pyproject.toml declares walked straight through setup and failed later, somewhere
+# else, with an error that pointed at the code rather than at the interpreter.
+#
+# A WARNING, not a failure, and deliberately so: pyproject says >=3.10, but the suite is currently
+# green on macOS's stock 3.9.6, so hard-failing here would block a machine that demonstrably works.
+# Name the gap and let the person decide — a setup script that refuses a working environment gets
+# edited out, and then it checks nothing at all.
+if command -v python3 >/dev/null; then
+  py_ver="$(python3 -V 2>&1 | cut -d' ' -f2)"
+  if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    ok "python3 $py_ver"
+  else
+    warn "python3 $py_ver — pyproject.toml declares >=3.10"
+    dim "     The suite currently passes on 3.9 too, so this is usually fine. If you hit a syntax"
+    dim "     error in code that works for everyone else, this is the first thing to suspect."
+  fi
 else bad "python3 — install Xcode command line tools: xcode-select --install"; missing=1; fi
 
 if command -v node >/dev/null; then ok "node $(node -v)"
-else bad "node — install Node 20+ from https://nodejs.org (or: brew install node)"; missing=1; fi
+else
+  bad "node — install Node 20+ from https://nodejs.org (or: brew install node)"
+  dim "     Required, not optional: without it scripts/check.sh SKIPS its whole frontend half"
+  dim "     (eslint, next build, tsc) and still exits green — a half-gate that looks like a pass."
+  missing=1
+fi
 
 if command -v npm >/dev/null; then ok "npm $(npm -v)"
 else bad "npm — comes with node"; missing=1; fi

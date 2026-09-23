@@ -110,6 +110,22 @@ class ClaudeCliLLM:
     def __init__(self, model: str | None = None, *, meter: CostMeter | None = None,
                  timeout: int = _DEFAULT_TIMEOUT) -> None:
         self.model = model or ""
+        # A model id only means something NEXT TO the provider it belongs to, and this transport
+        # inherits whichever COUNCIL_MODEL / INGEST_MODEL is in the environment or a local .env.
+        # With a second provider configured as a fallback, that is somebody else's slug: the CLI
+        # got `claude -p --model qwen/qwen3.6-27b` and answered with a bare 404 naming neither the
+        # variable nor the provider (Jem, #190, hit in run_from_note.py; reproduced).
+        #
+        # A "/" is the tell: vendor-prefixed ids (openrouter/…, groq/…, moonshotai/…) always carry
+        # one and no Claude id ever does — they are `opus`/`sonnet`/`haiku` or `claude-…`. Fail
+        # here, where we can name the variable to fix, instead of inside the CLI 30 seconds later.
+        if "/" in self.model:
+            raise LLMError(
+                f"COUNCIL_MODEL/INGEST_MODEL is {self.model!r}, which belongs to another provider "
+                "— the Claude CLI has no such model and will reject it. Claude ids look like "
+                "'opus', 'sonnet', 'haiku' or 'claude-…'. Either unset the variable (the CLI then "
+                "uses your account default, usually what you want) or set it to a Claude id."
+            )
         self._meter = meter
         self._timeout = timeout
 

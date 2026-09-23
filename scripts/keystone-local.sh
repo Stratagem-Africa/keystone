@@ -84,6 +84,16 @@ for p in "$API_PORT" "$WEB_PORT"; do
 done
 
 # ---------------------------------------------------------------- run
+# PIN THE MODEL VARS TOO, NOT JUST THE PROVIDERS. This script chose the provider but inherited
+# whatever COUNCIL_MODEL / INGEST_MODEL happened to be in the environment or a local .env — and a
+# model id only means anything ALONGSIDE the provider it belongs to. With a Groq fallback
+# configured (COUNCIL_MODEL=qwen/…), the claude_cli transport passed that straight through as
+# `claude -p --model qwen/…` (llm_cli.py) and Claude rejected it with a 404. Reported by Jem on
+# #190 after it bit her in run_from_note.py; reproduced here.
+#
+# Unset rather than set: with no model the CLI uses the account's own default, which is the right
+# answer for "run the council on your subscription" and needs no list of model ids kept up to date.
+unset COUNCIL_MODEL INGEST_MODEL
 if [ "$MODE" = "cli" ]; then
   export COUNCIL_PROVIDER=claude_panel   # 7 personas as subagents in ONE call, not 7 sessions
   export INGEST_PROVIDER=claude_cli
