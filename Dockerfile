@@ -17,12 +17,18 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # prototype/, so pip install ".[api,db]" would install an empty shell of keystone
 # alongside the real deps. We run from source (WORKDIR /app/prototype below), so
 # pip only needs the dependencies — not the package itself.
+# Keep this list in step with the `api` + `db` extras in pyproject.toml: python-multipart is
+# required by the upload routes (FastAPI refuses to start without it), and pyjwt[crypto] is
+# what api/auth.py imports directly for ES256 token checks (declared here rather than relying
+# on supabase happening to pull it in).
 RUN pip install --no-cache-dir \
     "fastapi>=0.110" \
     "uvicorn>=0.29" \
     "pydantic>=2" \
     "supabase>=2.31" \
-    "python-dotenv>=1.0"
+    "python-dotenv>=1.0" \
+    "python-multipart>=0.0.9" \
+    "pyjwt[crypto]>=2.8"
 
 # Copy the application code AFTER pip install.
 # Code changes invalidate only this layer, not the pip install layer above.
