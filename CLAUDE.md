@@ -70,8 +70,9 @@ Keystone/
 
 - **Language/core:** Python 3.10+ · FastAPI for the API (when added). Engine is pure stdlib today; hot path may be ported to Rust later (the SysSimulator lesson) — not now, and only behind an ADR.
 - **DB:** Supabase (Postgres) free tier — also gives Auth, Storage, pgvector (RAG later). Note: free projects pause after 7 days idle (cron-ping to keep alive).
-- **File/object storage:** Supabase Storage or Cloudflare R2. **Not Google Drive** (not an app object store).
-- **Frontend (later):** Next.js + Tailwind on Vercel free tier.
+- **File/object storage:** **Cloudflare R2** for large uploads (ADR-003); Supabase Storage for the rest. **Not Google Drive** (not an app object store).
+- **Frontend + hosting:** **Next.js + Tailwind on Cloudflare** (Pages/Workers via OpenNext), API + background worker on **Fly.io** — see **`docs/adr/ADR-003`**, which is the source of truth for the deploy target.
+  - This line used to say "Vercel free tier", which **contradicted a ratified ADR that had specifically rejected it**: a council run is ~15 sequential LLM calls and can take minutes, so it exceeds serverless function timeouts (ADR-003 §13). Jem found the contradiction while reading both (#190). If the target ever changes, amend ADR-003 — don't edit this summary, or the two drift apart again.
 - **AI:** Claude API via the Agent SDK (Haiku for dev = pennies). Council = single model, multiple persona prompts (cost control). May prototype on free OpenRouter models / local Ollama for $0.
 - **Cost rule:** **do not add a paid dependency without an ADR.** Dev target is ~$0/month.
 

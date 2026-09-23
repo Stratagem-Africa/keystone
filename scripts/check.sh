@@ -25,6 +25,30 @@ unset COUNCIL_PROVIDER COUNCIL_MODEL CONSENSUS_PRIMARY CONSENSUS_VOTERS \
 
 status=0
 
+# SAY WHICH INTERPRETER THIS IS, AND WHETHER IT MATCHES WHAT WE DECLARE.
+#
+# pyproject.toml says `requires-python = ">=3.10"`. The review machine runs macOS's stock python3,
+# which is 3.9.6. That gap produced two false signals in one week and cost real time both times:
+#   * a contributor's PR was green on her 3.10 box and RED here, on `assertNoLogs` (3.10+), and the
+#     red was first misattributed to an unrelated environment variable (#200);
+#   * `setup.sh` accepted any python3 at all, so nothing ever surfaced the mismatch.
+# A gate whose interpreter differs from the declared minimum is testing something other than what
+# the project claims to support, and neither side can tell.
+#
+# WARN, do not fail. The suite genuinely passes on 3.9.6, so failing would redden the only machine
+# that reviews anything — and a gate that is red for reasons unrelated to the change teaches you to
+# ignore red. Name the gap loudly instead, every run, until someone closes it.
+py_ver="$(python3 -V 2>&1 | cut -d' ' -f2)"
+if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+  echo "==> python3 $py_ver  (meets pyproject's >=3.10)"
+else
+  printf '\033[33m==> python3 %s — BELOW pyproject.toml\047s declared >=3.10\033[0m\n' "$py_ver"
+  echo "    The suite passes here, but this gate is not testing the version we claim to support:"
+  echo "    3.10-only syntax and stdlib (e.g. unittest's assertNoLogs) pass review on a"
+  echo "    contributor's machine and fail on this one. Install python 3.10+, or lower the"
+  echo "    declaration — but they should not disagree."
+fi
+
 echo "==> Test suite  (python3 -m unittest discover -s tests)"
 python3 -m unittest discover -s tests 2>&1 | tail -n 4
 [ "${PIPESTATUS[0]}" -eq 0 ] || status=1
