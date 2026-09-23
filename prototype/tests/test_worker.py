@@ -62,6 +62,11 @@ class TestWorker(unittest.TestCase):
         self.assertIsNotNone(completed.result)   # report was generated
         self.assertIsNone(completed.error)
 
+        # issue #183: the engine-driven architecture map is built alongside the report
+        self.assertIsInstance(completed.arch_map, dict)
+        self.assertIn("nodes", completed.arch_map)
+        self.assertIn("verdict", completed.arch_map)
+
     def test_run_pipeline_records_error_on_failure(self):
         # patch make_ingestor to raise an exception — simulates a real pipeline failure
         # patch() temporarily replaces the real function with a fake one for this test only

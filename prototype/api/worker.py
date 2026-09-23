@@ -10,6 +10,7 @@ from keystone.claude_council import _redact_engine_metrics
 from keystone.report import render              # produces the markdown report
 from keystone.simulation import simulate        # the ONLY source of numbers
 from keystone.grounding import ground_model
+from keystone.arch_map import build_arch_map    # serialises model+sim into the interactive map's data
 from api.jobs import update_job  # updates job status as the pipeline progresses
 
 log = logging.getLogger("keystone.worker")
@@ -77,7 +78,12 @@ def run_pipeline(job_id: str, intent_text: str, access_token: str) -> None:
         # Step 5: render — combine everything into a markdown report
         report = render(model, adrs, sim_result)
 
-        update_job(job_id, access_token=access_token, status="done", result=report)  # store the finished report
+        # Step 6: serialise the same model + sim_result into the engine-driven architecture map
+        # (issue #183) — no re-computation, just a structured view of numbers already produced above.
+        arch = build_arch_map(model, sim_result)
+
+        update_job(job_id, access_token=access_token, status="done",
+                   result=report, arch_map=arch)  # store the finished report + map
         log.info("job %s completed successfully", job_id)
         log.info("job %s: %s", job_id, meter.summary())
 

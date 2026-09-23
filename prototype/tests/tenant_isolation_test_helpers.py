@@ -69,6 +69,10 @@ MIGRATIONS = [
     # harness does not apply is a migration nothing tests.
     REPO_ROOT / "db" / "migrations" / "0005_pin_search_path_and_allow_fanout.sql",
     REPO_ROOT / "db" / "migrations" / "0006_project_deletion_rpc.sql",
+    # 0007 only adds jobs.arch_map (#183) and is independent of 0006 (#200, project deletion) —
+    # they were developed in parallel and merged in number order. Registered so the isolation gate
+    # actually builds the arch_map column it is supposed to be proving `own_jobs` protects.
+    REPO_ROOT / "db" / "migrations" / "0007_jobs_arch_map.sql",
 ]
 
 
