@@ -1,0 +1,176 @@
+-- 0006_project_deletion_rpc.sql
+--
+-- Issue #21 "Milestone 6" (ADR-005 §5, privacy + deletion) — the DB-row half of erasure.
+--
+-- The row-purge itself needs NO new schema: every project_id-scoped table already cascades
+-- via `on delete cascade` (0001), verified directly against real Postgres before writing this
+-- file (a plain `DELETE FROM project` as `authenticated`, own tenant, reaches system_model,
+-- component, flow, flow_step, assumption, source_document, AND simulation_run down to zero
+-- rows — even though `authenticated` holds no direct write grant on most of those tables
+-- post-0004; FK ON DELETE CASCADE runs as an internal RI trigger, not ordinary DML the
+-- caller's own table grants would need to cover).
+--
+-- What DOES need a function: `SupabaseModelStore.delete_project()` (Python) must read each
+-- `source_document.uri` under a project BEFORE deleting it — the cascade removes those rows
+-- too, so reading them after would find nothing to report as needing a Storage/R2 purge.
+-- Through PostgREST, "SELECT the uris" and "DELETE the project" are two separate REST calls,
+-- not one transaction (same reason 0004 needed an RPC for save_model: supabase-py's client is
+-- one-REST-call-per-statement). Two separate calls leaves a real race: a source_document
+-- inserted between them is cascade-deleted without ever being read, silently orphaning
+-- whatever Storage/R2 object it pointed at with no record that it needed purging (found by
+-- independent review of the two-round-trip Python-only version of this). A single function
+-- call is one implicit transaction, closing that window the same way 0004 closed its own.
+--
+-- LOCKING: a plain SELECT-then-DELETE inside one function is NOT by itself enough to close
+-- the race described above under READ COMMITTED (Postgres's default) — each STATEMENT takes
+-- its own snapshot, so a concurrent INSERT into source_document that commits between our
+-- SELECT and our DELETE would still be invisible to v_uris, yet still get cascade-deleted
+-- (found by a second independent review, after the first version of this file shipped
+-- without the lock below). The fix mirrors 0004's own technique exactly: `select ... for
+-- update` on the project row BEFORE reading its children. Postgres's own FK enforcement
+-- takes a `FOR KEY SHARE` lock on a referenced row for every INSERT that references it (to
+-- stop the parent disappearing mid-check) — our stronger `FOR UPDATE` lock on that same row
+-- forces any concurrent `insert into source_document (project_id, ...) values (p_project_id,
+-- ...)` to block until we commit or roll back. By then the project row is either gone (that
+-- INSERT then fails its own FK check, which is correct — you cannot attach a document to a
+-- project that no longer exists) or it committed before we ever locked the row, in which
+-- case our SELECT already saw it. Either way, no source_document can slip through uncounted.
+--
+-- ASSUMES READ COMMITTED (Postgres's own default, and Supabase's — flagged by a third
+-- independent review, not fixed here): the lock-then-reread argument above only holds
+-- because READ COMMITTED takes a FRESH snapshot per statement, so once `for update` unblocks
+-- (the concurrent inserter has committed), the following `select ... from source_document`
+-- sees that commit. Under REPEATABLE READ/SERIALIZABLE, the whole transaction's snapshot is
+-- fixed at its first query, so that same select could still miss a row that committed after
+-- this transaction started, even though the lock correctly waited for it. Not pinned inside
+-- this function: `SET TRANSACTION ISOLATION LEVEL` is only legal before ANY query has run in
+-- the transaction, and PostgREST (like this repo's own sign_in_as test harness) already runs
+-- `SET LOCAL ROLE`/claims setup first — attempting it here risks a confusing runtime error
+-- for a scenario nothing in this stack currently creates (Postgres/Supabase default to READ
+-- COMMITTED; nothing here raises it). Documented instead of "fixed": if `authenticated`'s
+-- default isolation is ever changed, this function's race-closure needs re-verifying then.
+--
+-- SECURITY INVOKER (the default — see 0001/0002/0003's functions, NOT 0004's exception):
+-- unlike keystone_save_system_model, this function is NOT becoming the only way to write
+-- `project`/`source_document` — `authenticated`'s existing direct grants there (0001) are
+-- left as-is; this is an additional atomic path for the one specific operation (collect URIs
+-- + delete) that needs one. Running as the caller means RLS applies exactly as it already
+-- does for a direct `DELETE FROM project` or `SELECT FROM source_document`: a project outside
+-- the caller's own tenant is invisible to both statements, so this function needs no explicit
+-- tenant check of its own (contrast 0004, which bypasses RLS by necessity and therefore must
+-- check the tenant itself).
+--
+-- Depends on: 0001 (project, source_document). Independent of 0002-0005.
+
+begin;
+
+create or replace function keystone_delete_project(p_project_id uuid)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_uris          text[];
+  v_deleted_count int;
+begin
+  -- Lock the project row FIRST (see LOCKING above) -- this is what actually closes the
+  -- race, not just being "one function call." A no-op (0 rows) when the project doesn't
+  -- exist or belongs to another tenant (RLS), same as every statement below.
+  perform 1 from project where id = p_project_id for update;
+
+  -- Read BEFORE delete, in the same transaction as the delete below — the whole point of
+  -- this being one function call instead of two REST calls.
+  select coalesce(array_agg(uri), array[]::text[])
+    into v_uris
+    from source_document
+    where project_id = p_project_id;
+
+  -- Lock every row (this project's AND any other same-tenant row) that points at one of
+  -- those uris, in a fixed order (`order by id`), BEFORE deleting. Without this the survivor
+  -- filter below has its own race (found by the independent review of this round): projects
+  -- A and B share uri X and are deleted concurrently; under READ COMMITTED each transaction
+  -- still sees the OTHER's not-yet-committed row as a survivor, both withhold X, and the
+  -- object is orphaned with no record anywhere. With the lock, the second deleter BLOCKS on
+  -- the first's rows until it commits, then re-reads: the first deleter withheld X (B still
+  -- referenced it), the second finds no survivors and reports it -- the LAST deleter of a
+  -- shared uri always owns its purge. The fixed `order by id` makes deleters queue on the
+  -- lowest contended id first, which NARROWS deadlocks but does NOT rule them out -- see
+  -- KNOWN LIMIT (3) below (an earlier version of this comment claimed otherwise; that was
+  -- wrong, and reproduced as 40P01 on real Postgres).
+  -- HARD DEPENDENCY on the grant at 0001:610: `FOR UPDATE` needs UPDATE on source_document.
+  -- If `authenticated` ever loses it this function RAISES 42501 for EVERY call (verified on
+  -- real PG, even for a project with no documents) -- it does not "silently lock nothing";
+  -- silently locking nothing is what an RLS policy that narrows the visible rows would do.
+  perform id from source_document where uri = any(v_uris) order by id for update;
+
+  delete from project where id = p_project_id;
+  get diagnostics v_deleted_count = row_count;
+
+  -- Narrow "uris this project referenced" to "uris SAFE TO PURGE": drop any uri a surviving
+  -- row still points at (Bifola's PR #200 review). `uri` has no UNIQUE constraint and
+  -- `authenticated` can UPDATE source_document.project_id, so two rows can legitimately share
+  -- an object; a purge that trusted the raw list would delete a file another document still
+  -- uses. Runs AFTER the delete so this project's own (now cascade-deleted) rows don't count
+  -- as survivors. `distinct` also stops a duplicated uri inflating storage_objects_found.
+  -- Under RLS this only sees the CALLER's tenant: it defends same-tenant sharing and the
+  -- UPDATE-moved-a-document case, NOT a cross-tenant collision, which still relies on the
+  -- `{tenant_id}/{project_id}/...` path convention (nothing enforces it). The harmful case is
+  -- ONE deleter plus one SURVIVING row in another tenant that is invisible to it under RLS
+  -- (not both tenants deleting): the uri looks unreferenced, so it is reported safe to purge
+  -- while the other tenant's row still points at it. A `check (uri like tenant_id::text ||
+  -- '/%')` on source_document would close it, but only makes sense together with Epic 5.3's
+  -- object-key format, so it is deliberately not added here.
+  --
+  -- KNOWN LIMITS of this being a best-effort filter (found by review, deliberately not
+  -- "fixed" here):
+  -- (1) OVER-purge: it cannot see a row another transaction has inserted or repointed but
+  -- NOT yet committed -- the lock above only covers rows that already exist -- so a writer
+  -- attaching a shared uri concurrently with the last delete can still have that object
+  -- purged from under it. Closing that needs the WRITER (the Epic 5.3 upload path, which
+  -- does not exist yet) to coordinate, e.g. a per-uri advisory lock, or a reference count /
+  -- purge-queue table; a snapshot read in this function cannot.
+  -- (2) The lock above takes row locks on OTHER same-tenant documents sharing a uri, so
+  -- deleting a project that shares a widely-used uri blocks writes to those rows until this
+  -- transaction commits. `source_document` has no index on `uri` or `project_id` (0001
+  -- creates none beyond the primary key), so both statements seq-scan: measured by review at
+  -- ~2.3 s over 500k rows WHILE HOLDING those locks -- so "blocks" can mean seconds, not
+  -- milliseconds, at scale. Follow-up migration: indexes on (tenant_id, uri) and (project_id).
+  -- (3) DEADLOCK: two concurrent calls can deadlock (SQLSTATE 40P01). `v_uris` is read at the
+  -- top, but the lock statement re-evaluates `uri = any(v_uris)` on a FRESH READ COMMITTED
+  -- snapshot, so a document repointed in between (an UPDATE, which authenticated may do)
+  -- drops out of this call's ordered lock set while the cascade still has to lock it later
+  -- -- in an order the other deleter never agreed to. Reproduced 3/3 on PG 17 with the window
+  -- widened by a pg_sleep between the two statements (the real window is microseconds, so
+  -- this is rare, not impossible). Postgres aborts one victim and the whole call rolls back:
+  -- NOTHING is deleted, so the CALLER MAY SAFELY RETRY on 40P01.
+  -- (4) UNDER-purge: an `UPDATE source_document SET uri = ...` touches no foreign key, so the
+  -- project-row lock at the top does not fence it. Repoint a victim's uri mid-delete and this
+  -- call reports the OLD uri while the row it actually cascade-deletes carries the NEW one --
+  -- so the new object is deleted from the DB without ever being reported for purge. (Present
+  -- since the first version of this function; not a regression from the survivor filter.)
+  select coalesce(array_agg(t.u order by t.u), array[]::text[])
+    into v_uris
+    from (select distinct u from unnest(v_uris) as x(u)) t
+    where not exists (select 1 from source_document s where s.uri = t.u);
+
+  return jsonb_build_object(
+    'project_deleted', v_deleted_count > 0,
+    'source_document_uris', to_jsonb(v_uris)
+  );
+end;
+$$;
+
+comment on function keystone_delete_project(uuid) is
+  'ADR-005 §5 (issue #21 "Milestone 6"): atomically collects the source_document.uri values '
+  'a project referenced -- minus any uri a surviving row VISIBLE TO THE CALLER (their own '
+  'tenant, under RLS) still points at -- and deletes the project row (which cascades to every project_id-'
+  'scoped table, 0001) -- one function call = one transaction, closing the read-then-delete '
+  'race a two-call Python implementation would have. SECURITY INVOKER: RLS applies exactly '
+  'as it would to either statement run directly, so a cross-tenant project_id is silently '
+  'invisible to both (project_deleted: false), same as any other RLS-scoped DML.';
+
+revoke execute on function keystone_delete_project(uuid) from public, anon, service_role;
+grant execute on function keystone_delete_project(uuid) to authenticated;
+
+commit;
