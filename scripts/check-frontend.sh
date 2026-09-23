@@ -110,6 +110,20 @@ echo; echo "==> frontend: next build (WITH NO SUPABASE CONFIG — see below)"
 # result that means the same thing every time.
 rm -rf "$NEXT_DIST_DIR" 2>/dev/null || true
 
+# WAIT OUT A CONCURRENT BUILD instead of failing next to it. `next build` refuses to run while
+# another build is in flight — "Another next build process is already running" — and that is a
+# LOCK on the toolchain, not on $NEXT_DIST_DIR, so a separate dist dir does not avoid it. Running
+# the app (scripts/keystone-local.sh builds before it serves) while the gate runs therefore turned
+# the gate RED for a reason that had nothing to do with the change. Observed 2026-09-23.
+#
+# Same principle as the cold-cache note above: a gate whose result depends on what else is running
+# is not a gate. Wait, say so, and only give up after a build could not plausibly still be going.
+for _ in $(seq 1 120); do
+  pgrep -f "next build" >/dev/null 2>&1 || break
+  echo "   waiting: another 'next build' is running (the app? another gate?) — not a real failure"
+  sleep 5
+done
+
 ( unset NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY
   NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= npm run build ) 2>&1 \
   | grep -E "✓|✗|error|Error|Failed" | tail -n 6

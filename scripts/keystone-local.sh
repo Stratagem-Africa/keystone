@@ -110,7 +110,23 @@ export KB_PROVIDER=curated               # cited evidence in the report; uses no
 # so whichever one you open in works. Still loopback only: nothing outside this machine is allowed.
 export ALLOWED_ORIGINS="http://$BIND:$WEB_PORT,http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT"
 
-cleanup() { dim "shutting down…"; kill $(jobs -p) 2>/dev/null || true; }
+# KILL THE WHOLE TREE, NOT JUST OUR OWN JOBS — a failed launch used to poison the NEXT one.
+#
+# Both servers run inside `( … ) &` subshells, so `next build` / `next start` / uvicorn are
+# GRANDCHILDREN. `kill $(jobs -p)` killed the subshells and left the node process running. An
+# orphaned `next build` holds `.next/lock`, so the following launch died on "Another next build
+# process is already running" — a first failure that made every subsequent attempt fail too, with
+# an error naming none of the real cause. Observed after a build overran the readiness wait.
+kill_tree() {                      # depth-first: children before the parent, or they reparent and survive
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$child"; done
+  kill -9 "$pid" 2>/dev/null || true
+}
+cleanup() {
+  dim "shutting down…"
+  local p
+  for p in $(jobs -p 2>/dev/null); do kill_tree "$p"; done
+}
 trap cleanup EXIT INT TERM
 
 ( cd prototype && python3 -m uvicorn api.main:app --host "$BIND" --port "$API_PORT" --log-level warning ) &
@@ -124,6 +140,14 @@ trap cleanup EXIT INT TERM
 # NEXT_PUBLIC_* are inlined AT BUILD TIME, so the API address must be set for the build, not just
 # the server — that is why it appears on both lines below.
 ( cd frontend
+  # Clear a STALE build lock. `next build` writes .next/lock and removes it on exit; if it was
+  # killed (see kill_tree above, or a Ctrl-C mid-build) the file outlives the process and the next
+  # build refuses to start. Only remove it when no build is actually running, so this can never
+  # stomp a genuine concurrent build.
+  if [ -e .next/lock ] && ! pgrep -f "next build" >/dev/null 2>&1; then
+    dim "  · clearing a stale build lock left by an interrupted run"
+    rm -f .next/lock .next/dev/lock
+  fi
   # `set -o pipefail` is on, and `find ... -newer .next/BUILD_ID` ERRORS when that file does not
   # exist (first run). The failing find made the whole pipeline fail, `set -e` killed this subshell
   # before it printed anything, and the launcher happily announced a URL that served nothing.
@@ -158,10 +182,27 @@ for _ in $(seq 1 40); do
   curl -fsS -m 2 "http://$BIND:$API_PORT/health" >/dev/null 2>&1 && break
   sleep 1
 done
+# DON'T TIME OUT A BUILD THAT IS STILL WORKING. This was a flat 180s, which is fine for the
+# ~60s incremental case and far too short after a branch change invalidates the cache: the build
+# was still compiling at 180s, the launcher declared failure, and the EXIT trap then killed it
+# mid-flight — which is what orphaned `next build` and left the lock that broke the next launch
+# too. Measured here: 4m+ for a cold build after a multi-PR merge.
+#
+# So: only spend the countdown while nothing is progressing. A live `next build` resets it, with a
+# hard ceiling so a genuinely wedged build still ends.
 web_up=0
-for _ in $(seq 1 180); do
+idle=0
+waited=0
+while [ "$idle" -lt 180 ] && [ "$waited" -lt 900 ]; do
   if curl -fsS -m 2 "http://$BIND:$WEB_PORT/studio" >/dev/null 2>&1; then web_up=1; break; fi
   kill -0 %2 2>/dev/null || break          # the frontend job died — stop waiting on it
+  if pgrep -f "next build" >/dev/null 2>&1; then
+    [ "$idle" -gt 0 ] && dim "  · still building…"
+    idle=0                                 # making progress: don't count this against the timeout
+  else
+    idle=$((idle + 1))
+  fi
+  waited=$((waited + 1))
   sleep 1
 done
 if [ "$web_up" != "1" ]; then
