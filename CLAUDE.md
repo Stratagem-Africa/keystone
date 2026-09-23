@@ -70,9 +70,10 @@ Keystone/
 
 - **Language/core:** Python 3.10+ · FastAPI for the API (when added). Engine is pure stdlib today; hot path may be ported to Rust later (the SysSimulator lesson) — not now, and only behind an ADR.
 - **DB:** Supabase (Postgres) free tier — also gives Auth, Storage, pgvector (RAG later). Note: free projects pause after 7 days idle (cron-ping to keep alive).
-- **File/object storage:** **Cloudflare R2** for large uploads (ADR-003); Supabase Storage for the rest. **Not Google Drive** (not an app object store).
-- **Frontend + hosting:** **Next.js + Tailwind on Cloudflare** (Pages/Workers via OpenNext), API + background worker on **Fly.io** — see **`docs/adr/ADR-003`**, which is the source of truth for the deploy target.
-  - This line used to say "Vercel free tier", which **contradicted a ratified ADR that had specifically rejected it**: a council run is ~15 sequential LLM calls and can take minutes, so it exceeds serverless function timeouts (ADR-003 §13). Jem found the contradiction while reading both (#190). If the target ever changes, amend ADR-003 — don't edit this summary, or the two drift apart again.
+- **File/object storage:** **Cloudflare R2** for large uploads; Supabase Storage for the rest. **Not Google Drive** (not an app object store).
+- **Frontend:** **Next.js + Tailwind**, served locally by `scripts/keystone-local.sh` (or the macOS `Keystone.app`).
+- **Hosting: there isn't any — Keystone is LOCAL-FIRST.** It runs on each Stratagem person's own machine, not as a hosted web app (decided 2026-09-12, recorded on **#24**). The reason is structural, not preference: the council runs on Claude Code's CLI, i.e. on *that person's own subscription* with no API key and nothing to bill — and a browser cannot reach a CLI on the visitor's laptop, so a hosted server calling it would be one account answering everybody. `llm_cli._refuse_if_served()` fails closed on exactly that.
+  - **`docs/adr/ADR-003` (Cloudflare + Fly) is therefore SUPERSEDED for deployment** and stands only as the reference if hosting ever returns. This bullet previously said "Vercel free tier", which contradicted ADR-003 *and* the descope — two ways of being wrong at once. Jem found it (#190). Before trusting a deploy claim anywhere in the docs, check #24.
 - **AI:** Claude API via the Agent SDK (Haiku for dev = pennies). Council = single model, multiple persona prompts (cost control). May prototype on free OpenRouter models / local Ollama for $0.
 - **Cost rule:** **do not add a paid dependency without an ADR.** Dev target is ~$0/month.
 

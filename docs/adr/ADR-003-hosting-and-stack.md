@@ -1,8 +1,25 @@
 # ADR-003 — Hosting & Stack Topology
 
-**Status:** Accepted · **Ratified-by:** Bifola, 2026-06-15
+**Status:** **SUPERSEDED for the hosting decision** (2026-09-12) · Accepted 2026-06-15 · **Ratified-by:** Bifola
 **Date:** 2026-06-15 · **Owner:** Keystone A (Bifola)
 **Relates to:** `docs/02` §5 (recommended stack), `docs/07` §3, `docs/08` Epics 3–6
+
+> **Superseded — read this before acting on anything below.** On **2026-09-12** Keystone became
+> **local-first**: it runs on each person's own machine and there is **no hosted target** (decision
+> recorded on **#24**; `docs/08` Epic 6.3 descoped from deploy-on-merge to a manual build +
+> smoke-test, #201). The reason is structural. The council runs on Claude Code's CLI, i.e. on the
+> user's *own* subscription — no API key, nothing billed — and a browser cannot reach a CLI on the
+> visitor's laptop, so a hosted server calling it would be one account answering everybody's
+> requests. `llm_cli._refuse_if_served()` fails closed on precisely that.
+>
+> **Still current:** the *stack* choices — Next.js + Tailwind, FastAPI, Supabase, the zero-dep
+> engine — and the boundary MUST that the frontend never talks to Claude or the engine directly.
+> **No longer current:** Cloudflare Pages/Workers and Fly.io as deploy targets, and everything
+> downstream of "deployed". They stand as the reference if hosting ever returns.
+>
+> This marker exists because the contradiction was live in two places at once: `CLAUDE.md` claimed
+> Vercel (which this ADR had explicitly rejected), while this ADR claimed a deploy target the
+> descope had already removed. Jem found both by reading the documents against each other (#190).
 
 ---
 
