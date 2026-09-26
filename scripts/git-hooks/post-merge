@@ -26,4 +26,17 @@ if [ "$(uname)" = "Darwin" ] && [ -d "$HOME/Applications/Keystone.app" ]; then
       && printf '\033[2m  keystone: desktop app rebuilt\033[0m\n'
   fi
 fi
+
+# Same idea on Windows/WSL: the .lnk is a launcher pointing at this checkout, so it only needs
+# rebuilding when the launcher itself changes — not on every code pull. Gated on the shortcut
+# ALREADY EXISTING, same as the Darwin branch above: without this, anyone merging these commits
+# from inside WSL — including a contributor who never opted in via setup.sh — would get a brand
+# new Desktop icon they never asked for, purely as a side effect of a `git pull`.
+if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v powershell.exe >/dev/null 2>&1 \
+   && [ "$(powershell.exe -NoProfile -NonInteractive -Command 'Test-Path "$env:USERPROFILE\Desktop\Keystone.lnk"' 2>/dev/null | tr -d '\r')" = "True" ]; then
+  if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^scripts/\(make-windows-shortcut\.sh\|keystone-start\.sh\|keystone-local\.sh\)$'; then
+    ./scripts/make-windows-shortcut.sh >/dev/null 2>&1 \
+      && printf '\033[2m  keystone: desktop shortcut rebuilt\033[0m\n'
+  fi
+fi
 exit 0

@@ -111,8 +111,14 @@ AS
   else
     warn "could not build the .app — use ./scripts/keystone-local.sh instead"
   fi
+elif [ -n "${WSL_DISTRO_NAME:-}" ]; then
+  if ./scripts/make-windows-shortcut.sh; then
+    ok "built a Keystone shortcut on your Windows Desktop"
+  else
+    warn "could not build the Windows shortcut — use ./scripts/keystone-local.sh instead"
+  fi
 else
-  dim "  not macOS — start it with ./scripts/keystone-local.sh"
+  dim "  not macOS or WSL — start it with ./scripts/keystone-local.sh"
 fi
 
 # ---------------------------------------------------------------- 5. keep it fresh
@@ -124,7 +130,7 @@ git config core.hooksPath scripts/git-hooks 2>/dev/null \
 
 echo
 bold "  Done."
-if [ "$(uname)" = "Darwin" ]; then
+if [ "$(uname)" = "Darwin" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; then
   echo "  Double-click \"Keystone\" on your Desktop."
 else
   echo "  Start it with: ./scripts/keystone-local.sh"
