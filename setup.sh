@@ -28,10 +28,12 @@ missing=0
 # green on macOS's stock 3.9.6, so hard-failing here would block a machine that demonstrably works.
 # Name the gap and let the person decide — a setup script that refuses a working environment gets
 # edited out, and then it checks nothing at all.
+py_ge_310=0
 if command -v python3 >/dev/null; then
   py_ver="$(python3 -V 2>&1 | cut -d' ' -f2)"
   if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
     ok "python3 $py_ver"
+    py_ge_310=1
   else
     warn "python3 $py_ver — pyproject.toml declares >=3.10"
     dim "     The suite currently passes on 3.9 too, so this is usually fine. If you hit a syntax"
@@ -84,6 +86,49 @@ else
   dim "  installing frontend dependencies (a minute or two)…"
   ( cd frontend && npm install --silent ) && ok "frontend dependencies installed" \
     || { bad "npm install failed — run 'cd frontend && npm install' to see why"; exit 1; }
+fi
+
+# ---------------------------------------------------------------- 3b. python API/DB deps
+# `python3` existing isn't enough here either (same lesson as the version check above): the API
+# needs fastapi/uvicorn/pydantic/pyjwt/python-multipart (the `api` extra) and supabase/python-dotenv
+# (the `db` extra), and keystone-local.sh's `python3 -m uvicorn ...` fails with a bare
+# ModuleNotFoundError, deep inside the app, on any python3 that's never had them installed — not an
+# actionable message here where the fix is obvious.
+if python3 -c "import fastapi, uvicorn, pydantic, jwt, multipart, supabase, dotenv" >/dev/null 2>&1; then
+  ok "python API/DB dependencies present"
+elif [ "$py_ge_310" != "1" ]; then
+  # Same posture as the version check above: a python3 below what pyproject.toml declares is a
+  # warning, not a hard stop, so don't attempt (and then hard-fail on) an install that a live
+  # test showed genuinely does reject `keystone`'s own `requires-python` on 3.9 — that would
+  # contradict the exact "don't block a machine that might work" promise made 60 lines up.
+  warn "skipping the python API/DB dependency install — pyproject.toml requires python>=3.10"
+  dim "     Once you're on 3.10+:  pip install -e '.[api,db]'"
+else
+  dim "  installing python API/DB dependencies (pip install -e '.[api,db]')…"
+  if pip_out=$(python3 -m pip install -e ".[api,db]" --quiet 2>&1); then
+    ok "python API/DB dependencies installed"
+  elif printf '%s' "$pip_out" | grep -q "externally-managed-environment"; then
+    # Debian/Ubuntu 23.04+ (PEP 668, e.g. WSL's default Ubuntu 24.04) refuse a bare `pip install`
+    # against the system python3 — a guard for the machine's OWN apt-managed tooling (cloud-init,
+    # unattended-upgrades, and similar scripts that shell out to plain `python3`), not about how
+    # many people use Keystone. `--user` is what actually keeps this override safe: it installs
+    # into the CALLING USER's own site-packages, never apt's system dist-packages, so it can't
+    # shadow a version apt depends on — true whether setup.sh is run as a normal user (pip would
+    # have picked --user's exact location anyway once EXTERNALLY-MANAGED blocked it) or, the one
+    # case actually worth guarding against explicitly, as root (where pip would otherwise happily
+    # write straight into the system tree instead).
+    if python3 -m pip install --user --break-system-packages -e ".[api,db]" --quiet; then
+      ok "python API/DB dependencies installed"
+    else
+      bad "pip install failed even with --break-system-packages — run it by hand to see why:"
+      dim "     pip install --user --break-system-packages -e '.[api,db]'"
+      exit 1
+    fi
+  else
+    bad "pip install failed — run this to see why:  pip install -e '.[api,db]'"
+    dim "$pip_out"
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------- 4. the desktop app
