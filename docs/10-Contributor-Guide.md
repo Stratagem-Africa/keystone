@@ -55,9 +55,9 @@ cd keystone
 ```
 
 That is the whole thing. `setup.sh` checks what you have, names anything missing and how to get it,
-installs the frontend dependencies, and — on macOS — builds `Keystone.app`, puts a **Keystone**
-shortcut on your Desktop, and installs a git hook so every later `git pull` rebuilds the app for
-you. It is safe to re-run at any time.
+installs the frontend dependencies, and — on macOS, or inside WSL on Windows — builds a **Keystone**
+Desktop shortcut, and installs a git hook so every later `git pull` rebuilds it for you. It is safe
+to re-run at any time. Windows support is WSL-only; there's no native PowerShell/cmd path.
 
 **What you need first:**
 
@@ -82,8 +82,9 @@ Copy `.env.example` → `.env` (gitignored) when you need config. **Never commit
 ./scripts/keystone-local.sh --offline  # no AI at all — the engine and all 56 designs, $0
 ```
 
-On macOS, double-clicking the Desktop **Keystone** shortcut does the same thing. Either way you get
-**the same Next.js frontend the web app serves** — one codebase, not a second UI to keep in sync.
+On macOS, or on Windows via WSL, double-clicking the Desktop **Keystone** shortcut does the same
+thing. Either way you get **the same Next.js frontend the web app serves** — one codebase, not a
+second UI to keep in sync.
 
 The desktop wrapper exists for one reason: the council can run on `claude -p`, which is a program on
 *your* laptop, so Keystone has to run locally to use your own subscription instead of a paid API

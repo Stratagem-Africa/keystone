@@ -11,9 +11,9 @@ git clone https://github.com/Stratagem-Africa/keystone.git && cd keystone
 ./setup.sh
 ```
 
-That checks your tools, installs frontend dependencies, builds the macOS app, puts a **Keystone**
-shortcut on your Desktop, and installs a git hook so future `git pull`s keep it in step. Then just
-double-click **Keystone**.
+That checks your tools, installs frontend dependencies, and — on macOS, or on Windows via WSL —
+builds a **Keystone** Desktop shortcut, plus a git hook so future `git pull`s keep it in step. Then
+just double-click **Keystone**.
 
 The Claude CLI is optional — `setup.sh` tells you how to add it, and Keystone runs fully without it
 (the engine and all 56 reference designs need no AI at all).
@@ -26,6 +26,15 @@ The Claude CLI is optional — `setup.sh` tells you how to add it, and Keystone 
 ./scripts/make-mac-app.sh     # builds Keystone.app
 ```
 
+**Windows (via WSL) — the Desktop shortcut**, or rebuild it with:
+
+```bash
+./scripts/make-windows-shortcut.sh     # run from inside WSL — builds a Keystone shortcut
+```
+
+Windows support is WSL-only — there's no native PowerShell/cmd path, same as `keystone-local.sh`
+itself.
+
 **Any platform — a command:**
 
 ```bash
@@ -34,9 +43,9 @@ The Claude CLI is optional — `setup.sh` tells you how to add it, and Keystone 
 ```
 
 Either way it opens **http://127.0.0.1:3000/studio** in your browser, and it is the **same app** —
-the same Next.js frontend the web build serves, pixel for pixel. `Keystone.app` is a thin launcher
-pointing at this checkout, not a copy and not a second UI: `git pull` updates it, and there is no
-second interface to keep in sync because there isn't a second interface.
+the same Next.js frontend the web build serves, pixel for pixel. `Keystone.app` and the Windows
+`.lnk` are both thin launchers pointing at this checkout, not a copy and not a second UI: `git pull`
+updates them, and there is no second interface to keep in sync because there isn't a second interface.
 No account, no API key, no Supabase project needed — the app runs without any of them.
 
 **Why a local run and not a website.** The council can run on Claude Code's CLI (`claude -p`),
