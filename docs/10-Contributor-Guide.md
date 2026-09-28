@@ -42,9 +42,13 @@ You own the **delivery layer + backend code**: the **FastAPI API, file parsing, 
 - **Harm floor:** never commit secrets (`.env` is gitignored — keep it so); treat uploaded user docs as **untrusted** input (prompt-injection); fail closed.
 - **Design standard:** `docs/09` is the bar for everything user-facing. Read its **§11 (Fixed vs. Latitude)** — the trust thesis is fixed; the craft is yours to own.
 
-## 4. The stack (ratified — `docs/adr/ADR-003`)
+## 4. The stack
 
-Frontend: **Next.js + Tailwind on Cloudflare** (OpenNext). Backend: **FastAPI on Fly**. Data: **Supabase** (Postgres + Auth + Storage + pgvector). Uploads: **Cloudflare R2**. AI: Claude (the council). All free-tier; **$0 dev target** (you won't need an API key until the deployed council goes live).
+Frontend: **Next.js + Tailwind**. Backend: **FastAPI**. Data: **Supabase** (Postgres + Auth + Storage + pgvector). Uploads: **Cloudflare R2**. AI: Claude (the council). **$0 dev target** — you don't need an API key at all: the council runs on your own Claude Code CLI.
+
+**There is no hosting — Keystone runs on your machine** (decided 2026-09-12, **#24**). It is not a website anyone visits. The reason is structural: the council runs on the Claude Code CLI, i.e. on *your own* subscription with nothing billed, and a browser cannot reach a CLI on the visitor's laptop — so a hosted server calling it would be one account answering everybody. `llm_cli._refuse_if_served()` fails closed on exactly that.
+
+> This section used to read "Cloudflare (OpenNext) … FastAPI on Fly", carried from **ADR-003**. That ADR is **superseded for the hosting decision**: it still records the *stack* choices and the boundary MUST, but its deploy targets are not live. Before trusting any deploy claim in these docs, check #24. (Found by Jem, #205.)
 
 ## 5. Setup (≈5 minutes)
 
@@ -114,13 +118,13 @@ KEYSTONE_TEST_DATABASE_URL=postgresql://postgres@localhost:5432/postgres \
 - It **imports** `keystone.simulation` / `keystone.council` — rebuilds none of it.
 - Runs locally (`uvicorn`), returns a real report; one basic test; engine stays zero-dep (`anthropic` only loaded when the council provider is `claude`).
 
-### #15 — Frontend: Next.js + Tailwind on Cloudflare → `frontend/`
+### #15 — Frontend: Next.js + Tailwind → `frontend/`
 **Build:** the app shell + the design-system foundation.
 **Done when:**
-- Next.js + Tailwind, OpenNext-configured for Cloudflare; `npm run dev` works.
+- Next.js + Tailwind; `npm run dev` works.
 - Design tokens from `docs/09` §2.4 (palette hex), the 3 font families (Inter + Newsreader + Geist Mono), and a first-pass **`<Metric>` / `<ConfidenceBand>` primitive** — a number that *cannot render* without a band + provenance (`docs/09` §3.1, §11).
 - A placeholder landing that respects the standard (serif = reasoned, mono = computed). No real numbers yet — you wire to the API later.
-- Deploys to a Cloudflare preview.
+- Served locally by `./scripts/keystone-local.sh` (there is no preview deploy — see §4).
 
 ### #20 — Infra: Supabase dev project
 **Build:** the dev data backbone.

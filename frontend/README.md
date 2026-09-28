@@ -16,41 +16,49 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 Get both from the Supabase project dashboard: **Project Settings → API**.
 The anon key is safe to expose in the browser — it identifies the
 project, not a user.
-Without these set, the app throws at build/prerender time
-(`lib/supabase.ts`) — every page imports `Nav`, which imports the Supabase client.
+**These are optional.** Without them the app builds and runs fine — `isAuthConfigured`
+is false, `supabase` is null, and the sign-in UI says so plainly instead of erroring
+(`src/lib/supabase.ts:25-27`). The studio itself needs no login at all.
 
-## Getting Started
+Missing config *used* to `throw` at module load, which took down every page because the
+root layout imports `AuthProvider`. That is fixed, and `scripts/check-frontend.sh`
+builds with no Supabase config on purpose so it stays fixed.
 
-First, run the development server:
+## Running it
+
+**Don't start this on its own.** The studio is useless without the API that computes
+every number — `npm run dev` gives you a UI whose requests go nowhere. Start both:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd ..
+./scripts/keystone-local.sh            # API + studio on http://127.0.0.1:3000/studio
+./scripts/keystone-local.sh --offline  # no AI at all: the engine + all 56 designs, $0
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+On macOS the **Keystone** Desktop shortcut does the same thing (`./setup.sh` builds it).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The launcher deliberately runs a **production build**, not `next dev`: the dev server's
+hot-reload socket once failed to connect and silently took hydration down with it — the
+page rendered, you could type, and the Generate button stayed dead forever. Use
+`npm run dev` when you are editing this code, not when you want to use the app.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`NEXT_PUBLIC_API_URL` is inlined **at build time**, so a bundle built against a
+different API address is stale even when every source file is older than it. The
+launcher records the address next to the build and rebuilds when it changes.
+
+## Deploying
+
+There is nothing to deploy to. **Keystone runs on each person's own machine** (#24,
+2026-09-12) — it is not a hosted website. The council runs on the Claude Code CLI, i.e.
+on your own subscription with nothing billed, and a browser cannot reach a CLI on the
+visitor's laptop, so a server calling it would be one account answering everybody.
+
+*(This section used to be `create-next-app`'s stock "Deploy on Vercel" boilerplate,
+which was wrong three times over: not Vercel, not Cloudflare, not deployed.)*
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
+Read `AGENTS.md` in this directory first — this is **not** the Next.js most references
+describe, and the guides in `node_modules/next/dist/docs/` are the current source.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
+- [Next.js Documentation](https://nextjs.org/docs)

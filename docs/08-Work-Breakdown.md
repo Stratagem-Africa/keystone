@@ -26,7 +26,7 @@ Each row should be roughly one PR. Bifola reviews & approves every one before `m
 | 2.4 | Reconciliation: merge partial models → conflict/gap report (never auto-resolve) | B | `ingestion/reconcile.py` |
 | 2.5 | Tests: parsing (J), extraction via fake LLM (B), planted-conflict reconciliation (B) | J + B | `tests/` |
 
-## Epic 3 — API layer (FastAPI on Fly)
+## Epic 3 — API layer (FastAPI, run locally)
 | # | Activity | Owner | Output |
 |---|---|---|---|
 | 3.1 | ADR-003: ratify hosting topology (Cloudflare + Fly + Supabase) | A | `ADR-003` |
@@ -34,12 +34,12 @@ Each row should be roughly one PR. Bifola reviews & approves every one before `m
 | 3.3 | Endpoint: submit intent → enqueue council/ingestion job | J | `api/` |
 | 3.4 | Background worker: runs long council/ingestion jobs; job state in Postgres | J | `api/worker.py` |
 | 3.5 | Endpoint: poll job status / fetch report (JSON + markdown) | J | `api/` |
-| 3.6 | `Dockerfile` + `fly.toml`; deploy to dev | J | `fly.toml` |
+| 3.6 | ~~`Dockerfile` + `fly.toml`; deploy to dev~~ — **descoped**: no hosted target (#24, 2026-09-12). `Dockerfile` is kept and build-smoke-tested by #201; `fly.toml` is dormant. | J | `Dockerfile` |
 
-## Epic 4 — Frontend (Next.js on Cloudflare)
+## Epic 4 — Frontend (Next.js, served locally)
 | # | Activity | Owner | Output |
 |---|---|---|---|
-| 4.1 | Scaffold Next.js + Tailwind; OpenNext → Cloudflare; wire design tokens from doc 09 | J | `frontend/` |
+| 4.1 | Scaffold Next.js + Tailwind; wire design tokens from doc 09 (OpenNext → Cloudflare **descoped**, #24) | J | `frontend/` |
 | 4.2 | Intent input (text + file upload) → submit | J | `frontend/` |
 | 4.3 | Report view: verdict, component table, ADRs, and **"where this is wrong" front-and-centre** (trust = the feature) | J | `frontend/` |
 | 4.4 | What-if interactions (re-simulate, show the delta) — the retention feature; must feel instant | J | `frontend/` |
@@ -58,7 +58,7 @@ Each row should be roughly one PR. Bifola reviews & approves every one before `m
 |---|---|---|---|
 | 6.1 | GitHub Actions: run the test suite on every PR (**works on Free** — gives a signal even without branch protection) | J | `.github/workflows/ci.yml` |
 | 6.2 | Lint + type: `ruff` + `mypy` on PR | J | same |
-| 6.3 | Deploy-on-merge-to-`main`: Fly (backend) + Cloudflare (frontend) | J | `.github/workflows/deploy.yml` |
+| 6.3 | ~~Deploy-on-merge-to-`main`: Fly + Cloudflare~~ → **manual build + smoke test** (`workflow_dispatch` only). Descoped #24; delivered #201. | J | `.github/workflows/deploy.yml` |
 | 6.4 | (When on GitHub Team) enable branch protection on `main`: PR + Code-Owner review + include admins | A | repo settings |
 
 ## Epic 7 — Benchmarks & eval (ex-Tunji overflow, split J + B)

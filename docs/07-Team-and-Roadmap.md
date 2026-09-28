@@ -53,14 +53,22 @@ Intent → validated design. Legend: ✅ built · 🔨 building · ⏭ next · �
 | Calibration store | Prediction vs actuals (the moat) | 🔭 Phase 2 | — |
 | **API** (FastAPI) | HTTP surface over engine + council | ⏭ next | Jem |
 | **Frontend** (Next.js) | Thin UI: intent in → report out | ⏭ next | Jem |
-| **Infra** (Cloudflare + Fly + Supabase) | Hosting, data, auth, storage | ⏭ next | Jem |
+| **Infra** (Supabase) | Data, auth, storage | ⏭ next | Jem |
 
-**Hosting topology** (to ratify in ADR-003): Next.js → **Cloudflare** (Pages/Workers
-via OpenNext — the stack the team already runs on SAMS); FastAPI + engine/council →
-**Fly.io** (+ a background worker for long council/ingestion runs); Postgres / Auth /
-Storage / pgvector → **Supabase**; large uploads → **Cloudflare R2**. $0-dev target
-holds across the free tiers. Note: Cloudflare Workers can't run the Python backend —
-**frontend on Cloudflare, backend on Fly**.
+**Hosting topology: there is none — Keystone runs on each person's own machine**
+(decided 2026-09-12, **#24**). The council runs on the Claude Code CLI, i.e. on that
+person's own subscription with no API key and nothing billed; a browser cannot reach a
+CLI on the visitor's laptop, so a hosted server calling it would be one account
+answering everybody (`llm_cli._refuse_if_served()` fails closed on exactly that).
+`scripts/keystone-local.sh` — or the macOS `Keystone.app` — serves the studio on
+loopback. Postgres / Auth / Storage / pgvector → **Supabase**; large uploads →
+**Cloudflare R2**. $0-dev target holds.
+
+> This paragraph previously specified Cloudflare (OpenNext) + Fly.io, "to ratify in
+> ADR-003". ADR-003 was ratified and is now **superseded for the hosting decision** —
+> it still records the stack choices and the boundary MUST, but not a live deploy
+> target. Kept here as a pointer rather than deleted, because #24 is where the
+> reasoning lives and this is the doc people check first.
 
 ---
 

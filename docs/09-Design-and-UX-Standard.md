@@ -142,7 +142,7 @@ Three families, each with a *job*. The reader can identify the **source** of any
 | Mono data | 15px, tabular, tight leading | Mono |
 | Provenance tag | 12px, all-caps, in a pill | Mono |
 
-**Open-source-first:** ship the fallback stack (Inter + Newsreader + Geist Mono) as the launch default — it is genuinely excellent and native to the stack. Treat the premium faces as a funded upgrade once revenue exists. The load-bearing distinction is **mono-vs-not** (it carries NFR-3); if the serif must ever be cut for performance or dev-reception reasons, keep mono-vs-not intact and A/B the serif against a humanist sans. Cap to 3 weights per family; subset aggressively; self-host woff2 on Cloudflare (no FOUT).
+**Open-source-first:** ship the fallback stack (Inter + Newsreader + Geist Mono) as the launch default — it is genuinely excellent and native to the stack. Treat the premium faces as a funded upgrade once revenue exists. The load-bearing distinction is **mono-vs-not** (it carries NFR-3); if the serif must ever be cut for performance or dev-reception reasons, keep mono-vs-not intact and A/B the serif against a humanist sans. Cap to 3 weights per family; subset aggressively; **self-host woff2** (no FOUT) — self-hosting is the point, and it matters more now that the app is served locally: a font fetched from a CDN is the one thing on the page that would need the network.
 
 ### 2.6 Motion principles — "instruments settle, they don't bounce"
 
@@ -310,7 +310,7 @@ Every surface is reviewed against these eight dimensions. Score each **0–3** (
 
 ## 10. Stack Reality — design choices the platform constrains
 
-Frontend is **Next.js + Tailwind on Cloudflare (OpenNext)**. This shapes design, not just engineering:
+Frontend is **Next.js + Tailwind**, served **locally** on each person's own machine — there is no hosted deployment (#24, 2026-09-12). The budgets below were written against a Cloudflare/OpenNext target and **still stand**: they are about what the design owes its reader, not about who serves the bytes. A slow local app refutes the speed thesis exactly as a slow hosted one would. This shapes design, not just engineering:
 
 - **Performance budgets are a design constraint, not an afterthought.** Target **LCP < 2.0s** and **JS < 150KB on the cover**. A credibility brand that loads slowly refutes itself on contact. If a moment costs the speed thesis, **cut it** (clarity & speed outrank craft).
 - **Server-render the substance.** The report and its bands render server-side; the page must read fully with JS off (ship static OG/poster frames). The reduced-motion, no-JS fallback is a **first-class, genuinely beautiful** static layout — design it *first*, animate *second*.
