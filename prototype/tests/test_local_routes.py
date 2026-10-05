@@ -8,6 +8,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
+from api import jobs
 from api.main import app
 from keystone.blueprints.url_shortener import build as build_url_shortener
 from keystone.llm import LLMError
@@ -110,6 +111,46 @@ class TestSpecSubject(unittest.TestCase):
 
     def test_bad_spec_is_a_clean_400(self):
         self.assertEqual(local.post("/generate", json={"spec": {"version": 999}}).status_code, 400)
+
+
+STUB = {**ON, "INGEST_PROVIDER": "stub", "COUNCIL_PROVIDER": "stub"}   # offline, $0 — no real LLM in tests
+
+
+class TestLocalIntentPipeline(unittest.TestCase):
+    def setUp(self):
+        jobs._store.clear()
+
+    def test_refuses_without_the_launcher_override(self):
+        with mock.patch.dict("os.environ", {"KEYSTONE_ALLOW_CLI_IN_SERVER": ""}):
+            self.assertEqual(local.post("/local/intent", data={"text": "a url shortener at 5k rps"}).status_code, 403)
+            self.assertEqual(local.get("/local/jobs/anything").status_code, 403)
+
+    def test_full_pipeline_runs_with_no_login(self):
+        # TestClient runs background tasks before returning, so the job has finished by the next line.
+        with mock.patch.dict("os.environ", STUB):
+            r = local.post("/local/intent", data={"text": "a url shortener at 5k requests a second"})
+            self.assertEqual(r.status_code, 200, r.text)
+            job_id = r.json()["job_id"]
+            self.assertEqual(local.get(f"/local/jobs/{job_id}").json()["status"], "done")
+            report = local.get(f"/local/jobs/{job_id}/report?fmt=markdown")
+            self.assertEqual(report.status_code, 200)
+            self.assertIn("#", report.text)                                # a markdown report
+            html = local.get(f"/local/jobs/{job_id}/archmap?fmt=html")
+            self.assertTrue(html.text.lstrip().lower().startswith("<!doctype html"))
+
+    def test_same_intake_rules_as_intent(self):
+        with mock.patch.dict("os.environ", STUB):
+            self.assertEqual(local.post("/local/intent", data={"text": "short"}).status_code, 422)
+            r = local.post("/local/intent", data={"text": "a store"},
+                           files={"file": ("brief.pdf", b"%PDF", "application/pdf")})
+            self.assertEqual(r.status_code, 400)
+
+    def test_local_jobs_stay_in_memory_and_out_of_reach_of_signed_in_users(self):
+        with mock.patch.dict("os.environ", STUB):
+            job_id = local.post("/local/intent", data={"text": "a url shortener at 5k rps"}).json()["job_id"]
+        # A real Supabase user (any other id) cannot see it — same "not found" as a missing job.
+        self.assertIsNone(jobs.get_job(job_id, user_id="user-123", access_token=""))
+        self.assertEqual(jobs._store[job_id].user_id, "local")
 
 
 if __name__ == "__main__":
