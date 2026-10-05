@@ -15,11 +15,22 @@ type JobStatusResponse = {
   error?: string;
 };
 
+/** "account" — the signed-in pipeline (/intent, /jobs/*): Supabase login, jobs saved to your account.
+ *  "local" — the same pipeline on /local/* (#204): only answers the person at the machine running
+ *  Keystone (prototype/api/local_guard.py), so there is no login, and the AI is your own Claude. */
+export type IntentMode = "account" | "local";
+
 const POLL_INTERVAL_MS = 1000;
 const MAX_POLL_ATTEMPTS = 600;   // 10 minutes at 1s/poll — a bound so a stuck job fails loudly instead of spinning forever
 
-export function IntentForm() {
+export function IntentForm({ mode = "account" }: { mode?: IntentMode }) {
   const { session, loading: authLoading } = useAuth();
+  const isLocal = mode === "local";
+  // Where the pipeline lives, and how to prove who you are to it. Locally the guard is the proof,
+  // so there is no token to send.
+  const base = `${process.env.NEXT_PUBLIC_API_URL}${isLocal ? "/local" : ""}`;
+  const authHeaders = (token: string | null): Record<string, string> =>
+    token ? { Authorization: `Bearer ${token}` } : {};
   const [brief, setBrief] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [formState, setFormState] = useState<FormState>("idle");
@@ -42,14 +53,12 @@ export function IntentForm() {
     return () => { cancelledRef.current = true; };
   }, []);
 
-  async function pollUntilDone(jobId: string, token: string) {
+  async function pollUntilDone(jobId: string, token: string | null) {
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       if (cancelledRef.current) return;
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       if (cancelledRef.current) return;
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`${base}/jobs/${jobId}`, { headers: authHeaders(token) });
       if (!res.ok) throw new Error(`checking on your design failed (error ${res.status})`);
       const status: JobStatusResponse = await res.json();
       if (status.status === "done") return;
@@ -62,19 +71,19 @@ export function IntentForm() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!brief.trim() && !file) return;
-    if (!session) return;   // form is gated on sign-in below; this is just a safety guard
+    if (!isLocal && !session) return;   // form is gated on sign-in below; this is just a safety guard
     setFormState("submitting");
     setErrorMsg(null);
 
     try {
-      const token = session.access_token;
+      const token = isLocal ? null : session?.access_token ?? null;
       const formData = new FormData();
       if (brief.trim()) formData.append("text", brief.trim());
       if (file) formData.append("file", file);
 
-      const submitRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/intent`, {
+      const submitRes = await fetch(`${base}/intent`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },   // no Content-Type — the browser sets the multipart boundary
+        headers: authHeaders(token),   // no Content-Type — the browser sets the multipart boundary
         body: formData,
       });
       if (!submitRes.ok) {
@@ -88,12 +97,8 @@ export function IntentForm() {
       if (cancelledRef.current) return;   // unmounted while polling — nothing left to update
 
       const [reportRes, archMapRes] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/report?fmt=markdown`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${job_id}/archmap?fmt=html`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+        fetch(`${base}/jobs/${job_id}/report?fmt=markdown`, { headers: authHeaders(token) }),
+        fetch(`${base}/jobs/${job_id}/archmap?fmt=html`, { headers: authHeaders(token) }),
       ]);
       if (!reportRes.ok) throw new Error(`your design finished, but the report could not be downloaded (error ${reportRes.status})`);
       if (!archMapRes.ok) throw new Error(`your design finished, but the architecture map could not be downloaded (error ${archMapRes.status})`);
@@ -122,7 +127,7 @@ export function IntentForm() {
   }
 
   // Same honest-hold treatment as report/page.tsx while we check for an existing session.
-  if (authLoading) {
+  if (!isLocal && authLoading) {
     return (
       <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">
         checking whether you&apos;re signed in…
@@ -132,7 +137,7 @@ export function IntentForm() {
 
   // The API rejects anonymous calls (#10) — send the person to sign in rather than
   // letting them submit into a guaranteed 401.
-  if (!session) {
+  if (!isLocal && !session) {
     return (
       <div className="border border-assumption-amber rounded-lg p-6 flex flex-col gap-3">
         <p className="font-mono text-provenance uppercase tracking-widest text-ink-muted-strong">
@@ -278,6 +283,14 @@ export function IntentForm() {
       >
         {formState === "submitting" ? "Sending…" : formState === "polling" ? "Designing…" : "Design it →"}
       </button>
+
+      {/* Honest about the wait: a local run boots your own Claude for the ingest AND the council. */}
+      {isLocal && isBusy && (
+        <p role="status" className="font-mono text-provenance text-ink-muted-strong max-w-[60ch]">
+          Your AI architects are working through the design on this machine — this usually takes a few
+          minutes. The engine then computes every number; the AI never produces one.
+        </p>
+      )}
 
     </form>
   );

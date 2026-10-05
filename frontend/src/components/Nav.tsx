@@ -38,6 +38,14 @@ export function Nav() {
           Studio
         </Link>
 
+        {/* The full pipeline: AI architects + their reasons + the engine's report (#204). */}
+        <Link
+          href="/design"
+          className={`font-sans text-label text-architect-blue hover:text-paper transition-colors ease-settle duration-ui ${navFocus}`}
+        >
+          Full design
+        </Link>
+
         {/* Accuracy-ladder badge — climbable, honest status, not a trust-me seal (docs/09 §3.6).
             A native <details> disclosure: keyboard-accessible, no framework state. Neutral hues
             ONLY — green here would read as "certified" and break §11.4. */}

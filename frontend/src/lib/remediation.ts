@@ -4,7 +4,7 @@
 // and `after` are two real simulate() runs. Nothing here computes a metric.
 
 import type { ArchMap } from "./archMap";
-import type { ScenarioSubject } from "./scenarios";
+import { subjectBody, type ScenarioSubject } from "./scenarios";
 
 export interface Remedy {
   component_id: string;
@@ -57,15 +57,7 @@ export async function planCapacity(
   targetRps: number,
   signal?: AbortSignal,
 ): Promise<RemediationPlan> {
-  const body =
-    subject.mode === "intent"
-      ? { intent: subject.intent }
-      : {
-          name: subject.name,
-          system_rps: subject.system_rps,
-          nodes: subject.nodes,
-          edges: subject.edges,
-        };
+  const body = subjectBody(subject);
   const res = await fetch(`${api}/remediate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

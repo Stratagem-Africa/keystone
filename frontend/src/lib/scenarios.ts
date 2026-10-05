@@ -94,9 +94,12 @@ export const CATEGORY_ORDER: ScenarioCategory[] = ["traffic", "capacity", "data"
 
 /** How the design reaches POST /scenario. These are not interchangeable: a generated design must
  *  travel as its `intent`, because a canvas topology cannot carry flow branch probabilities (a
- *  cache-miss path, say) and rebuilding from one would silently change the model being perturbed. */
+ *  cache-miss path, say) and rebuilding from one would silently change the model being perturbed.
+ *  A design the local AI produced travels as its exact `spec`: asking the AI again would not give
+ *  back the same design (#204). */
 export type ScenarioSubject =
   | { mode: "intent"; intent: string }
+  | { mode: "spec"; spec: Record<string, unknown> }
   | {
       mode: "topology";
       name: string;
@@ -110,21 +113,26 @@ export type ScenarioSubject =
 /** Run one scenario, or several at once. A compound is composed into ONE model and simulated once —
  *  it is not the sum of the individual verdicts, because each perturbation changes the arrivals the
  *  next one lands on. */
+/** The request-body form of a subject. One place, so /scenario, /remediate and /export can never
+ *  disagree about how a design is sent. */
+export function subjectBody(subject: ScenarioSubject) {
+  if (subject.mode === "intent") return { intent: subject.intent };
+  if (subject.mode === "spec") return { spec: subject.spec };
+  return {
+    name: subject.name,
+    system_rps: subject.system_rps,
+    nodes: subject.nodes,
+    edges: subject.edges,
+  };
+}
+
 export async function runScenario(
   api: string,
   subject: ScenarioSubject,
   specs: ScenarioSpec[],
   signal?: AbortSignal,
 ): Promise<ScenarioRun> {
-  const body =
-    subject.mode === "intent"
-      ? { intent: subject.intent }
-      : {
-          name: subject.name,
-          system_rps: subject.system_rps,
-          nodes: subject.nodes,
-          edges: subject.edges,
-        };
+  const body = subjectBody(subject);
   const res = await fetch(`${api}/scenario`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
