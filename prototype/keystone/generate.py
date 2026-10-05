@@ -74,16 +74,17 @@ def match_reference(intent: str):
 
 
 def generate_architecture(intent: str, *, provider: str | None = None,
-                          model: str | None = None, client=None) -> SystemModel:
+                          model: str | None = None, client=None, meter=None) -> SystemModel:
     """Intent → a deep, validated SystemModel. Uses the LLM to DESIGN it when a live provider/client is
-    available (any intent); otherwise falls back to the closest reference architecture (offline, $0)."""
+    available (any intent); otherwise falls back to the closest reference architecture (offline, $0).
+    `meter` is an optional CostMeter so LLM_MAX_SPEND_USD caps the LLM path (unused offline)."""
     prov = (provider or os.getenv("INGEST_PROVIDER", "stub")).strip().lower()
     use_llm = client is not None or prov not in ("", "stub")
     if use_llm:
         # A passed client forces the LLM design path even if INGEST_PROVIDER=stub; `claude` is the
         # default transport shape for an injected client (make_ingestor('stub', ...) ignores it).
         eff_provider = provider or (prov if prov not in ("", "stub") else "claude")
-        ingestor = make_ingestor(eff_provider, model=model, client=client)
+        ingestor = make_ingestor(eff_provider, model=model, client=client, meter=meter)
         designed = ingestor.ingest(Source(text=intent, name=(intent[:60] or "intent"))).model
         # Also on the LLM path, and deliberately NOT delegated to the model: whether a human expert
         # is required is not a judgement a language model gets to make about its own output.
