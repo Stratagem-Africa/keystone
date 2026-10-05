@@ -14,6 +14,7 @@ import {
 } from "@/lib/scenarios";
 import { planCapacity, type RemediationPlan } from "@/lib/remediation";
 import { downloadSpec, exportSpec, importSpec } from "@/lib/spec";
+import { fetchLocalStatus, type LocalStatus } from "@/lib/localAi";
 
 // The one architecture surface. Describe an intent → the engine designs + simulates a DEEP architecture
 // (POST /generate) → it opens on the beautiful, animated map (the self-contained renderer, journeys +
@@ -23,6 +24,12 @@ import { downloadSpec, exportSpec, importSpec } from "@/lib/spec";
 //
 // Prime directive: every number comes from the engine (/generate, then /simulate on edits). This
 // component computes none. Public + offline-pinned (never a live LLM), so no sign-in is needed.
+//
+// The one exception is opt-in and local-only (#204): when GET /local/status says this browser is the
+// person at the machine running Keystone, an "AI design" toggle appears. The structure then comes
+// from THEIR OWN Claude via /local/generate; the engine still computes every number. That response
+// carries the design's exact `spec`, and every later edit sends the spec rather than the intent,
+// because asking the AI again would not give back the same design.
 
 type GenerateResponse = ArchMap & {
   matched?: string | null; // which reference architecture (null = no offline match → generic fallback)
@@ -30,7 +37,12 @@ type GenerateResponse = ArchMap & {
   sweep?: SweepFrame[];         // one real simulate() run per load stop
   scenarios?: ScenarioOption[]; // the chaos scenarios THIS design can truthfully run
   unmodelled?: Unmodelled;      // and the ones the engine refuses to fake, with reasons
+  provider?: string;              // /local/generate only: who designed the structure ("stub" = library)
+  spec?: Record<string, unknown>; // /local/generate only: the exact design, for edits without the AI
 };
+
+/** A design the local AI produced: the exact spec (so edits re-simulate IT) and who designed it. */
+type AiDesign = { spec: Record<string, unknown>; provider: string; label: string | null };
 
 type State = "idle" | "generating" | "done" | "error";
 type Mode = "map" | "edit";
@@ -78,22 +90,44 @@ export function ArchStudio() {
   // second discarding the first.
   const sizingRef = useRef<Record<string, number>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The local AI path. `localStatus` decides whether the toggle is shown at all; `aiDesign` is the
+  // AI-made design on screen (null = an offline/library design). A ref mirrors it because the map's
+  // message listener is attached once and must read the CURRENT design, like intentRef above.
+  const [localStatus, setLocalStatus] = useState<LocalStatus | null>(null);
+  const [useAi, setUseAi] = useState(false);
+  const [aiDesign, setAiDesign] = useState<AiDesign | null>(null);
+  const aiRef = useRef<AiDesign | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Only a Keystone started by scripts/keystone-local.sh, opened on this machine, says "available".
+  useEffect(() => {
+    if (!API) return;
+    const controller = new AbortController();
+    void fetchLocalStatus(API, controller.signal).then((s) => {
+      if (!controller.signal.aborted) setLocalStatus(s);
+    });
+    return () => controller.abort();
+  }, []);
 
   // The map runs in a sandboxed iframe (allow-scripts, no same-origin), so it cannot call the API
   // itself — by design. Right-clicking a tier posts its request up here instead, and the studio
   // re-runs the engine. Nothing is patched in place: the whole design is re-simulated, so the
   // numbers that come back are a real result for the edited design rather than the old ones with a
   // component drawn on top.
+  // The listener is attached once, so it calls the LATEST `generate` through a ref — otherwise it
+  // would keep the first render's copy, with that render's toggle and AI status baked in.
+  const generateRef = useRef<typeof generate | null>(null);
+  useEffect(() => { generateRef.current = generate; });
   useEffect(() => {
     function onMapMessage(ev: MessageEvent) {
       const d = ev.data;
       if (!d || d.source !== "keystone-map" || !intentRef.current) return;
       if (d.type === "resize" && typeof d.id === "string" && Number.isInteger(d.instances)) {
-        void generate(intentRef.current, { [d.id]: d.instances });
+        void generateRef.current?.(intentRef.current, { [d.id]: d.instances });
       } else if (d.type === "remediate") {
-        void generate(intentRef.current, "auto");
+        void generateRef.current?.(intentRef.current, "auto");
       }
     }
     window.addEventListener("message", onMapMessage);
@@ -120,33 +154,59 @@ export function ArchStudio() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    // A FRESH design with the toggle on goes to the local AI. Everything else — a fresh offline
+    // design, or a resize/autosize of whatever is on screen — is engine work on /generate: for an
+    // AI-made design it sends that design's exact spec, so the AI is never asked again.
+    const askAi = sizing === undefined && useAi && !!localStatus?.available;
+    const editingAi = sizing === undefined ? null : aiRef.current;
     setState("generating");
+    setAiBusy(askAi);
     setErrorMsg(null);
     try {
-      const res = await fetch(`${API}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // sweep:true → the load axis (one real simulate() per stop). render:false → no HTML string;
-        // the map is a React component now, so the self-contained document is no longer needed.
-        // "auto" asks the engine to size the design itself: `remediation.plan_capacity` works out
-        // what every tier needs for today's load and re-simulates to prove it holds. That already
-        // existed and had simply never been reachable from the canvas.
-        body: JSON.stringify({
-          intent: brief,
-          render: false,
-          sweep: true,
-          ...(sizing === "auto" ? { autosize: true } : {}),
-          ...(Object.keys(sizingRef.current).length ? { instances: sizingRef.current } : {}),
-        }),
-        signal: controller.signal,
-      });
+      const res = askAi
+        ? await fetch(`${API}/local/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ intent: brief, render: false, sweep: true }),
+            signal: controller.signal,
+          })
+        : await fetch(`${API}/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // sweep:true → the load axis (one real simulate() per stop). render:false → no HTML string;
+            // the map is a React component now, so the self-contained document is no longer needed.
+            // "auto" asks the engine to size the design itself: `remediation.plan_capacity` works out
+            // what every tier needs for today's load and re-simulates to prove it holds. That already
+            // existed and had simply never been reachable from the canvas.
+            body: JSON.stringify({
+              ...(editingAi ? { spec: editingAi.spec } : { intent: brief }),
+              render: false,
+              sweep: true,
+              ...(sizing === "auto" ? { autosize: true } : {}),
+              ...(Object.keys(sizingRef.current).length ? { instances: sizingRef.current } : {}),
+            }),
+            signal: controller.signal,
+          });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
         throw new Error(detail?.detail ?? `Keystone's design service could not build this design (error ${res.status})`);
       }
       const data: GenerateResponse = await res.json();
       if (controller.signal.aborted) return;
-      setResult(data);
+      // Which design is now on screen. A spec re-run carries no intent, so it cannot name a matched
+      // reference itself — keep the label the AI design arrived with.
+      const nextAi: AiDesign | null = askAi && data.spec
+        ? {
+            spec: data.spec,
+            provider: data.provider ?? "stub",
+            // "stub" means the offline library answered, so its own match (or lack of one) is the
+            // honest label. Otherwise the AI designed it for this intent — not a generic fallback.
+            label: data.provider && data.provider !== "stub" ? `designed by your AI (${data.provider})` : data.matched ?? null,
+          }
+        : editingAi;
+      aiRef.current = nextAi;
+      setAiDesign(nextAi);
+      setResult(nextAi ? { ...data, matched: nextAi.label } : data);
       setLoadIndex(-1);
       setEdited(false);
       setActiveFlowIndex(null);
@@ -163,6 +223,8 @@ export function ArchStudio() {
       if (controller.signal.aborted) return;
       setErrorMsg(err instanceof Error ? err.message : "something went wrong");
       setState("error");
+    } finally {
+      if (!controller.signal.aborted) setAiBusy(false);
     }
   }
 
@@ -182,6 +244,8 @@ export function ArchStudio() {
     setFixError(null);
     setIntent("");
     setErrorMsg(null);
+    aiRef.current = null;
+    setAiDesign(null);
     textareaRef.current?.focus();
   }
 
@@ -223,7 +287,8 @@ export function ArchStudio() {
   }
 
   // The design as POST /scenario and /remediate need it: intent while it is still the generated
-  // design (topologies cannot carry flow branch probabilities), the drawn topology once edited.
+  // design (topologies cannot carry flow branch probabilities), its exact spec if the local AI made
+  // it (asking again would change it), the drawn topology once edited.
   const subject: ScenarioSubject | null = !result || !seed
     ? null
     : edited
@@ -237,7 +302,9 @@ export function ArchStudio() {
           })),
           edges: seed.edges,
         }
-      : { mode: "intent", intent };
+      : aiDesign
+        ? { mode: "spec", spec: aiDesign.spec }
+        : { mode: "intent", intent };
 
   async function planFix(targetRps: number) {
     if (!API || !subject) return;
@@ -296,6 +363,8 @@ export function ArchStudio() {
       const arch = await importSpec(API, JSON.parse(await file.text()));
       setResult({ ...arch, matched: arch.meta.title, catalogue: result?.catalogue });
       setEdited(true);            // an opened spec IS the design; perturb it as a topology
+      aiRef.current = null;
+      setAiDesign(null);
       setChaos(null); setChaosError(null); setFixPlan(null); setFixApplied(false);
       setLoadIndex(-1); setActiveFlowIndex(null); setSelectedNode(null);
       setIntent(arch.meta.title);
@@ -369,6 +438,28 @@ export function ArchStudio() {
             </button>
           ))}
         </div>
+        {/* Only offered when the API says this browser is the person at the machine (#204). */}
+        {localStatus?.available && (
+          <label className="flex items-start gap-3 self-start cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useAi}
+              onChange={(e) => setUseAi(e.target.checked)}
+              disabled={busy}
+              className="mt-1 accent-architect-blue"
+            />
+            <span className="flex flex-col gap-1">
+              <span className="font-sans text-label text-paper">
+                Design it with AI — your own Claude, on this machine
+              </span>
+              <span className="font-mono text-provenance text-ink-muted max-w-[62ch]">
+                Works for any description, not just the built-in examples. Takes about a minute. The AI
+                proposes the structure only; the engine still computes every number.
+              </span>
+            </span>
+          </label>
+        )}
+
         <button
           type="submit"
           disabled={!intent.trim() || busy}
@@ -389,7 +480,9 @@ export function ArchStudio() {
 
       {state === "generating" && (
         <p className="font-mono text-provenance text-ink-muted animate-pulse">
-          designing your system · running it through the simulator — same description in, same numbers out, every time…
+          {aiBusy
+            ? "your AI is designing the structure (about a minute) · then the engine simulates it — the AI never produces a number…"
+            : "designing your system · running it through the simulator — same description in, same numbers out, every time…"}
         </p>
       )}
 

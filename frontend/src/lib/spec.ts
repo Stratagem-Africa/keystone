@@ -4,24 +4,13 @@
 // re-opening it and running the engine reproduces the run rather than replaying a stale answer.
 
 import type { ArchMap } from "./archMap";
-import type { ScenarioSubject } from "./scenarios";
+import { subjectBody, type ScenarioSubject } from "./scenarios";
 
 export interface SpecExport {
   spec: Record<string, unknown>;
   filename: string;
   /** Components on no flow: they receive nothing, report 0% utilisation, and still cost money. */
   orphans: string[];
-}
-
-function subjectBody(subject: ScenarioSubject) {
-  return subject.mode === "intent"
-    ? { intent: subject.intent }
-    : {
-        name: subject.name,
-        system_rps: subject.system_rps,
-        nodes: subject.nodes,
-        edges: subject.edges,
-      };
 }
 
 export async function exportSpec(api: string, subject: ScenarioSubject): Promise<SpecExport> {
