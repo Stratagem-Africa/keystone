@@ -630,13 +630,10 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024   # 2MB
 _ALLOWED_UPLOAD_SUFFIXES = (".txt", ".md")
 
 
-@app.post("/intent")
-async def submit_intent(
-    background_tasks: BackgroundTasks,
-    text: str = Form(""),
-    file: UploadFile | None = File(None),
-    user: AuthUser = Depends(get_current_user),
-) -> dict:
+async def _read_intent_text(text: str, file: UploadFile | None) -> tuple[str, list[str]]:
+    """The shared intake for /intent and /local/intent: typed text + an optional .txt/.md upload,
+    length-checked, then secret-scanned BEFORE anything is stored (harm floor).
+    Returns (clean_text, names_of_secrets_redacted)."""
     combined_text = text.strip()
     if file is not None:
         if not file.filename or not file.filename.lower().endswith(_ALLOWED_UPLOAD_SUFFIXES):
@@ -657,7 +654,13 @@ async def submit_intent(
         )
 
     # Scan the raw text for secrets BEFORE storing anything (harm floor rule).
-    clean_text, secrets_found = scan_and_redact_secrets(combined_text)
+    return scan_and_redact_secrets(combined_text)
+
+
+async def _submit_intent(background_tasks: BackgroundTasks, text: str, file: UploadFile | None,
+                         user: AuthUser) -> dict:
+    """Intake → a queued job owned by `user` → the pipeline runs after the response is sent."""
+    clean_text, secrets_found = await _read_intent_text(text, file)
 
     # Create a job record and get back a job_id straight away. create_job() is a
     # synchronous Supabase/Postgres call (jobs.py) — run it off the event loop so it
@@ -666,10 +669,9 @@ async def submit_intent(
     job = await run_in_threadpool(create_job, intent_text=clean_text, secrets_found=secrets_found,
                                   user_id=user.user_id, access_token=user.access_token)
 
-
     # Register the pipeline to run AFTER this response is sent - never blocks the caller.
     background_tasks.add_task(run_pipeline, job.job_id, job.intent_text, user.access_token)
-    
+
     # Build the response. warnings tells the frontend if any secrets were redacted.
     response: dict = {"job_id": job.job_id, "status": job.status}
     if secrets_found:
@@ -677,15 +679,15 @@ async def submit_intent(
 
     return response
 
-@app.get("/jobs/{job_id}")
-def get_job_status(job_id: str, user: AuthUser = Depends(get_current_user)) -> dict:
-    # {job_id} in the decorator becomes the job_id argument — FastAPI extracts it from the URL
+
+def _job_status(job_id: str, user: AuthUser) -> dict:
+    # get_job is ownership-scoped: another user's job looks exactly like a missing one
     job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
 
     if job is None:
         # 404 = "Not Found" - correct code when the resource simply doesn't exist
         raise HTTPException(status_code=404, detail="job not found")
-    
+
     # Always include id and status; only add error field when something went wrong
     response: dict = {"job_id": job.job_id, "status": job.status}
     if job.status == "error":
@@ -693,15 +695,8 @@ def get_job_status(job_id: str, user: AuthUser = Depends(get_current_user)) -> d
 
     return response  # FastAPI auto-converts this dict to JSON
 
-@app.get("/jobs/{job_id}/report", response_model=None)
-def get_job_report(
-    job_id: str,
-    request: Request,
-    fmt: str = "json",
-    user: AuthUser = Depends(get_current_user),
-):
-    # `fmt` is a query param — client passes ?fmt=markdown in the URL
-    # `request` gives access to HTTP headers the client sent
+
+def _job_report(job_id: str, request: Request, fmt: str, user: AuthUser):
     job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
 
     if job is None:
@@ -729,21 +724,7 @@ def get_job_report(
     return {"job_id": job.job_id, "status": job.status, "report": job.result}
 
 
-@app.get("/jobs/{job_id}/archmap", response_model=None)
-def get_job_archmap(
-    job_id: str,
-    request: Request,
-    fmt: str = "json",
-    user: AuthUser = Depends(get_current_user),
-):
-    """The engine-driven interactive architecture map for a finished job (issue #183).
-
-    Same auth + ownership + status gating as /jobs/{id}/report. Default is the structured
-    JSON data map (`build_arch_map`'s output, computed once in worker.py and persisted on the
-    job — never recomputed here). `?fmt=html` (or `Accept: text/html`) returns the same data
-    rendered via `render_html` as a self-contained HTML page, for the frontend to embed directly
-    (e.g. `<iframe srcDoc=...>`) without porting any rendering logic to the client.
-    """
+def _job_archmap(job_id: str, request: Request, fmt: str, user: AuthUser):
     job = get_job(job_id, user_id=user.user_id, access_token=user.access_token)
 
     if job is None:
@@ -763,6 +744,85 @@ def get_job_archmap(
         return Response(content=render_html(job.arch_map), media_type="text/html")
 
     return {"job_id": job.job_id, "status": job.status, "arch_map": _sanitize(job.arch_map)}
+
+
+@app.post("/intent")
+async def submit_intent(
+    background_tasks: BackgroundTasks,
+    text: str = Form(""),
+    file: UploadFile | None = File(None),
+    user: AuthUser = Depends(get_current_user),
+) -> dict:
+    return await _submit_intent(background_tasks, text, file, user)
+
+
+@app.get("/jobs/{job_id}")
+def get_job_status(job_id: str, user: AuthUser = Depends(get_current_user)) -> dict:
+    # {job_id} in the decorator becomes the job_id argument — FastAPI extracts it from the URL
+    return _job_status(job_id, user)
+
+
+@app.get("/jobs/{job_id}/report", response_model=None)
+def get_job_report(
+    job_id: str,
+    request: Request,
+    fmt: str = "json",
+    user: AuthUser = Depends(get_current_user),
+):
+    # `fmt` is a query param — client passes ?fmt=markdown in the URL
+    # `request` gives access to HTTP headers the client sent
+    return _job_report(job_id, request, fmt, user)
+
+
+@app.get("/jobs/{job_id}/archmap", response_model=None)
+def get_job_archmap(
+    job_id: str,
+    request: Request,
+    fmt: str = "json",
+    user: AuthUser = Depends(get_current_user),
+):
+    """The engine-driven interactive architecture map for a finished job (issue #183).
+
+    Same auth + ownership + status gating as /jobs/{id}/report. Default is the structured
+    JSON data map (`build_arch_map`'s output, computed once in worker.py and persisted on the
+    job — never recomputed here). `?fmt=html` (or `Accept: text/html`) returns the same data
+    rendered via `render_html` as a self-contained HTML page, for the frontend to embed directly
+    (e.g. `<iframe srcDoc=...>`) without porting any rendering logic to the client.
+    """
+    return _job_archmap(job_id, request, fmt, user)
+
+
+# ── Local full pipeline (#204) ──────────────────────────────────────────────────────────────────
+# The same intake → ingest → council → simulate → report pipeline as /intent, for the person at this
+# machine with no login: `require_local_operator` (local_guard.py) is what stands in for auth. Jobs
+# are owned by the fixed "local" identity with no token, so they live in memory only — nothing from
+# a local run is written to the shared database, and no Supabase user can ever own "local".
+
+@app.post("/local/intent")
+async def submit_local_intent(
+    background_tasks: BackgroundTasks,
+    text: str = Form(""),
+    file: UploadFile | None = File(None),
+    user: AuthUser = Depends(require_local_operator),
+) -> dict:
+    return await _submit_intent(background_tasks, text, file, user)
+
+
+@app.get("/local/jobs/{job_id}")
+def get_local_job_status(job_id: str, user: AuthUser = Depends(require_local_operator)) -> dict:
+    return _job_status(job_id, user)
+
+
+@app.get("/local/jobs/{job_id}/report", response_model=None)
+def get_local_job_report(job_id: str, request: Request, fmt: str = "json",
+                         user: AuthUser = Depends(require_local_operator)):
+    return _job_report(job_id, request, fmt, user)
+
+
+@app.get("/local/jobs/{job_id}/archmap", response_model=None)
+def get_local_job_archmap(job_id: str, request: Request, fmt: str = "json",
+                          user: AuthUser = Depends(require_local_operator)):
+    return _job_archmap(job_id, request, fmt, user)
 
 if __name__ == "__main__":
     import uvicorn
